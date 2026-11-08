@@ -60,6 +60,23 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 package_runtime.scan_runtime(root, 1024 * 1024)
 
+    def test_allows_symlink_to_future_virtual_mount_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            (root / "proc").mkdir(parents=True)
+            (root / "dev").mkdir()
+            (root / "bin").mkdir()
+            (root / "bin" / "wine").write_bytes(b"wine")
+            (root / "dev" / "fd").symlink_to("/proc/self/fd")
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+
+            self.assertEqual(["bin/wine"], [item.relative_path for item in files])
+            self.assertEqual(
+                [("dev/fd", "/proc/self/fd")],
+                [(item.relative_path, item.target) for item in symlinks],
+            )
+
     def test_rejects_case_colliding_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
