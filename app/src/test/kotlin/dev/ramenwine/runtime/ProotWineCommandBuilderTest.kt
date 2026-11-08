@@ -18,7 +18,12 @@ class ProotWineCommandBuilderTest {
             assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/box64"))
-            assertTrue(command.arguments.contains("/usr/bin/wine64"))
+            assertTrue(command.arguments.contains("/usr/bin/wine"))
+            assertTrue(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("--link2symlink"))
+            assertTrue(command.arguments.contains("--sysvipc"))
+            assertEquals(hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
@@ -127,8 +132,9 @@ class ProotWineCommandBuilderTest {
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
+        val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val box64 = executable(rootfs, "usr/bin/box64")
-        val wine64 = executable(rootfs, "usr/bin/wine64")
+        val wine = executable(rootfs, "usr/bin/wine")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {
