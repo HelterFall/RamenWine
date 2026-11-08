@@ -65,8 +65,8 @@ object ProotWineCommandBuilder {
         requireDirectory(rootfs, "Linux rootfs")
 
         val proot = executableFile(backendRoot, "host/bin/proot")
-        val box64 = executableFile(rootfs, "usr/bin/box64")
-        val wine64 = executableFile(rootfs, "usr/bin/wine64")
+        executableFile(rootfs, "usr/bin/box64")
+        executableFile(rootfs, "usr/bin/wine64")
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
         val gameDirectory = File(filesRoot, request.game.relativeDirectory).canonicalFile
@@ -107,7 +107,7 @@ object ProotWineCommandBuilder {
         if (!hostSocket.exists()) {
             throw IOException("The Wayland socket is not ready: " + hostSocket.absolutePath)
         }
-        if (hostSocket.absolutePath.length >= MAX_UNIX_SOCKET_PATH_BYTES) {
+        if (hostSocket.absolutePath.toByteArray(Charsets.UTF_8).size >= MAX_UNIX_SOCKET_PATH_BYTES) {
             throw IOException("The Wayland socket path is too long for Android AF_UNIX.")
         }
 
@@ -117,6 +117,20 @@ object ProotWineCommandBuilder {
         val guestTempDirectory = "/tmp"
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
         val guestExecutable = guestGameDirectory + "/" + executableRelativePath
+
+        // PRoot bind targets must exist in the guest filesystem. Create only
+        // app-private directories inside this runtime's rootfs.
+        listOf(
+            "/dev",
+            "/proc",
+            guestGameDirectory,
+            guestPrefixDirectory,
+            guestHomeDirectory,
+            guestTempDirectory,
+            guestRuntimeDirectory
+        ).forEach { guestPath ->
+            ensureGuestDirectory(rootfs, guestPath)
+        }
 
         val arguments = buildList {
             add("--rootfs=" + rootfs.absolutePath)
@@ -156,11 +170,40 @@ object ProotWineCommandBuilder {
                 "DISPLAY",
                 "WAYLAND_SOCKET",
                 "LD_LIBRARY_PATH",
-                "LD_PRELOAD"
+                "LD_PRELOAD",
+                "ANDROID_ROOT",
+                "ANDROID_DATA",
+                "BOOTCLASSPATH",
+                "ANDROID_ART_ROOT",
+                "ANDROID_I18N_ROOT",
+                "ANDROID_TZDATA_ROOT"
             ),
             guestExecutablePath = guestExecutable,
             guestRuntimeDirectory = guestRuntimeDirectory
         )
+    }
+
+
+    private fun ensureGuestDirectory(rootfs: File, guestAbsolutePath: String) {
+        if (!guestAbsolutePath.startsWith('/')) {
+            throw IOException("Guest mount target must be absolute.")
+        }
+
+        val relativePath = SafeGamePath.normalizeRelativePath(
+            guestAbsolutePath.removePrefix("/")
+        ) ?: throw IOException("Unsafe guest mount target.")
+
+        val directory = File(rootfs, relativePath)
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw IOException("Could not create guest mount point: " + guestAbsolutePath)
+        }
+
+        val canonicalRootfs = rootfs.canonicalFile
+        val canonicalDirectory = directory.canonicalFile
+        requireContained(canonicalRootfs, canonicalDirectory, "Guest mount point")
+        if (!canonicalDirectory.isDirectory) {
+            throw IOException("Guest mount target is not a directory: " + guestAbsolutePath)
+        }
     }
 
     private fun executableFile(root: File, relativePath: String): File {
