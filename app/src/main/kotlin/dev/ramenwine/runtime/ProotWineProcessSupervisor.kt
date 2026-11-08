@@ -3,9 +3,10 @@ package dev.ramenwine.runtime
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -14,11 +15,13 @@ import kotlinx.coroutines.withContext
 /**
  * Starts a previously validated PRoot command without a shell.
  *
- * Output is merged (stdout + stderr) and delivered on the main dispatcher.
+ * Output is merged (stdout + stderr) and delivered on the callback dispatcher.
  * This is a process boundary only; an Android display backend must already be
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
-class ProotWineProcessSupervisor {
+class ProotWineProcessSupervisor(
+    private val callbackDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+) {
     suspend fun start(
         command: ProotWineCommand,
         onOutput: (String) -> Unit,
@@ -48,7 +51,8 @@ class ProotWineProcessSupervisor {
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,
-            onExit = onExit
+            onExit = onExit,
+            callbackDispatcher = callbackDispatcher
         )
     }
 }
@@ -56,7 +60,8 @@ class ProotWineProcessSupervisor {
 class ProotWineProcessSession internal constructor(
     private val process: Process,
     private val onOutput: (String) -> Unit,
-    private val onExit: (Int) -> Unit
+    private val onExit: (Int) -> Unit,
+    private val callbackDispatcher: CoroutineDispatcher
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -70,7 +75,7 @@ class ProotWineProcessSession internal constructor(
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
-                        withContext(Dispatchers.Main.immediate) {
+                        withContext(callbackDispatcher) {
                             onOutput(line)
                         }
                     }
@@ -87,9 +92,7 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
-            // Drain the final stdout/stderr lines before reporting the exit.
-            runCatching { outputJob.join() }
-            notifyExit(exitCode)
+            completeAfterOutputDrain(exitCode)
         }
     }
 
@@ -103,23 +106,33 @@ class ProotWineProcessSession internal constructor(
                 process.destroy()
                 if (!process.waitFor(gracePeriodMillis, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
-                    process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+                    if (!process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
+                        throw IOException("PRoot did not exit after forced termination.")
+                    }
                 }
             }
 
-            val exitCode = runCatching { process.exitValue() }
-                .getOrDefault(UNKNOWN_EXIT_CODE)
-            notifyExit(exitCode)
-            scope.cancel()
+            val exitCode = process.exitValue()
+            completeAfterOutputDrain(exitCode)
             exitCode
         }
 
+    private suspend fun completeAfterOutputDrain(exitCode: Int) {
+        // The stop() path and the natural-exit watcher can race. Both wait for
+        // EOF before the single exit callback is allowed to cancel the reader.
+        runCatching { outputJob.join() }
+        notifyExit(exitCode)
+    }
+
     private suspend fun notifyExit(exitCode: Int) {
         if (!finished.compareAndSet(false, true)) return
-        withContext(Dispatchers.Main.immediate) {
-            onExit(exitCode)
+        try {
+            withContext(callbackDispatcher) {
+                onExit(exitCode)
+            }
+        } finally {
+            scope.cancel()
         }
-        scope.cancel()
     }
 
     companion object {
