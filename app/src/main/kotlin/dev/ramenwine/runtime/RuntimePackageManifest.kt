@@ -123,4 +123,5 @@ object RuntimePackageManifestParser {
     private const val MAX_ENTRIES = 100_000
     private const val MAX_SYMLINK_TARGET_LENGTH = 4096
     private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
+    private val VERSION_PATTERN = Regex("[A-Za-z0-9._+-]{1,128}")
 }
