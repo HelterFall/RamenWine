@@ -66,11 +66,11 @@ class ProotWineProcessSupervisorTest {
 
             def handle_sigterm(_signal, _frame):
                 global stop_requested
-                os.write(1, b"terminated\\n")
+                os.write(1, b"terminated\n")
                 stop_requested = True
 
             signal.signal(signal.SIGTERM, handle_sigterm)
-            os.write(1, b"ready\\n")
+            os.write(1, b"ready\n")
             while not stop_requested:
                 time.sleep(0.01)
             """.trimIndent()
@@ -106,7 +106,7 @@ class ProotWineProcessSupervisorTest {
             assertEquals("Unexpected callback exit. Output: $output", 0, callbackExitCode)
             assertTrue("Final signal output was not drained: $output", output.contains("terminated"))
             assertTrue(
-                "Exit callback ran before final output was drained: ${outputAtExit.get()}",
+                "Exit callback ran before final output was drained.",
                 outputAtExit.get().contains("terminated")
             )
             assertEquals(1, exitCount.get())
@@ -119,7 +119,7 @@ class ProotWineProcessSupervisorTest {
     private class ScriptFixture(scriptBody: String) : AutoCloseable {
         private val root = Files.createTempDirectory("ramenwine-process-test").toFile()
         private val executable = File(root, "fake-proot").apply {
-            writeText("#!/usr/bin/env python3\\n" + scriptBody + "\\n")
+            writeText("#!/usr/bin/env python3\n" + scriptBody + "\n")
             check(setExecutable(true)) { "Could not mark the process fixture executable." }
         }
 
