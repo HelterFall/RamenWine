@@ -25,6 +25,9 @@
 - Python runtime packager that creates ZIP files with a JSON manifest, SHA-256 values, executable flags and symlink metadata.
 - Python tests for archive output, traversal, case collisions, virtual mount symlinks and symlink escape.
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
+- PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
+- Coroutine PRoot process supervision with merged stdout/stderr, main-thread callbacks, graceful/forced termination and output draining before the exit callback.
+- JVM regression tests for command construction and process output/termination behavior.
 - GitHub Actions workflow for Python tests, Android build, unit tests, lint and debug APK artifact upload.
 
 ## Current Android user flow
@@ -37,7 +40,7 @@
 6. Save the game title, relative path, EXE path, architecture and import size in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
 
-The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. Runtime installation checks package integrity and inventory; it does not execute Wine or test a Windows program.
+The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder and process supervisor are implemented as a separate runtime layer, but they are not connected to a Play action. Runtime installation checks package integrity and inventory; it does not execute Wine or test a Windows program.
 
 ## Runtime backend strategy
 
@@ -62,8 +65,8 @@ See Android Display Backend Research for the findings and integration gates. No 
 - No Wine, Proton, FEX, Box64, Box86 or PRoot runtime binaries are bundled.
 - No Linux rootfs is built or installed.
 - No signed runtime package metadata or pinned release signing key exists. SHA-256 verifies payload integrity but does not authenticate the publisher.
-- No process supervisor launches a Windows EXE.
-- No Wine prefix is created for each imported game.
+- The process supervisor is not wired into an Android game-session/UI flow and has not been validated against Android PRoot/Wine child-process behavior on a device.
+- The builder reserves per-game prefix directories, but Wine prefix initialization (for example, through wineboot) and first-start validation are not implemented.
 - No Android game surface is connected to a Wine display/window backend.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No audio bridge, input mapping, game pause/resume integration or save management exists.
@@ -81,7 +84,7 @@ See Android Display Backend Research for the findings and integration gates. No 
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The last completed Android build/test/lint run passed on commit 500374b9311e938a7931b48e456daeeb5def3f88. New import-progress and display-research changes are undergoing their own CI run; do not treat them as validated until that run completes successfully.
+The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The new PRoot process-supervisor regression tests are on the current work branch and require their own CI result. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 
@@ -91,7 +94,7 @@ The last completed Android build/test/lint run passed on commit 500374b9311e938a
 4. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
 5. Build a glibc rootfs + PRoot + Box64 fallback package.
 6. Run the same original Windows GUI test executable through each backend.
-7. Add a process supervisor, Wine prefix creation and first real Windows EXE launch.
+7. Wire the existing command builder and process supervisor into a game-session manager after a display backend is available; initialize and validate each Wine prefix.
 8. Connect Wine's Wayland/X11 display path to the Android game surface.
 9. Add 32-bit Windows execution after a confirmed 64-bit path.
 10. Add graphics and audio backend probing only after the first Wine window renders.
