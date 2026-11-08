@@ -303,6 +303,7 @@ class RuntimePackageInstaller(private val context: Context) {
         val executableFiles = manifest.files
             .filter { it.executable }
             .joinToString(",") { it.path }
+        val requiredSymlinks = manifest.symlinks.joinToString(",") { it.path }
 
         val properties = buildString {
             append("backendId=").append(manifest.backend.directoryName).append('\n')
@@ -310,6 +311,7 @@ class RuntimePackageInstaller(private val context: Context) {
             append("runtimeVersion=").append(manifest.runtimeVersion).append('\n')
             append("requiredFiles=").append(requiredFiles).append('\n')
             append("executableFiles=").append(executableFiles).append('\n')
+            append("requiredSymlinks=").append(requiredSymlinks).append('\n')
         }
 
         FileOutputStream(File(backendDirectory, "runtime.properties")).use { output ->
