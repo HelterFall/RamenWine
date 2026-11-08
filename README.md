@@ -219,17 +219,22 @@ RamenWine может повторно использовать полезные 
 
 
 
+
 ## Current implementation status
 
-The Android host scaffold now includes:
-- Jetpack Compose application and ARM64 NDK/JNI bridge;
-- SAF folder selection and bounded EXE/PE inspection;
-- explicit main-EXE candidate selection;
-- safe, streamed import into app-private storage;
-- local JSON game library;
+The Android host scaffold currently includes:
+
+- Jetpack Compose app and ARM64 NDK/JNI bridge;
+- SAF folder selection, bounded EXE/PE inspection and manual EXE selection;
+- streamed import into private app storage with live progress;
+- local JSON game library with atomic metadata persistence;
 - runtime inventory for Bionic ARM64EC/FEX, Bionic + Box64 and glibc + PRoot + Box64;
-- JVM tests and GitHub Actions build/test/lint workflow.
+- offline runtime ZIP installation with SHA-256 payload verification, staged activation and rollback;
+- a Python runtime package builder and automated Python/JVM tests;
+- GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
-Wine and CPU translation binaries are not bundled yet; imported games cannot be launched yet. The current milestone makes the import and runtime boundaries testable before adding native execution. See [Development Status](docs/DEVELOPMENT_STATUS.md) and [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md).
+**Wine/Box64/FEX binaries are not bundled and imported games cannot be launched yet.** Runtime package file checks are not a proof of execution. No game EXE is run during scanning or import.
 
-A runtime manifest that reports all files present is only an inventory result; it is not proof that a Windows application can launch. No executable is run during folder scanning or import.
+See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
+
+Piperella Wayland Compositor is currently a research reference only. It is GPL-3.0 and requires Android API 36, so it has not been added as a direct dependency.
