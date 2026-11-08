@@ -8,6 +8,7 @@ import java.util.ArrayDeque
 
 data class ExecutableCandidate(
     val displayName: String,
+    val relativePath: String,
     val uri: Uri,
     val sizeBytes: Long?,
     val peInspection: PeInspection?
@@ -43,7 +44,7 @@ class GameFolderScanner(private val context: Context) {
         var visitedEntries = 0
         var wasTruncated = false
 
-        queue.addLast(DirectoryEntry(root, depth = 0))
+        queue.addLast(DirectoryEntry(root, depth = 0, relativePath = ""))
 
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
@@ -65,10 +66,30 @@ class GameFolderScanner(private val context: Context) {
                     break
                 }
 
+                val segment = SafeGamePath.validateSegment(child.name)
+                if (segment == null) {
+                    warnings.addBounded(
+                        "Skipped an entry with an unsafe or unsupported file name."
+                    )
+                    continue
+                }
+
+                val relativePath = if (current.relativePath.isEmpty()) {
+                    segment
+                } else {
+                    current.relativePath + "/" + segment
+                }
+
                 when {
                     child.isDirectory -> {
                         if (current.depth < MAX_DEPTH) {
-                            queue.addLast(DirectoryEntry(child, current.depth + 1))
+                            queue.addLast(
+                                DirectoryEntry(
+                                    document = child,
+                                    depth = current.depth + 1,
+                                    relativePath = relativePath
+                                )
+                            )
                         } else {
                             wasTruncated = true
                         }
@@ -76,15 +97,14 @@ class GameFolderScanner(private val context: Context) {
 
                     child.isFile -> {
                         visitedFiles++
-                        val name = child.name ?: "unnamed"
-                        if (name.endsWith(".exe", ignoreCase = true)) {
+                        if (segment.endsWith(".exe", ignoreCase = true)) {
                             val inspection = try {
                                 context.contentResolver.openInputStream(child.uri)?.use {
                                     PeHeaderInspector.inspect(it.readPrefix(MAX_HEADER_BYTES))
                                 }
                             } catch (error: Exception) {
                                 warnings.addBounded(
-                                    "Could not inspect $name: " + error.javaClass.simpleName
+                                    "Could not inspect $relativePath: " + error.javaClass.simpleName
                                 )
                                 null
                             }
@@ -95,7 +115,8 @@ class GameFolderScanner(private val context: Context) {
 
                             if (candidates.size < MAX_CANDIDATES) {
                                 candidates += ExecutableCandidate(
-                                    displayName = name,
+                                    displayName = segment,
+                                    relativePath = relativePath,
                                     uri = child.uri,
                                     sizeBytes = size,
                                     peInspection = inspection
@@ -119,7 +140,7 @@ class GameFolderScanner(private val context: Context) {
                         PeArchitecture.ARM64, PeArchitecture.ARM64EC -> 2
                         else -> 3
                     }
-                }.thenBy { it.displayName.lowercase() }
+                }.thenBy { it.relativePath.lowercase() }
             ),
             visitedFiles = visitedFiles,
             wasTruncated = wasTruncated,
@@ -146,7 +167,8 @@ class GameFolderScanner(private val context: Context) {
 
     private data class DirectoryEntry(
         val document: DocumentFile,
-        val depth: Int
+        val depth: Int,
+        val relativePath: String
     )
 
     private companion object {
