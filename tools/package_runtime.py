@@ -120,6 +120,8 @@ def scan_runtime(root: Path, max_bytes: int) -> tuple[list[PackageFile], list[Pa
                 link_target = os.readlink(source)
                 resolve_symlink_inside(root, source, link_target)
                 symlinks.append(PackageSymlink(relative, link_target))
+                if len(files) + len(symlinks) > MAX_ENTRIES:
+                    raise ValueError(f"runtime payload exceeds {MAX_ENTRIES} entries")
                 continue
 
             if stat.S_ISDIR(metadata.st_mode):
@@ -252,7 +254,16 @@ def main() -> int:
         if args.max_bytes <= 0 or args.max_bytes > MAX_TOTAL_BYTES:
             raise ValueError("max-bytes must be between 1 byte and 64 GiB")
 
-        files, symlinks = scan_runtime(args.root, args.max_bytes)
+        root_real = args.root.resolve(strict=True)
+        output_resolved = args.output.resolve(strict=False)
+        try:
+            output_resolved.relative_to(root_real)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("output ZIP must be outside the runtime root")
+
+        files, symlinks = scan_runtime(root_real, args.max_bytes)
         if not files:
             raise ValueError("runtime root contains no regular files")
 
