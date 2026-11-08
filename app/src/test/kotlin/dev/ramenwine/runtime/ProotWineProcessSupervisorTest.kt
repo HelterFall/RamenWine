@@ -21,8 +21,8 @@ class ProotWineProcessSupervisorTest {
     fun drainsMergedOutputBeforeNaturalExitCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
-            printf 'stdout-line\\n'
-            printf 'stderr-line\\n' >&2
+            printf 'stdout-line\n'
+            printf 'stderr-line\n' >&2
             exit 7
             """.trimIndent()
         )
@@ -57,8 +57,8 @@ class ProotWineProcessSupervisorTest {
     fun drainsTerminationOutputBeforeManualStopCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
-            printf 'ready\\n'
-            trap 'printf "terminated\\n"; exit 0' TERM
+            printf 'ready\n'
+            trap 'printf "terminated\n"; exit 0' TERM
             while :; do
                 sleep 1 &
                 wait $!
@@ -106,7 +106,7 @@ class ProotWineProcessSupervisorTest {
     private class ScriptFixture(scriptBody: String) : AutoCloseable {
         private val root = Files.createTempDirectory("ramenwine-process-test").toFile()
         private val executable = File(root, "fake-proot").apply {
-            writeText("#!/bin/sh\\n" + scriptBody + "\\n")
+            writeText("#!/bin/sh\n" + scriptBody + "\n")
             check(setExecutable(true)) { "Could not mark the process fixture executable." }
         }
 
