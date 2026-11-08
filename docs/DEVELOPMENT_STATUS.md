@@ -56,7 +56,7 @@ This layout is a first contract for the app/runtime boundary, not a downloadable
 - Android Gradle Plugin: 9.1.1
 - Gradle: 9.3.1
 - AGP built-in Kotlin + Compose compiler plugin 2.2.10
-- Android compile SDK: 37
+- Android compile SDK: 36
 - Android NDK: 30.0.16248370 (NDK r30, 2026 LTS)
 - CMake: 3.22.1
 - Compose BOM: 2026.09.00
