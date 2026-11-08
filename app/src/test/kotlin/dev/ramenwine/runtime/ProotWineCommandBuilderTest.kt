@@ -1,5 +1,6 @@
 package dev.ramenwine.runtime
 
+import dev.ramenwine.display.WaylandSocketValidator
 import dev.ramenwine.library.ImportedGame
 import java.io.File
 import java.nio.file.Files
@@ -13,7 +14,7 @@ class ProotWineCommandBuilderTest {
     fun buildsProotBox64WineCommandWithPrivateBindsAndWaylandSocket() {
         val fixture = Fixture()
         try {
-            val command = ProotWineCommandBuilder.build(fixture.request())
+            val command = fixture.build()
 
             assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
@@ -58,7 +59,7 @@ class ProotWineCommandBuilderTest {
         val fixture = Fixture(executableRelativePath = "../outside.exe")
         try {
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException || error is java.io.IOException)
@@ -76,7 +77,7 @@ class ProotWineCommandBuilderTest {
                 relativeDirectory = "games/../escape"
             )
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request().copy(game = invalidGame))
+                fixture.build(fixture.request().copy(game = invalidGame))
             }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException)
@@ -91,11 +92,29 @@ class ProotWineCommandBuilderTest {
         val fixture = Fixture(createWaylandSocket = false)
         try {
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("Wayland socket"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRegularFileMasqueradingAsWaylandSocket() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request(),
+                    WaylandSocketValidator { false }
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Unix-domain socket"))
         } finally {
             fixture.cleanup()
         }
@@ -107,7 +126,7 @@ class ProotWineCommandBuilderTest {
         try {
             fixture.proot.delete()
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is java.io.IOException)
@@ -165,6 +184,12 @@ class ProotWineCommandBuilderTest {
             display = WaylandDisplayEndpoint(displayDirectory),
             hostUid = 10123
         )
+
+        fun build(gameRequest: ProotWineLaunchRequest = request()) =
+            ProotWineCommandBuilder.build(
+                gameRequest,
+                WaylandSocketValidator { it.isFile }
+            )
 
         fun cleanup() {
             root.deleteRecursively()
