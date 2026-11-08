@@ -124,3 +124,21 @@ A compositor candidate must pass:
 - Piperella documentation: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/DOCUMENTATION.md
 - Piperella third-party notices: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/THIRD_PARTY_NOTICES.md
 - Piperella Bionic Hangover release project: https://github.com/Piperella/Piperella-Hangover-Bionic
+
+
+## Wawona integration assessment
+
+The current upstream [Wawona compositor](https://github.com/Wawona/Wawona) is MIT-licensed and its Android application declares minSdk 24, so its license and Android floor are compatible with RamenWine's current minSdk 26.
+
+It is **not** a drop-in Android library today:
+
+- The upstream Android Gradle project is an application module, not a published reusable AAR.
+- Its Android CMake target expects the repository's Rust core, generated protocol sources, Weston dependencies and native libraries staged by its Nix build.
+- The Kotlin surface is coupled to Wawona's global WawonaNative JNI object, preferences, session activities and machine model. Copying only WawonaSurfaceView would not provide a working compositor.
+- Its fallback Studio native build uses stub render/backend sources, so it is not a runtime integration path.
+
+**Current decision:** use Wawona as the MIT-licensed technical reference and potential source for a later, separately reviewed RamenWine-owned native adapter. Do not add its full Android app as a Gradle dependency or copy the large application UI into RamenWine.
+
+RamenWine now defines a small GameDisplayBackend / GameDisplaySession boundary. A real backend must attach to an Android Surface, return its live Wayland socket endpoint, resize with the surface, and stop/unlink cleanly when the session closes. No implementation is registered yet, so this is an integration contract, not a claim that the app can display a Wine window.
+
+The PRoot command builder also checks the socket node type with Android lstat(2). A same-named regular file is rejected; a backend cannot satisfy the launch precondition by merely creating a placeholder file.
