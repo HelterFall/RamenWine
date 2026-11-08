@@ -1,0 +1,118 @@
+package dev.ramenwine.runtime
+
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Starts a previously validated PRoot command without a shell.
+ *
+ * Output is merged (stdout + stderr) and delivered on the main dispatcher.
+ * This is a process boundary only; an Android display backend must already be
+ * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
+ */
+class ProotWineProcessSupervisor {
+    suspend fun start(
+        command: ProotWineCommand,
+        onOutput: (String) -> Unit,
+        onExit: (Int) -> Unit
+    ): ProotWineProcessSession = withContext(Dispatchers.IO) {
+        val commandLine = buildList {
+            add(command.prootExecutable.absolutePath)
+            addAll(command.arguments)
+        }
+
+        val builder = ProcessBuilder(commandLine)
+            .directory(command.hostWorkingDirectory)
+            .redirectErrorStream(true)
+
+        val environment = builder.environment()
+        command.unsetEnvironment.forEach { environment.remove(it) }
+        environment.putAll(command.environment)
+
+        val process = builder.start()
+        ProotWineProcessSession(
+            process = process,
+            onOutput = onOutput,
+            onExit = onExit
+        )
+    }
+}
+
+class ProotWineProcessSession internal constructor(
+    private val process: Process,
+    private val onOutput: (String) -> Unit,
+    private val onExit: (Int) -> Unit
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var finished = false
+
+    init {
+        scope.launch {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        withContext(Dispatchers.Main.immediate) {
+                            onOutput(line)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // The process may close its stream while the session is stopping.
+            }
+        }
+
+        scope.launch {
+            val exitCode = try {
+                process.waitFor()
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                UNKNOWN_EXIT_CODE
+            }
+            notifyExit(exitCode)
+        }
+    }
+
+    fun isAlive(): Boolean = process.isAlive
+
+    suspend fun stop(gracePeriodMillis: Long = DEFAULT_GRACE_PERIOD_MILLIS): Int =
+        withContext(Dispatchers.IO) {
+            require(gracePeriodMillis >= 0L) { "Grace period cannot be negative." }
+
+            if (process.isAlive) {
+                process.destroy()
+                if (!process.waitFor(gracePeriodMillis, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                    process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+                }
+            }
+
+            val exitCode = runCatching { process.exitValue() }
+                .getOrDefault(UNKNOWN_EXIT_CODE)
+            notifyExit(exitCode)
+            scope.cancel()
+            exitCode
+        }
+
+    private suspend fun notifyExit(exitCode: Int) {
+        if (finished) return
+        finished = true
+        withContext(Dispatchers.Main.immediate) {
+            onExit(exitCode)
+        }
+        scope.cancel()
+    }
+
+    companion object {
+        private const val DEFAULT_GRACE_PERIOD_MILLIS = 1_500L
+        private const val FORCE_STOP_WAIT_MILLIS = 1_500L
+        const val UNKNOWN_EXIT_CODE = -1
+    }
+}
