@@ -2,129 +2,29 @@ package dev.ramenwine.runtime
 
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class RuntimeLayoutTest {
-    @Test
-    fun missingRuntimeIsNotInstalled() {
-        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
-        try {
-            val result = RuntimeLayout.inspect(root)
-            assertEquals(RuntimeState.NOT_INSTALLED, result.state)
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun emptyRuntimeDirectoryIsNotInstalled() {
-        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
-        try {
-            File(root, "runtime/current").mkdirs()
-            val result = RuntimeLayout.inspect(root)
-            assertEquals(RuntimeState.NOT_INSTALLED, result.state)
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun manifestWithMissingFilesIsIncomplete() {
-        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
-        try {
-            writeManifest(
-                root = root,
-                backend = RuntimeBackendId.GLIBC_PROOT_BOX64,
-                requiredFiles = "host/bin/proot,rootfs/usr/bin/box64,rootfs/usr/bin/wine",
-                executableFiles = "host/bin/proot,rootfs/usr/bin/box64,rootfs/usr/bin/wine"
-            )
-
-            val result = RuntimeLayout.inspect(root)
-
-            assertEquals(RuntimeState.INCOMPLETE, result.state)
-            assertTrue(result.missingItems.any { it.contains("host/bin/proot") })
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun installedBackendIsRecognizedOnlyWhenRequiredExecutablesExist() {
-        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
-        try {
-            val backend = RuntimeBackendId.BIONIC_ARM64EC_FEX
-            val backendRoot = File(
-                root,
-                "runtime/current/backends/" + backend.directoryName
-            )
-            backendRoot.mkdirs()
-            val wine = File(backendRoot, "bin/wine")
-            wine.parentFile?.mkdirs()
-            wine.writeText("test executable")
-            wine.setExecutable(true)
-
-            writeManifest(
-                root = root,
-                backend = backend,
-                requiredFiles = "bin/wine",
-                executableFiles = "bin/wine"
-            )
-
-            val result = RuntimeLayout.inspect(root)
-
-            assertEquals(RuntimeState.FILES_PRESENT, result.state)
-            assertEquals(
-                RuntimeState.FILES_PRESENT,
-                result.backends.first { it.backend == backend }.state
-            )
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun manifestCannotEscapeItsBackendDirectory() {
-        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
-        try {
-            writeManifest(
-                root = root,
-                backend = RuntimeBackendId.BIONIC_X64_BOX64,
-                requiredFiles = "../outside",
-                executableFiles = ""
-            )
-
-            val result = RuntimeLayout.inspect(root)
-
-            assertEquals(RuntimeState.INCOMPLETE, result.state)
-            assertTrue(result.missingItems.any { it.contains("Unsafe path") })
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
+class RuntimeLayoutSymlinkTest {
     @Test
     fun validSymlinkInsideBackendIsAccepted() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
         try {
             val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
-            val backendRoot = File(root, "runtime/current/backends/" + backend.directoryName)
-            val executable = File(backendRoot, "bin/wine")
-            executable.parentFile?.mkdirs()
-            executable.writeText("test executable")
-            executable.setExecutable(true)
+            val backendRoot = backendRoot(root, backend)
+            createExecutable(backendRoot)
 
             val realLibrary = File(backendRoot, "lib/libwine.so.1")
             realLibrary.parentFile?.mkdirs()
             realLibrary.writeText("test library")
             Files.createSymbolicLink(
                 File(backendRoot, "lib/libwine.so").toPath(),
-                java.nio.file.Paths.get("libwine.so.1")
+                Paths.get("libwine.so.1")
             )
 
             writeManifest(
-                root = root,
+                backendRoot = backendRoot,
                 backend = backend,
                 requiredFiles = "bin/wine,lib/libwine.so.1",
                 executableFiles = "bin/wine",
@@ -146,11 +46,8 @@ class RuntimeLayoutTest {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
         try {
             val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
-            val backendRoot = File(root, "runtime/current/backends/" + backend.directoryName)
-            val executable = File(backendRoot, "bin/wine")
-            executable.parentFile?.mkdirs()
-            executable.writeText("test executable")
-            executable.setExecutable(true)
+            val backendRoot = backendRoot(root, backend)
+            createExecutable(backendRoot)
 
             val outside = File(root, "outside-secret.txt")
             outside.writeText("outside")
@@ -158,11 +55,11 @@ class RuntimeLayoutTest {
             libraryDirectory.mkdirs()
             Files.createSymbolicLink(
                 File(libraryDirectory, "escape").toPath(),
-                java.nio.file.Paths.get("../../../../../outside-secret.txt")
+                Paths.get("../../../../../outside-secret.txt")
             )
 
             writeManifest(
-                root = root,
+                backendRoot = backendRoot,
                 backend = backend,
                 requiredFiles = "bin/wine",
                 executableFiles = "bin/wine",
@@ -179,20 +76,24 @@ class RuntimeLayoutTest {
         }
     }
 
+    private fun backendRoot(root: File, backend: RuntimeBackendId): File =
+        File(root, "runtime/current/backends/" + backend.directoryName).apply { mkdirs() }
+
+    private fun createExecutable(backendRoot: File) {
+        val executable = File(backendRoot, "bin/wine")
+        executable.parentFile?.mkdirs()
+        executable.writeText("test executable")
+        executable.setExecutable(true)
+    }
+
     private fun writeManifest(
-        root: File,
+        backendRoot: File,
         backend: RuntimeBackendId,
         requiredFiles: String,
         executableFiles: String,
-        requiredSymlinks: String = ""
+        requiredSymlinks: String
     ) {
-        val directory = File(
-            root,
-            "runtime/current/backends/" + backend.directoryName
-        )
-        directory.mkdirs()
-        val manifest = File(directory, "runtime.properties")
-        manifest.writeText(
+        File(backendRoot, "runtime.properties").writeText(
             "backendId=" + backend.directoryName + "\n" +
                 "hostAbi=arm64-v8a\n" +
                 "runtimeVersion=test\n" +
