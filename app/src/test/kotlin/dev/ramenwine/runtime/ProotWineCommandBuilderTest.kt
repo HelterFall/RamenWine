@@ -35,6 +35,10 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals("/run/user/10123", command.environment["XDG_RUNTIME_DIR"])
             assertEquals("wayland-0", command.environment["WAYLAND_DISPLAY"])
+            assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
+            assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
+            assertTrue(File(fixture.rootfs, "home/ramen").isDirectory)
+            assertTrue(File(fixture.rootfs, "run/user/10123").isDirectory)
             assertEquals("/prefixes/" + fixture.gameId, command.environment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
@@ -53,6 +57,25 @@ class ProotWineCommandBuilderTest {
             }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException || error is java.io.IOException)
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsInvalidGameIdBeforeCreatingGuestPaths() {
+        val fixture = Fixture()
+        try {
+            val invalidGame = fixture.request().game.copy(
+                id = "../escape",
+                relativeDirectory = "games/../escape"
+            )
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request().copy(game = invalidGame))
+            }.exceptionOrNull()
+
+            assertTrue(error is IllegalArgumentException)
+            assertFalse(File(fixture.rootfs, "games/escape").exists())
         } finally {
             fixture.cleanup()
         }
