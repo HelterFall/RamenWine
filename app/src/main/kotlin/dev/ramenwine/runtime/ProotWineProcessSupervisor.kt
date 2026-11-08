@@ -1,6 +1,7 @@
 package dev.ramenwine.runtime
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,8 +51,7 @@ class ProotWineProcessSession internal constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @Volatile
-    private var finished = false
+    private val finished = AtomicBoolean(false)
 
     init {
         scope.launch {
@@ -102,8 +102,7 @@ class ProotWineProcessSession internal constructor(
         }
 
     private suspend fun notifyExit(exitCode: Int) {
-        if (finished) return
-        finished = true
+        if (!finished.compareAndSet(false, true)) return
         withContext(Dispatchers.Main.immediate) {
             onExit(exitCode)
         }
