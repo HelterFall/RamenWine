@@ -45,6 +45,7 @@ fun RamenWineApp() {
     val scope = rememberCoroutineScope()
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
+    var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
 
@@ -59,6 +60,7 @@ fun RamenWineApp() {
         if (uri != null) {
             selectedFolder = uri
             scanResult = null
+            selectedExecutable = null
             scanError = null
 
             runCatching {
@@ -153,9 +155,10 @@ fun RamenWineApp() {
 
                 Button(
                     onClick = { folderPicker.launch(null) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !scanning
                 ) {
-                    Text("Выбрать папку игры")
+                    Text(if (scanning) "Сканирование…" else "Выбрать папку игры")
                 }
 
                 selectedFolder?.let {
@@ -172,11 +175,43 @@ fun RamenWineApp() {
                         text = "Ошибка сканирования: " + scanError,
                         color = MaterialTheme.colorScheme.error
                     )
-                    scanResult != null -> ScanResultCard(scanResult!!)
+                    scanResult != null -> ScanResultCard(
+                        result = scanResult!!,
+                        selectedExecutable = selectedExecutable,
+                        onSelectExecutable = { selectedExecutable = it }
+                    )
+                }
+
+                selectedExecutable?.let { candidate ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
+                            Text(candidate.displayName)
+                            Text(
+                                text = "Архитектура: " +
+                                    (candidate.peInspection?.architecture?.displayName
+                                        ?: "не определена"),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "Следующий этап — подключение Wine runtime и реального запуска. " +
+                                    "Сейчас файл только выбран, он не исполнялся.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
 
                 Text(
-                    text = "Важно: этот этап только читает ограниченные заголовки EXE. " +
+                    text = "Сканер только читает ограниченные заголовки EXE. " +
                         "Он не запускает игровые файлы и не устанавливает Wine.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -187,7 +222,11 @@ fun RamenWineApp() {
 }
 
 @Composable
-private fun ScanResultCard(result: FolderScanResult) {
+private fun ScanResultCard(
+    result: FolderScanResult,
+    selectedExecutable: ExecutableCandidate?,
+    onSelectExecutable: (ExecutableCandidate) -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -206,7 +245,11 @@ private fun ScanResultCard(result: FolderScanResult) {
             }
 
             result.executableCandidates.take(MAX_VISIBLE_CANDIDATES).forEach { candidate ->
-                ExecutableRow(candidate)
+                ExecutableRow(
+                    candidate = candidate,
+                    isSelected = selectedExecutable?.uri == candidate.uri,
+                    onSelect = { onSelectExecutable(candidate) }
+                )
             }
 
             result.warnings.forEach { warning ->
@@ -225,8 +268,12 @@ private fun ScanResultCard(result: FolderScanResult) {
 }
 
 @Composable
-private fun ExecutableRow(candidate: ExecutableCandidate) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+private fun ExecutableRow(
+    candidate: ExecutableCandidate,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(candidate.displayName, fontWeight = FontWeight.Medium)
         val architecture = candidate.peInspection?.architecture?.displayName
             ?: "Заголовок PE не распознан"
@@ -235,10 +282,31 @@ private fun ExecutableRow(candidate: ExecutableCandidate) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        candidate.sizeBytes?.let { size ->
+            Text(
+                text = formatFileSize(size),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         candidate.peInspection?.diagnostic?.let {
             Text(it, style = MaterialTheme.typography.labelSmall)
         }
+        Button(
+            onClick = onSelect,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isSelected) "Выбран для запуска" else "Выбрать этот EXE")
+        }
         HorizontalDivider()
+    }
+}
+
+private fun formatFileSize(sizeBytes: Long): String {
+    return when {
+        sizeBytes >= 1024L * 1024L -> "%.1f MB".format(sizeBytes / (1024.0 * 1024.0))
+        sizeBytes >= 1024L -> "%.1f KB".format(sizeBytes / 1024.0)
+        else -> "$sizeBytes B"
     }
 }
 
