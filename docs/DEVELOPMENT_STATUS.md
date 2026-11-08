@@ -27,8 +27,10 @@
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
 - Coroutine PRoot process supervision with merged stdout/stderr, main-thread callbacks, graceful/forced termination and output draining before the exit callback.
-- JVM regression tests for command construction and process output/termination behavior.
-- GitHub Actions workflow for Python tests, Android build, unit tests, lint and debug APK artifact upload.
+- JVM regression tests for command construction, process output/termination and rejection of placeholder Wayland socket files.
+- A compositor-facing GameDisplayBackend/GameDisplaySession contract that accepts an Android Surface and exports a per-session Wayland endpoint.
+- Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file.
+- Focused GitHub Actions checks: Python runtime-packager tests and JVM unit tests only; APK packaging, artifact upload, lint and NDK/CMake setup are deferred.
 
 ## Current Android user flow
 
@@ -58,7 +60,7 @@ The offline ZIP format is documented in Android Runtime Backends. The package bu
 
 Piperella Wayland Compositor was reviewed as a possible Android SurfaceView/Wayland implementation. It is a substantial proof-of-concept, but is not included as a dependency because its project is GPL-3.0 and declares minSdk 36, while RamenWine currently targets minSdk 26. Its Steam example also has an unresolved documentation/code mismatch and GPU-dependent limitations.
 
-See Android Display Backend Research for the findings and integration gates. No Wayland compositor is currently integrated.
+See Android Display Backend Research for the findings and integration gates. The Wawona-based interface and real-socket precondition are now defined, but no Wayland compositor is currently integrated.
 
 ## What is not implemented yet
 
@@ -90,7 +92,7 @@ The latest completed Android CI run on main (run #66, commit 439aa47ad63720c0899
 
 1. Complete CI verification for import progress and the display-research documentation commit.
 2. Decide the RamenWine distribution license before considering any GPL-3.0 compositor integration.
-3. Choose a display backend strategy: test an independent Wayland compositor or prototype a different Android display bridge.
+3. Implement the first RamenWine-owned compositor adapter behind GameDisplayBackend. Wawona is the MIT-licensed reference, but its current Android target is an application with Nix-staged native dependencies rather than a reusable Gradle library.
 4. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
 5. Build a glibc rootfs + PRoot + Box64 fallback package.
 6. Run the same original Windows GUI test executable through each backend.
