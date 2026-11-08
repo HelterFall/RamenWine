@@ -73,6 +73,7 @@ class GameFolderImporter(private val context: Context) {
             var copiedFiles = 0
             var copiedBytes = 0L
             var lastStorageCheckBytes = 0L
+            var lastProgressBytes = 0L
             var selectedExecutableCopied = false
 
             queue.addLast(PendingDirectory(root, depth = 0, relativePath = ""))
@@ -175,6 +176,12 @@ class GameFolderImporter(private val context: Context) {
 
                                         output.write(buffer, 0, read)
                                         copiedBytes = nextTotal
+                                        if (
+                                            copiedBytes - lastProgressBytes >= PROGRESS_INTERVAL_BYTES
+                                        ) {
+                                            onProgress?.invoke(ImportProgress(copiedFiles, copiedBytes))
+                                            lastProgressBytes = copiedBytes
+                                        }
                                     }
                                     output.flush()
                                     output.fd.sync()
@@ -182,10 +189,11 @@ class GameFolderImporter(private val context: Context) {
                             }
 
                             copiedFiles++
+                            onProgress?.invoke(ImportProgress(copiedFiles, copiedBytes))
+                            lastProgressBytes = copiedBytes
                             if (relativePath == executablePath) {
                                 selectedExecutableCopied = true
                             }
-                            onProgress?.invoke(ImportProgress(copiedFiles, copiedBytes))
                         }
 
                         else -> {
@@ -273,5 +281,6 @@ class GameFolderImporter(private val context: Context) {
         const val MAX_TOTAL_BYTES = 64L * 1024L * 1024L * 1024L
         const val MIN_FREE_SPACE_RESERVE = 128L * 1024L * 1024L
         const val STORAGE_CHECK_INTERVAL = 4L * 1024L * 1024L
+        const val PROGRESS_INTERVAL_BYTES = 16L * 1024L * 1024L
     }
 }
