@@ -1,8 +1,8 @@
 package dev.ramenwine.runtime
 
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Starts a previously validated PRoot command without a shell.
@@ -64,9 +65,8 @@ class ProotWineProcessSession internal constructor(
     private val callbackDispatcher: CoroutineDispatcher
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val finished = AtomicBoolean(false)
-
+    private val processExit = CompletableDeferred<Int>()
     private val outputJob: Job
 
     init {
@@ -85,6 +85,8 @@ class ProotWineProcessSession internal constructor(
             }
         }
 
+        // Keep exactly one waiter for Process.waitFor(). stop() awaits this
+        // result instead of racing a second waitFor(timeout) against the watcher.
         scope.launch {
             val exitCode = try {
                 process.waitFor()
@@ -92,6 +94,7 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
+            processExit.complete(exitCode)
             completeAfterOutputDrain(exitCode)
         }
     }
@@ -104,22 +107,24 @@ class ProotWineProcessSession internal constructor(
 
             if (process.isAlive) {
                 process.destroy()
-                if (!process.waitFor(gracePeriodMillis, TimeUnit.MILLISECONDS)) {
-                    process.destroyForcibly()
-                    if (!process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
-                        throw IOException("PRoot did not exit after forced termination.")
-                    }
-                }
             }
 
-            val exitCode = process.exitValue()
+            val gracefulExit = withTimeoutOrNull(gracePeriodMillis) {
+                processExit.await()
+            }
+            val exitCode = gracefulExit ?: run {
+                process.destroyForcibly()
+                withTimeoutOrNull(FORCE_STOP_WAIT_MILLIS) {
+                    processExit.await()
+                } ?: throw IOException("PRoot did not exit after forced termination.")
+            }
+
             completeAfterOutputDrain(exitCode)
             exitCode
         }
 
     private suspend fun completeAfterOutputDrain(exitCode: Int) {
-        // The stop() path and the natural-exit watcher can race. Both wait for
-        // EOF before the single exit callback is allowed to cancel the reader.
+        // Natural exit and stop both wait for EOF before the single callback.
         runCatching { outputJob.join() }
         notifyExit(exitCode)
     }

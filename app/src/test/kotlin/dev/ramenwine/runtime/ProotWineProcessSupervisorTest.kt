@@ -58,18 +58,21 @@ class ProotWineProcessSupervisorTest {
     fun drainsTerminationOutputBeforeManualStopCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
+            import os
             import signal
-            import sys
             import time
 
+            stop_requested = False
+
             def handle_sigterm(_signal, _frame):
-                print("terminated", flush=True)
-                raise SystemExit(0)
+                global stop_requested
+                os.write(1, b"terminated\\n")
+                stop_requested = True
 
             signal.signal(signal.SIGTERM, handle_sigterm)
-            print("ready", flush=True)
-            while True:
-                time.sleep(0.05)
+            os.write(1, b"ready\\n")
+            while not stop_requested:
+                time.sleep(0.01)
             """.trimIndent()
         )
         try {
@@ -92,17 +95,20 @@ class ProotWineProcessSupervisorTest {
             )
 
             assertTrue(
-                "The fixture process did not become ready.",
+                "The fixture process did not become ready. Output: $output",
                 ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
             )
 
             val stopExitCode = session.stop(gracePeriodMillis = 3_000L)
             val callbackExitCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
 
-            assertEquals(0, stopExitCode)
-            assertEquals(0, callbackExitCode)
-            assertTrue(output.contains("terminated"))
-            assertTrue(outputAtExit.get().contains("terminated"))
+            assertEquals("Unexpected process exit. Output: $output", 0, stopExitCode)
+            assertEquals("Unexpected callback exit. Output: $output", 0, callbackExitCode)
+            assertTrue("Final signal output was not drained: $output", output.contains("terminated"))
+            assertTrue(
+                "Exit callback ran before final output was drained: ${outputAtExit.get()}",
+                outputAtExit.get().contains("terminated")
+            )
             assertEquals(1, exitCount.get())
             assertFalse(session.isAlive())
         } finally {
@@ -113,7 +119,7 @@ class ProotWineProcessSupervisorTest {
     private class ScriptFixture(scriptBody: String) : AutoCloseable {
         private val root = Files.createTempDirectory("ramenwine-process-test").toFile()
         private val executable = File(root, "fake-proot").apply {
-            writeText("#!/usr/bin/env python3\n" + scriptBody + "\n")
+            writeText("#!/usr/bin/env python3\\n" + scriptBody + "\\n")
             check(setExecutable(true)) { "Could not mark the process fixture executable." }
         }
 
