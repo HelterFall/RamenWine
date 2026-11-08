@@ -76,19 +76,38 @@ def sha256_file(path: Path) -> str:
 
 
 def resolve_symlink_inside(root: Path, link_path: Path, target: str) -> Path:
-    if not target or "\\" in target or "\x00" in target or any(ord(ch) < 32 for ch in target):
+    if not target or "\\\\" in target or "\\x00" in target or any(ord(ch) < 32 for ch in target):
         raise ValueError(f"invalid symlink target for {link_path}: {target!r}")
 
-    if target.startswith("/"):
-        resolved = (root / target.lstrip("/")).resolve(strict=True)
-    else:
-        resolved = (link_path.parent / target).resolve(strict=True)
-
     root_real = root.resolve(strict=True)
+    if target.startswith("/"):
+        candidate = root_real / target.lstrip("/")
+    else:
+        candidate = link_path.parent / target
+
+    # Normalize existing symlinks, but allow a missing tail under virtual
+    # mount points such as /proc/self/fd that PRoot supplies at runtime.
+    resolved = candidate.resolve(strict=False)
     try:
         resolved.relative_to(root_real)
     except ValueError as exc:
         raise ValueError(f"symlink escapes runtime root: {link_path} -> {target}") from exc
+
+    probe = resolved
+    while not probe.exists() and not probe.is_symlink():
+        parent = probe.parent
+        if parent == probe:
+            raise ValueError(f"symlink target has no existing parent: {link_path} -> {target}")
+        probe = parent
+
+    try:
+        real_probe = probe.resolve(strict=True)
+        real_probe.relative_to(root_real)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise ValueError(
+            f"symlink escapes runtime root or has a broken parent: {link_path} -> {target}"
+        ) from exc
+
     return resolved
 
 
