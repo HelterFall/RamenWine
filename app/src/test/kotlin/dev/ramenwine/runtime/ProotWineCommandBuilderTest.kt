@@ -22,7 +22,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
-            assertEquals(hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
             assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
