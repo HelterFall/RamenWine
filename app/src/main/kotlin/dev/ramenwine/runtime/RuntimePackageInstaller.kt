@@ -4,14 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.os.StatFs
 import android.system.Os
-import androidx.documentfile.provider.DocumentFile
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
-import java.util.ArrayDeque
 import java.util.UUID
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
@@ -53,6 +51,7 @@ class RuntimePackageInstaller(private val context: Context) {
         }
 
         var previousDirectory: File? = null
+        var backendTargetDirectory: File? = null
         var activatedDirectory: File? = null
 
         try {
@@ -226,6 +225,7 @@ class RuntimePackageInstaller(private val context: Context) {
             writeRuntimeProperties(stagingDirectory, manifest)
 
             val backendDirectory = File(backendsRoot, manifest.backend.directoryName)
+            backendTargetDirectory = backendDirectory
             if (backendDirectory.exists()) {
                 val backup = File(backendsRoot, ".backup-" + installId)
                 if (!backendDirectory.renameTo(backup)) {
@@ -235,8 +235,6 @@ class RuntimePackageInstaller(private val context: Context) {
             }
 
             if (!stagingDirectory.renameTo(backendDirectory)) {
-                previousDirectory?.renameTo(backendDirectory)
-                previousDirectory = null
                 throw IOException("Could not activate the new runtime backend.")
             }
 
@@ -247,10 +245,6 @@ class RuntimePackageInstaller(private val context: Context) {
                 .first { it.backend == manifest.backend }
 
             if (installedBackend.state != RuntimeState.FILES_PRESENT) {
-                backendDirectory.deleteRecursively()
-                previousDirectory?.renameTo(backendDirectory)
-                previousDirectory = null
-                activatedDirectory = null
                 throw IOException(
                     "Runtime package was extracted but failed the post-install inventory check: " +
                         installedBackend.missingItems.joinToString()
@@ -271,12 +265,15 @@ class RuntimePackageInstaller(private val context: Context) {
             if (activatedDirectory != null && activatedDirectory.exists()) {
                 activatedDirectory.deleteRecursively()
             }
-            previousDirectory?.let { backup ->
-                val backend = stagingBackendDirectoryName(backup.name)
-                if (backend != null) {
-                    val destination = File(backendsRoot, backend)
-                    if (!destination.exists()) backup.renameTo(destination)
-                }
+            val backup = previousDirectory
+            val destination = backendTargetDirectory
+            if (
+                backup != null &&
+                backup.exists() &&
+                destination != null &&
+                !destination.exists()
+            ) {
+                backup.renameTo(destination)
             }
             throw error
         } finally {
@@ -284,7 +281,7 @@ class RuntimePackageInstaller(private val context: Context) {
         }
     }
 
-    private fun copyManifest(input: ZipInputStream, output: ByteArrayOutputStream) {
+    private suspend fun copyManifest(input: ZipInputStream, output: ByteArrayOutputStream) {
         val buffer = ByteArray(16 * 1024)
         while (true) {
             coroutineContext.ensureActive()
@@ -336,12 +333,6 @@ class RuntimePackageInstaller(private val context: Context) {
         if (available - nextChunkBytes < MIN_FREE_SPACE_RESERVE) {
             throw IOException("Not enough free space to install the runtime package.")
         }
-    }
-
-    private fun stagingBackendDirectoryName(backupName: String): String? {
-        // Backup names are generated as .backup-<UUID>; the active backend is
-        // determined from the manifest, so recovery is handled before cleanup.
-        return null
     }
 
     private fun ByteArray.toHexString(): String = joinToString("") { byte ->
