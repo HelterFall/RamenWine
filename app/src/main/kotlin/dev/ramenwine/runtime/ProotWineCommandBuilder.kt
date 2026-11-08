@@ -1,14 +1,12 @@
 package dev.ramenwine.runtime
 
+import dev.ramenwine.display.AndroidWaylandSocketValidator
+import dev.ramenwine.display.WaylandDisplayEndpoint
+import dev.ramenwine.display.WaylandSocketValidator
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.inspection.SafeGamePath
 import java.io.File
 import java.io.IOException
-
-data class WaylandDisplayEndpoint(
-    val hostRuntimeDirectory: File,
-    val socketName: String = "wayland-0"
-)
 
 data class ProotWineLaunchRequest(
     val filesDirectory: File,
@@ -36,7 +34,10 @@ data class ProotWineCommand(
  * and prepares a PRoot -> Box64 -> Wine WoW64 command without invoking a shell.
  */
 object ProotWineCommandBuilder {
-    fun build(request: ProotWineLaunchRequest): ProotWineCommand {
+    fun build(
+        request: ProotWineLaunchRequest,
+        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator
+    ): ProotWineCommand {
         require(request.hostUid >= 0) { "Invalid Android UID." }
         require(ID_PATTERN.matches(request.game.id)) { "Invalid imported game ID." }
         require(request.game.relativeDirectory == "games/" + request.game.id) {
@@ -108,6 +109,9 @@ object ProotWineCommandBuilder {
         val hostSocket = File(displayDirectory, request.display.socketName)
         if (!hostSocket.exists()) {
             throw IOException("The Wayland socket is not ready: " + hostSocket.absolutePath)
+        }
+        if (!socketValidator.isUnixDomainSocket(hostSocket)) {
+            throw IOException("The Wayland endpoint is not a Unix-domain socket: " + hostSocket.absolutePath)
         }
         if (hostSocket.absolutePath.toByteArray(Charsets.UTF_8).size >= MAX_UNIX_SOCKET_PATH_BYTES) {
             throw IOException("The Wayland socket path is too long for Android AF_UNIX.")
