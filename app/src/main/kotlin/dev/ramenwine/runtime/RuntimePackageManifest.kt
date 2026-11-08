@@ -2,6 +2,7 @@ package dev.ramenwine.runtime
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 data class RuntimePackageFile(
     val path: String,
@@ -41,7 +42,9 @@ object RuntimePackageManifestParser {
         }
 
         val version = root.optString("runtimeVersion")
-        require(version.isNotBlank()) { "Runtime version is missing." }
+        require(VERSION_PATTERN.matches(version)) {
+            "Runtime version is missing or contains unsupported characters."
+        }
 
         val filesArray = root.optJSONArray("files") ?: JSONArray()
         require(filesArray.length() in 1..MAX_ENTRIES) {
@@ -57,7 +60,9 @@ object RuntimePackageManifestParser {
                 val path = SafeRuntimePath.normalizeRelativePath(item.optString("path"))
                     ?: throw IllegalArgumentException("Unsafe runtime file path at index $index.")
 
-                require(seenPaths.add(path)) { "Duplicate runtime path: $path" }
+                require(seenPaths.add(path.lowercase(Locale.ROOT))) {
+                    "Duplicate runtime path (case-insensitive): $path"
+                }
 
                 val digest = item.optString("sha256").lowercase()
                 require(SHA256_PATTERN.matches(digest)) {
