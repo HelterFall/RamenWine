@@ -65,6 +65,9 @@ object ProotWineCommandBuilder {
         requireDirectory(rootfs, "Linux rootfs")
 
         val proot = executableFile(backendRoot, "host/bin/proot")
+        val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
+        requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
+        requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine64")
 
@@ -133,6 +136,9 @@ object ProotWineCommandBuilder {
         }
 
         val arguments = buildList {
+            add("--kill-on-exit")
+            add("--link2symlink")
+            add("--sysvipc")
             add("--rootfs=" + rootfs.absolutePath)
             add("--bind=/dev:/dev")
             add("--bind=/proc:/proc")
@@ -143,7 +149,7 @@ object ProotWineCommandBuilder {
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
             add("/usr/bin/box64")
-            add("/usr/bin/wine64")
+            add("/usr/bin/wine")
             add(guestExecutable)
         }
 
@@ -155,6 +161,7 @@ object ProotWineCommandBuilder {
             "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
             "TMPDIR" to guestTempDirectory,
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
+            "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/usr/local/bin:/usr/bin:/bin",
@@ -169,7 +176,6 @@ object ProotWineCommandBuilder {
             unsetEnvironment = setOf(
                 "DISPLAY",
                 "WAYLAND_SOCKET",
-                "LD_LIBRARY_PATH",
                 "LD_PRELOAD",
                 "ANDROID_ROOT",
                 "ANDROID_DATA",
