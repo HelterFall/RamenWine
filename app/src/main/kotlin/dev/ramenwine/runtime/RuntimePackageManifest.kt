@@ -80,8 +80,8 @@ object RuntimePackageManifestParser {
         }
 
         val symlinkArray = root.optJSONArray("symlinks") ?: JSONArray()
-        require(symlinkArray.length() <= MAX_ENTRIES) {
-            "Too many runtime symlinks."
+        require(filesArray.length() + symlinkArray.length() <= MAX_ENTRIES) {
+            "Runtime manifest contains too many combined files and symlinks."
         }
 
         val symlinks = buildList {
@@ -92,10 +92,19 @@ object RuntimePackageManifestParser {
                 val path = SafeRuntimePath.normalizeRelativePath(item.optString("path"))
                     ?: throw IllegalArgumentException("Unsafe runtime symlink path at index $index.")
 
-                require(seenPaths.add(path)) { "Duplicate runtime path: $path" }
+                require(seenPaths.add(path.lowercase(Locale.ROOT))) {
+                    "Duplicate runtime path (case-insensitive): $path"
+                }
 
                 val target = item.optString("target")
-                require(target.isNotBlank()) { "Missing symlink target for $path." }
+                require(
+                    target.isNotBlank() &&
+                        target.length <= MAX_SYMLINK_TARGET_LENGTH &&
+                        !target.contains('\\') &&
+                        !target.any { it.isISOControl() }
+                ) {
+                    "Missing or invalid symlink target for $path."
+                }
 
                 add(RuntimePackageSymlink(path, target))
             }
@@ -112,5 +121,6 @@ object RuntimePackageManifestParser {
 
     private const val SUPPORTED_SCHEMA_VERSION = 1
     private const val MAX_ENTRIES = 100_000
+    private const val MAX_SYMLINK_TARGET_LENGTH = 4096
     private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
 }
