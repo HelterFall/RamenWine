@@ -29,7 +29,7 @@ data class ImportProgress(
  * after the selected EXE has been copied and validated as a PE image.
  */
 class GameFolderImporter(private val context: Context) {
-    suspend fun import(
+    suspend fun importGame(
         treeUri: Uri,
         gameTitle: String,
         selectedExecutableRelativePath: String,
@@ -64,6 +64,7 @@ class GameFolderImporter(private val context: Context) {
         }
 
         try {
+            ensureFreeSpace(0L)
             val canonicalStaging = stagingDirectory.canonicalFile
             val canonicalPrefix = canonicalStaging.path + File.separator
             val queue = ArrayDeque<PendingDirectory>()
