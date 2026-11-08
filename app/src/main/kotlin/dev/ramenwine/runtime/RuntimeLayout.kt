@@ -1,6 +1,7 @@
 package dev.ramenwine.runtime
 
 import java.io.File
+import java.nio.file.Files
 import java.util.Properties
 
 enum class RuntimeState {
@@ -118,6 +119,7 @@ object RuntimeLayout {
 
         val requiredFiles = parsePathList(properties.getProperty("requiredFiles"))
         val executableFiles = parsePathList(properties.getProperty("executableFiles"))
+        val requiredSymlinks = parsePathList(properties.getProperty("requiredSymlinks"))
 
         if (requiredFiles.isEmpty()) {
             return incomplete(backend, "The manifest has no requiredFiles entries.")
@@ -128,6 +130,9 @@ object RuntimeLayout {
                 backend,
                 "Every executableFiles entry must also appear in requiredFiles."
             )
+        }
+        if (requiredSymlinks.any { it in requiredFiles || it in executableFiles }) {
+            return incomplete(backend, "A path cannot be both a file and a symlink.")
         }
 
         val missing = mutableListOf<String>()
@@ -146,6 +151,12 @@ object RuntimeLayout {
                 missing += "Missing file: $relativePath"
             } else if (relativePath in executableFiles && !safeFile.canExecute()) {
                 missing += "File is not executable: $relativePath"
+            }
+        }
+
+        for (relativePath in requiredSymlinks) {
+            if (!isSafeSymlink(backendRoot, canonicalRoot, relativePath)) {
+                missing += "Missing, broken or unsafe symlink: $relativePath"
             }
         }
 
@@ -186,6 +197,31 @@ object RuntimeLayout {
         }.getOrNull() ?: return null
 
         return file.takeIf { it.path.startsWith(canonicalPrefix) }
+    }
+
+
+    private fun isSafeSymlink(
+        backendRoot: File,
+        canonicalRoot: File,
+        relativePath: String
+    ): Boolean {
+        val safeRelativePath = SafeRuntimePath.normalizeRelativePath(relativePath)
+            ?: return false
+
+        return runCatching {
+            val rootPath = canonicalRoot.toPath().normalize()
+            val linkPath = backendRoot.toPath().resolve(safeRelativePath).normalize()
+            if (!linkPath.startsWith(rootPath)) return false
+
+            val parent = linkPath.parent ?: return false
+            val realParent = parent.toRealPath()
+            if (!realParent.startsWith(rootPath)) return false
+
+            if (!Files.isSymbolicLink(linkPath)) return false
+
+            val realTarget = linkPath.toRealPath()
+            realTarget.startsWith(rootPath)
+        }.getOrDefault(false)
     }
 
     private fun parsePathList(value: String?): List<String> {
