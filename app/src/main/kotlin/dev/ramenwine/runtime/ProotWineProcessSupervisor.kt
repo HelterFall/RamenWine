@@ -67,6 +67,7 @@ class ProotWineProcessSession internal constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val finished = AtomicBoolean(false)
     private val processExit = CompletableDeferred<Int>()
+    private val callbackCompleted = CompletableDeferred<Unit>()
     private val outputJob: Job
 
     init {
@@ -130,18 +131,24 @@ class ProotWineProcessSession internal constructor(
 
     private suspend fun completeAfterOutputDrain(exitCode: Int) {
         // Natural exit and stop both wait for EOF before the single callback.
-        runCatching { outputJob.join() }
+        outputJob.join()
         notifyExit(exitCode)
     }
 
     private suspend fun notifyExit(exitCode: Int) {
-        if (!finished.compareAndSet(false, true)) return
-        try {
-            withContext(callbackDispatcher) {
-                onExit(exitCode)
+        if (finished.compareAndSet(false, true)) {
+            try {
+                withContext(callbackDispatcher) {
+                    onExit(exitCode)
+                }
+            } finally {
+                callbackCompleted.complete(Unit)
+                scope.cancel()
             }
-        } finally {
-            scope.cancel()
+        } else {
+            // stop() and the process watcher both wait until the one callback
+            // has actually returned, not merely until one path wins the CAS.
+            callbackCompleted.await()
         }
     }
 
