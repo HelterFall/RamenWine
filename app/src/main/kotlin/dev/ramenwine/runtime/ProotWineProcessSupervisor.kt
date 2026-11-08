@@ -1,7 +1,9 @@
 package dev.ramenwine.runtime
 
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +24,13 @@ class ProotWineProcessSupervisor {
         onOutput: (String) -> Unit,
         onExit: (Int) -> Unit
     ): ProotWineProcessSession = withContext(Dispatchers.IO) {
+        if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
+            throw IOException("The PRoot host executable is missing or not executable.")
+        }
+        if (!command.hostWorkingDirectory.isDirectory) {
+            throw IOException("The PRoot working directory does not exist.")
+        }
+
         val commandLine = buildList {
             add(command.prootExecutable.absolutePath)
             addAll(command.arguments)
@@ -53,8 +62,10 @@ class ProotWineProcessSession internal constructor(
 
     private val finished = AtomicBoolean(false)
 
+    private val outputJob: Job
+
     init {
-        scope.launch {
+        outputJob = scope.launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
@@ -76,6 +87,8 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
+            // Drain the final stdout/stderr lines before reporting the exit.
+            runCatching { outputJob.join() }
             notifyExit(exitCode)
         }
     }
