@@ -2,6 +2,7 @@ package dev.ramenwine.runtime
 
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.Properties
 
 enum class RuntimeState {
@@ -216,11 +217,29 @@ object RuntimeLayout {
             val parent = linkPath.parent ?: return false
             val realParent = parent.toRealPath()
             if (!realParent.startsWith(rootPath)) return false
-
             if (!Files.isSymbolicLink(linkPath)) return false
 
-            val realTarget = linkPath.toRealPath()
-            realTarget.startsWith(rootPath)
+            val rawTarget = Files.readSymbolicLink(linkPath)
+            val targetPath = if (rawTarget.isAbsolute) {
+                rootPath.resolve(rawTarget.toString().removePrefix("/")).normalize()
+            } else {
+                linkPath.parent.resolve(rawTarget).normalize()
+            }
+            if (!targetPath.startsWith(rootPath)) return false
+
+            // Rootfs symlinks may point to virtual mount paths such as
+            // /proc/self/fd. Their final component may not exist until PRoot
+            // starts, so validate the nearest existing ancestor instead.
+            var existingAncestor = targetPath
+            while (
+                !Files.exists(existingAncestor, LinkOption.NOFOLLOW_LINKS) &&
+                !Files.isSymbolicLink(existingAncestor)
+            ) {
+                existingAncestor = existingAncestor.parent ?: return false
+            }
+
+            val realAncestor = existingAncestor.toRealPath()
+            realAncestor.startsWith(rootPath)
         }.getOrDefault(false)
     }
 
