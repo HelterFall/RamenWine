@@ -110,7 +110,7 @@ fun RamenWineApp() {
         scope.launch {
             try {
                 val imported = withContext(Dispatchers.IO) {
-                    GameFolderImporter(context.applicationContext).import(
+                    GameFolderImporter(context.applicationContext).importGame(
                         treeUri = folderUri,
                         gameTitle = title,
                         selectedExecutableRelativePath = candidate.relativePath
@@ -269,7 +269,7 @@ private fun RuntimeStatusCard(
             }
             Text(
                 text = "Ожидаемый путь: " +
-                    runtimeInspection.runtimeRoot.relativeTo(runtimeInspection.runtimeRoot.parentFile),
+                    runtimeInspection.runtimeRoot.path,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
