@@ -1,5 +1,6 @@
 package dev.ramenwine.runtime
 
+import dev.ramenwine.display.WaylandDisplayEndpoint
 import dev.ramenwine.display.WaylandSocketValidator
 import dev.ramenwine.library.ImportedGame
 import java.io.File
