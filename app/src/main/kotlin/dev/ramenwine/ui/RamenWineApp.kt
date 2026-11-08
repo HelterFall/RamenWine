@@ -258,18 +258,42 @@ private fun RuntimeStatusCard(
         ) {
             Text("Runtime environment", fontWeight = FontWeight.Bold)
             when (runtimeInspection.state) {
-                RuntimeState.NOT_INSTALLED -> Text("Linux/Wine runtime ещё не установлен.")
-                RuntimeState.INCOMPLETE -> {
-                    Text("Runtime directory существует, но он неполный.")
-                    runtimeInspection.missingItems.forEach { Text("• " + it) }
-                }
+                RuntimeState.NOT_INSTALLED -> Text("Windows runtime ещё не установлен.")
+                RuntimeState.INCOMPLETE -> Text(
+                    "Найдена неполная установка runtime. Проверь отсутствующие файлы ниже."
+                )
                 RuntimeState.FILES_PRESENT -> Text(
-                    "Ожидаемые файлы присутствуют. Реальная проверка запуска ещё требуется."
+                    "Найден как минимум один комплект runtime-файлов. Реальный запуск ещё нужно проверить."
                 )
             }
+            runtimeInspection.backends.forEach { backend ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    val stateLabel = when (backend.state) {
+                        RuntimeState.NOT_INSTALLED -> "не установлен"
+                        RuntimeState.INCOMPLETE -> "неполный"
+                        RuntimeState.FILES_PRESENT -> "файлы на месте"
+                    }
+                    Text(
+                        text = backend.backend.displayName + " · " + stateLabel,
+                        fontWeight = FontWeight.Medium
+                    )
+                    backend.runtimeVersion?.let {
+                        Text(
+                            text = "Версия: " + it,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    backend.missingItems.forEach { missing ->
+                        Text(
+                            text = "• " + missing,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
             Text(
-                text = "Ожидаемый путь: " +
-                    runtimeInspection.runtimeRoot.path,
+                text = "Путь runtime: " + runtimeInspection.runtimeRoot.path,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
