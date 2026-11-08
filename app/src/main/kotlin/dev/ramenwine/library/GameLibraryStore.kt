@@ -1,11 +1,13 @@
 package dev.ramenwine.library
 
 import android.content.Context
+import android.system.Os
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
+import dev.ramenwine.inspection.SafeGamePath
 
 /**
  * Small app-private JSON store for the first game-library milestone.
@@ -28,7 +30,13 @@ class GameLibraryStore(context: Context) {
                     val id = item.optString("id")
                     val directory = item.optString("relativeDirectory")
                     val executable = item.optString("executableRelativePath")
-                    if (id.isBlank() || directory != "games/$id" || executable.isBlank()) {
+                    val safeExecutable = SafeGamePath.normalizeRelativePath(executable)
+                    if (
+                        !id.matches(ID_PATTERN) ||
+                        directory != "games/$id" ||
+                        safeExecutable == null ||
+                        !safeExecutable.endsWith(".exe", ignoreCase = true)
+                    ) {
                         continue
                     }
                     add(
@@ -54,8 +62,15 @@ class GameLibraryStore(context: Context) {
         require(game.relativeDirectory == "games/" + game.id) {
             "Invalid game directory."
         }
-        require(game.executableRelativePath.isNotBlank()) {
-            "Missing executable path."
+        val safeExecutable = SafeGamePath.normalizeRelativePath(game.executableRelativePath)
+        require(
+            safeExecutable != null &&
+                safeExecutable.endsWith(".exe", ignoreCase = true)
+        ) {
+            "Invalid executable path."
+        }
+        require(game.title.length <= MAX_TITLE_LENGTH) {
+            "Game title is too long."
         }
 
         if (!gamesRoot.exists() && !gamesRoot.mkdirs()) {
@@ -91,12 +106,9 @@ class GameLibraryStore(context: Context) {
                 stream.fd.sync()
             }
 
-            if (libraryFile.exists() && !libraryFile.delete()) {
-                error("Could not replace the game library index.")
-            }
-            if (!temporaryFile.renameTo(libraryFile)) {
-                error("Could not commit the game library index.")
-            }
+            // Both files are in the same app-private directory, so POSIX rename
+            // replaces the previous index atomically on Android/Linux.
+            Os.rename(temporaryFile.absolutePath, libraryFile.absolutePath)
         } catch (error: Throwable) {
             temporaryFile.delete()
             throw error
@@ -106,6 +118,7 @@ class GameLibraryStore(context: Context) {
     companion object {
         private const val LIBRARY_FILE_NAME = "library.json"
         private const val SCHEMA_VERSION = 1
-        private val ID_PATTERN = Regex("[a-f0-9-]{36}")
+        private const val MAX_TITLE_LENGTH = 512
+        private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     }
 }
