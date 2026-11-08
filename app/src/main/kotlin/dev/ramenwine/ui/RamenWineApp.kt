@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.ramenwine.importer.GameFolderImporter
+import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
@@ -57,6 +59,7 @@ fun RamenWineApp() {
     var importedGames by remember { mutableStateOf(libraryStore.list()) }
     var scanning by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
+    var importProgress by remember { mutableStateOf(ImportProgress(0, 0L)) }
     var scanError by remember { mutableStateOf<String?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     var importNotice by remember { mutableStateOf<String?>(null) }
@@ -134,6 +137,7 @@ fun RamenWineApp() {
         val title = scanResult?.folderName ?: "Visual novel"
 
         importing = true
+        importProgress = ImportProgress(0, 0L)
         importError = null
         importNotice = null
 
@@ -143,7 +147,12 @@ fun RamenWineApp() {
                     GameFolderImporter(context.applicationContext).importGame(
                         treeUri = folderUri,
                         gameTitle = title,
-                        selectedExecutableRelativePath = candidate.relativePath
+                        selectedExecutableRelativePath = candidate.relativePath,
+                        onProgress = { progress ->
+                            scope.launch {
+                                importProgress = progress
+                            }
+                        }
                     )
                 }
                 importedGames = libraryStore.list()
@@ -268,11 +277,20 @@ fun RamenWineApp() {
                 }
 
                 if (importing) {
-                    Text(
-                        "Копирую игру в приватное хранилище приложения. Не закрывай RamenWine.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Копирую игру в приватное хранилище приложения…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(
+                            text = "Файлов: " + importProgress.copiedFiles +
+                                " · Скопировано: " + formatFileSize(importProgress.copiedBytes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 importError?.let {
