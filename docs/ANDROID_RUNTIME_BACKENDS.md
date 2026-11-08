@@ -148,3 +148,78 @@ Not implemented yet:
 ## Rule
 
 Bionic-native is the performance-first experiment; glibc + PRoot is the compatibility fallback. Production default is chosen only from reproducible device and game test results.
+
+
+## Offline runtime package format
+
+The Android app accepts a locally selected ZIP package. It does not fetch runtime
+binaries from the network during installation.
+
+Expected archive layout:
+
+```text
+runtime-manifest.json
+payload/
+  bin/
+    wine
+  lib/
+    ...
+```
+
+Example manifest:
+
+```json
+{
+  "schemaVersion": 1,
+  "backendId": "glibc-proot-box64",
+  "hostAbi": "arm64-v8a",
+  "runtimeVersion": "prototype-1",
+  "files": [
+    {
+      "path": "host/bin/proot",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
+      "path": "rootfs/usr/bin/box64",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
+      "path": "rootfs/usr/bin/wine",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    }
+  ],
+  "symlinks": [
+    {
+      "path": "rootfs/bin",
+      "target": "usr/bin"
+    }
+  ]
+}
+```
+
+The manifest file list is illustrative only; each backend has its own real file
+requirements. Every file listed in the manifest must be present under
+`payload/`, and its SHA-256 must match. Paths must be relative, unique
+case-insensitively and remain inside the backend staging directory. Symlink
+targets are normalized to remain inside that backend directory. The installer
+sets executable permissions from the manifest and writes the runtime inventory
+only after extraction.
+
+Installation is staged in app-private storage. The previous backend is renamed
+to a temporary backup; the new directory is activated; the app then performs a
+post-install inventory check. If the check fails, the new directory is removed
+and the backup is restored.
+
+**Security boundary:** SHA-256 checks detect a damaged or inconsistent file
+payload, but a manifest stored inside the same ZIP does not authenticate who
+created the package. Until RamenWine adds a pinned signing key and signed
+release metadata, users should install runtime ZIPs only from a source they
+trust. A future release pipeline must sign package metadata (for example with
+Ed25519) and the app must verify the signature before extraction.
+
+The installer limits ZIP entries, manifest size, uncompressed bytes, and
+available disk reserve. It does not execute any runtime or game binary during
+installation. Presence of installed files is still not proof that Wine starts.
