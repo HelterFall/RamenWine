@@ -4,7 +4,6 @@ import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.inspection.SafeGamePath
 import java.io.File
 import java.io.IOException
-import java.util.UUID
 
 data class WaylandDisplayEndpoint(
     val hostRuntimeDirectory: File,
@@ -69,7 +68,7 @@ object ProotWineCommandBuilder {
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/box64")
-        executableFile(rootfs, "usr/bin/wine64")
+        executableFile(rootfs, "usr/bin/wine")
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
         val gameDirectory = File(filesRoot, request.game.relativeDirectory).canonicalFile
