@@ -55,7 +55,7 @@ class RuntimePackagerTests(unittest.TestCase):
             root.mkdir()
             outside = Path(temporary) / "outside"
             outside.write_text("outside", encoding="utf-8")
-            (root / "escape").symlink_to(outside)
+            (root / "escape").symlink_to("../outside")
 
             with self.assertRaises(ValueError):
                 package_runtime.scan_runtime(root, 1024 * 1024)
