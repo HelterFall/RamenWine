@@ -1,85 +1,92 @@
 # RamenWine development status
 
 **Snapshot:** 2026-11-09  
-**Current milestone:** Android host scaffold + bounded, read-only EXE inspection.
+**Current milestone:** Android host, safe executable inspection, private game import and runtime backend inventory.
 
-## What is implemented
+## Implemented
 
-- Android Gradle project with Kotlin, Jetpack Compose and an NDK/CMake native library.
-- ARM64 (arm64-v8a) is the first Android native ABI.
-- Folder selection through Android Storage Access Framework.
-- Persistable read permission for a user-selected folder.
-- Bounded recursive scan (maximum depth 16, maximum 15,000 directory entries).
-- Bounded PE header inspection (up to 64 KiB per candidate; no executable loading).
-- Detection of common COFF machine values: x86, x86-64, ARM32, ARM64 and ARM64EC.
-- Basic runtime-layout inspection.
-- JNI bridge smoke diagnostic.
-- JVM unit tests for PE header parsing and runtime-layout state.
-- GitHub Actions workflow for debug build, unit tests and lint.
+- Android Gradle project using Kotlin and Jetpack Compose.
+- ARM64-first (arm64-v8a) Android NDK/CMake native bridge.
+- Android Storage Access Framework folder selection and persisted read permission.
+- Bounded, read-only game-folder scan.
+- Safe relative-path validation for Windows game file names.
+- Bounded PE header inspection for x86, x86-64, ARM32, ARM64 and ARM64EC COFF machine values.
+- Explicit selection of the game's main EXE candidate.
+- Streamed copy of the selected game folder into app-private storage.
+- Import staging directory and cleanup on failure/cancellation.
+- Import guardrails: maximum 32 directory levels, 100,000 entries, 64 GiB total bytes, and 128 MiB free-space reserve.
+- Validation that the selected EXE is a PE image before import finalization.
+- App-private JSON library metadata.
+- Runtime backend inventory for Bionic ARM64EC/FEX, Bionic x64/Box64 and glibc/PRoot/Box64 packages.
+- Runtime manifest checks for host ABI, required files, safe paths and executable permissions.
+- Unit tests for PE parsing, game path validation and runtime manifest states.
+- GitHub Actions workflow for Android build, unit tests, lint and debug APK artifact upload.
 
-## Important: Android Wine is not a standalone NDK library
+## Current Android user flow
 
-The current code intentionally does not pretend that Wine can be loaded directly from an APK as an ordinary Android shared library.
+1. Choose a game folder.
+2. The scanner lists EXE candidates and their PE machine architecture.
+3. Choose the intended game EXE.
+4. Import the complete folder into the app-private games/<uuid> directory.
+5. Save the game title, relative path, EXE path, architecture and import size in the local library index.
 
-The Android implementation needs a Linux userspace compatible with the chosen Wine and Box64 builds. The reference Android approach used by Winlator includes a Linux rootfs, PRoot, Wine, Box86/Box64 and graphics components. PRoot works without root, but its syscall interception has a performance cost that must be measured.
+The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game.
 
-Proposed on-device layout:
+## Runtime backend strategy
 
-```text
-files/runtime/current/
-  host/
-    bin/
-      proot                 # Android/host executable
-  rootfs/
-    usr/bin/
-      box64                 # Linux ARM64 host translator in rootfs
-      wine                  # Wine loader in rootfs
-    usr/lib/
-    lib/
-```
+RamenWine supports three backend package IDs in its runtime inventory:
 
-This layout is a first contract for the app/runtime boundary, not a downloadable runtime package. File presence alone does not prove that the binaries are compatible with Android, the rootfs, SELinux, linker, or device kernel.
+- bionic-arm64ec-fex
+- bionic-x64-box64
+- glibc-proot-box64
 
-## Not implemented yet
+The Bionic-native path is the performance experiment. The glibc + PRoot path is retained as a compatibility fallback. The Bionic ARM64EC/Wine builds currently available publicly are testing builds, so RamenWine must not treat them as production-ready without device/game testing.
 
-- No Wine binaries or Linux rootfs are bundled.
-- No PRoot process supervisor is integrated.
-- No Box64 or 32-bit execution path is integrated.
-- No graphics backend is bundled or selected.
-- No EXE is launched.
-- No Android game surface is connected to a Wine display backend.
-- No audio bridge, touch-to-mouse mapping or per-game prefix creation exists.
-- No physical-device validation has been performed by this repository bootstrap.
+See Android Runtime Backends for the decision and package manifest contract.
 
-## Build toolchain pinned for the first scaffold
+## What is not implemented yet
+
+- No Wine, Proton, FEX, Box64, Box86 or PRoot runtime binaries are bundled.
+- No Linux rootfs is built or installed.
+- No runtime package installer or SHA-256 package verifier exists.
+- No process supervisor launches a Windows EXE.
+- No Wine prefix is created for each imported game.
+- No game surface is connected to a Wine display/window backend.
+- No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
+- No audio bridge, input mapping, game pause/resume integration or save management exists.
+- No physical Android device has been tested by this bootstrap.
+
+## Build toolchain
 
 - Android Gradle Plugin: 9.1.1
 - Gradle: 9.3.1
-- AGP built-in Kotlin + Compose compiler plugin 2.2.10
-- Android compile SDK: 36
-- Android NDK: 30.0.16248370 (NDK r30, 2026 LTS)
+- Compose Compiler Gradle plugin: 2.2.10
+- Android compile/target SDK: 36
+- Minimum Android SDK: 26
+- Android NDK: 30.0.16248370
 - CMake: 3.22.1
-- Compose BOM: 2026.09.00
-- AndroidX Activity Compose: 1.13.0
-- AndroidX DocumentFile: 1.1.0
-- kotlinx.coroutines-android: 1.11.0
+- Compose BOM: 2026.04.01
+- JDK: 17
 
-These versions are pinned to documented compatible/stable lines for this initial scaffold. Re-check upstream compatibility before changing the build toolchain.
+GitHub Actions passed the Android build/test/lint workflow for the scanner/import scaffold. Runtime backend manifest changes are undergoing a new CI run; check the Actions run before treating the latest revision as validated.
 
-## Next tasks
+## Next engineering steps
 
-1. Run GitHub Actions and fix all build/test/lint failures.
-2. Test folder scanning against real SAF providers (Downloads, removable storage where available, and local storage).
-3. Add a safe folder importer into app-private storage with storage quota checks.
-4. Build and package a small ARM64 PRoot host executable.
-5. Produce a minimal glibc rootfs and validate PRoot under the Android app UID.
-6. Cross-build or integrate Wine and Box64 for that exact rootfs; run a Linux-side smoke test before attempting Windows EXE launch.
-7. Only then implement a native process supervisor and a first test Windows GUI executable.
-8. Add GPU probing and a graphics backend matrix before shipping DXVK or any driver-specific layer.
+1. Complete CI verification for the latest runtime backend manifest implementation.
+2. Add safe local runtime package installation with SHA-256 verification and staged activation.
+3. Build a minimal Android/Bionic Wine + ARM64EC/FEX launch prototype.
+4. Build a glibc rootfs + PRoot + Box64 fallback prototype.
+5. Run the same original x86-64 test executable through each backend and compare stability/performance.
+6. Add 32-bit Windows execution after a confirmed 64-bit path.
+7. Add the Android game surface, process supervision and correct pause/resume/exit lifecycle.
+8. Add graphics and audio backend probing only after the first Wine window renders.
+9. Build a reproducible visual-novel compatibility matrix on physical ARM64 devices.
 
-## Compatibility policy
+## Engineering rules
 
-- Do not classify a game as supported just because an EXE or engine marker was found.
-- Never execute game files during scanning.
-- Do not remove system APIs solely to shrink the package; optional features must be tested against the game compatibility corpus.
-- Prefer local/offline runtime packages. A first launch must not depend on downloading binaries.
+- A detected EXE is not a supported game.
+- A runtime manifest with files present is not proof of successful execution.
+- Never execute game files during scanning or import.
+- Do not remove system APIs solely to shrink the package.
+- Prefer local/offline runtime packages; the first launch must not depend on downloading binaries.
+- Keep a fallback backend and per-game compatibility profiles.
