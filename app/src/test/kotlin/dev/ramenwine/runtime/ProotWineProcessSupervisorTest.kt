@@ -21,9 +21,10 @@ class ProotWineProcessSupervisorTest {
     fun drainsMergedOutputBeforeNaturalExitCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
-            printf 'stdout-line\n'
-            printf 'stderr-line\n' >&2
-            exit 7
+            import sys
+            print("stdout-line", flush=True)
+            print("stderr-line", file=sys.stderr, flush=True)
+            sys.exit(7)
             """.trimIndent()
         )
         try {
@@ -57,12 +58,18 @@ class ProotWineProcessSupervisorTest {
     fun drainsTerminationOutputBeforeManualStopCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
-            printf 'ready\n'
-            trap 'printf "terminated\n"; exit 0' TERM
-            while :; do
-                sleep 1 &
-                wait $!
-            done
+            import signal
+            import sys
+            import time
+
+            def handle_sigterm(_signal, _frame):
+                print("terminated", flush=True)
+                raise SystemExit(0)
+
+            signal.signal(signal.SIGTERM, handle_sigterm)
+            print("ready", flush=True)
+            while True:
+                time.sleep(0.05)
             """.trimIndent()
         )
         try {
@@ -84,10 +91,10 @@ class ProotWineProcessSupervisorTest {
                 }
             )
 
-            assertTrue("The fixture process did not become ready.", ready.await(
-                TEST_TIMEOUT_MILLIS,
-                TimeUnit.MILLISECONDS
-            ))
+            assertTrue(
+                "The fixture process did not become ready.",
+                ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            )
 
             val stopExitCode = session.stop(gracePeriodMillis = 3_000L)
             val callbackExitCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
@@ -106,7 +113,7 @@ class ProotWineProcessSupervisorTest {
     private class ScriptFixture(scriptBody: String) : AutoCloseable {
         private val root = Files.createTempDirectory("ramenwine-process-test").toFile()
         private val executable = File(root, "fake-proot").apply {
-            writeText("#!/bin/sh\n" + scriptBody + "\n")
+            writeText("#!/usr/bin/env python3\n" + scriptBody + "\n")
             check(setExecutable(true)) { "Could not mark the process fixture executable." }
         }
 
