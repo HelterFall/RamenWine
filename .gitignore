@@ -1,0 +1,9 @@
+.gradle/
+.gradle-cache/
+.kotlin/
+.idea/
+local.properties
+**/build/
+*.iml
+.DS_Store
+Thumbs.db
