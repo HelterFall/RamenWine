@@ -42,6 +42,40 @@ class RuntimeLayoutSymlinkTest {
     }
 
     @Test
+    fun symlinkToRuntimeCreatedMountPathIsAccepted() {
+        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
+        try {
+            val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
+            val backendRoot = backendRoot(root, backend)
+            createExecutable(backendRoot)
+
+            File(backendRoot, "proc").mkdirs()
+            val devDirectory = File(backendRoot, "dev")
+            devDirectory.mkdirs()
+            Files.createSymbolicLink(
+                File(devDirectory, "fd").toPath(),
+                Paths.get("../proc/self/fd")
+            )
+
+            writeManifest(
+                backendRoot = backendRoot,
+                backend = backend,
+                requiredFiles = "bin/wine",
+                executableFiles = "bin/wine",
+                requiredSymlinks = "dev/fd"
+            )
+
+            val result = RuntimeLayout.inspect(root)
+            assertEquals(
+                RuntimeState.FILES_PRESENT,
+                result.backends.first { it.backend == backend }.state
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun symlinkEscapingBackendIsRejected() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
         try {
