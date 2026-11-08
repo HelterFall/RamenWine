@@ -216,3 +216,28 @@ RamenWine может повторно использовать полезные 
 При выборе между новым портом движка и расширением общего runtime сначала проверять, можно ли решить задачу в общей Windows-среде. Новый нативный адаптер оправдан, когда он закрывает конкретную несовместимость, улучшает производительность/стабильность или позволяет запускать игру, которую общий runtime пока не обслуживает.
 
 **RamenWine строится вокруг максимальной совместимости. Ни один движок не объявляется неподдерживаемым только потому, что его ещё не исследовали.**
+
+
+## Current implementation status
+
+The initial Android host scaffold is in the repository:
+- Kotlin / Jetpack Compose Android application;
+- ARM64-first NDK/CMake native library and JNI smoke bridge;
+- Android Storage Access Framework folder picker;
+- bounded, read-only recursive EXE scan and PE architecture inspection;
+- runtime-layout diagnostics;
+- JVM tests for PE inspection and runtime-layout checks;
+- GitHub Actions build/test/lint workflow.
+
+**Wine is not bundled and EXE files are not launched yet.** This milestone deliberately does not claim Windows compatibility. The first Android integration target is a compatible Linux userspace/rootfs plus a host process layer; a PRoot-based route is being evaluated against other options for performance and maintenance. See [Development Status](docs/DEVELOPMENT_STATUS.md).
+
+## Build
+
+The CI currently uses Gradle 9.3.1, JDK 17, Android API 37, NDK r30 and CMake 3.22.1. Open the repository in Android Studio with a matching Android toolchain, or use the same versions in a local command-line setup.
+
+The first CI job runs:
+```bash
+gradle --no-daemon testDebugUnitTest assembleDebug lintDebug
+```
+
+This is a host-app scaffold and scanner milestone only. Passing the Android build does not demonstrate that Wine, Box64, graphics translation, or real-game playback works.
