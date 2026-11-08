@@ -29,9 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
+import dev.ramenwine.library.GameLibraryStore
+import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimeState
@@ -43,11 +46,19 @@ import kotlinx.coroutines.withContext
 fun RamenWineApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val libraryStore = remember(context.filesDir) {
+        GameLibraryStore(context.applicationContext)
+    }
+
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
     var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
+    var importedGames by remember { mutableStateOf(libraryStore.list()) }
     var scanning by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var importNotice by remember { mutableStateOf<String?>(null) }
 
     val runtimeInspection = remember(context.filesDir) {
         RuntimeLayout.inspect(context.filesDir)
@@ -62,6 +73,8 @@ fun RamenWineApp() {
             scanResult = null
             selectedExecutable = null
             scanError = null
+            importError = null
+            importNotice = null
 
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -81,6 +94,34 @@ fun RamenWineApp() {
                 } finally {
                     scanning = false
                 }
+            }
+        }
+    }
+
+    fun startImport() {
+        val folderUri = selectedFolder ?: return
+        val candidate = selectedExecutable ?: return
+        val title = scanResult?.folderName ?: "Visual novel"
+
+        importing = true
+        importError = null
+        importNotice = null
+
+        scope.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    GameFolderImporter(context.applicationContext).import(
+                        treeUri = folderUri,
+                        gameTitle = title,
+                        selectedExecutableRelativePath = candidate.relativePath
+                    )
+                }
+                importedGames = libraryStore.list()
+                importNotice = "Игра импортирована: " + imported.title
+            } catch (error: Exception) {
+                importError = error.message ?: error.javaClass.simpleName
+            } finally {
+                importing = false
             }
         }
     }
@@ -109,56 +150,29 @@ fun RamenWineApp() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Development build · Phase 1: Android host and safe EXE inspection",
+                        text = "Development build · Phase 1: import and EXE inspection",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
                 }
 
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("Runtime environment", fontWeight = FontWeight.Bold)
-                        when (runtimeInspection.state) {
-                            RuntimeState.NOT_INSTALLED -> Text(
-                                "Linux/Wine runtime is not installed yet."
-                            )
-                            RuntimeState.INCOMPLETE -> {
-                                Text("Runtime directory exists but is incomplete.")
-                                runtimeInspection.missingItems.forEach { Text("• " + it) }
-                            }
-                            RuntimeState.FILES_PRESENT -> Text(
-                                "Expected files are present. A real launch self-test is still required."
-                            )
-                        }
-                        Text(
-                            text = "Expected location: " +
-                                runtimeInspection.runtimeRoot.relativeTo(context.filesDir),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        HorizontalDivider()
-                        Text("Native bridge", fontWeight = FontWeight.Bold)
-                        Text(
-                            text = nativeDiagnostic,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+                RuntimeStatusCard(
+                    runtimeInspection = runtimeInspection,
+                    nativeDiagnostic = nativeDiagnostic
+                )
 
                 Button(
                     onClick = { folderPicker.launch(null) },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !scanning
+                    enabled = !scanning && !importing
                 ) {
-                    Text(if (scanning) "Сканирование…" else "Выбрать папку игры")
+                    Text(
+                        when {
+                            scanning -> "Сканирование…"
+                            importing -> "Импортирование…"
+                            else -> "Выбрать папку игры"
+                        }
+                    )
                 }
 
                 selectedFolder?.let {
@@ -178,44 +192,137 @@ fun RamenWineApp() {
                     scanResult != null -> ScanResultCard(
                         result = scanResult!!,
                         selectedExecutable = selectedExecutable,
-                        onSelectExecutable = { selectedExecutable = it }
+                        onSelectExecutable = {
+                            selectedExecutable = it
+                            importError = null
+                            importNotice = null
+                        }
                     )
                 }
 
                 selectedExecutable?.let { candidate ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
-                            Text(candidate.displayName)
-                            Text(
-                                text = "Архитектура: " +
-                                    (candidate.peInspection?.architecture?.displayName
-                                        ?: "не определена"),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                "Следующий этап — подключение Wine runtime и реального запуска. " +
-                                    "Сейчас файл только выбран, он не исполнялся.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
+                    SelectedExecutableCard(
+                        candidate = candidate,
+                        importing = importing,
+                        onImport = ::startImport
+                    )
+                }
+
+                if (importing) {
+                    Text(
+                        "Копирую игру в приватное хранилище приложения. Не закрывай RamenWine.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+
+                importError?.let {
+                    Text(
+                        text = "Ошибка импорта: " + it,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                importNotice?.let {
+                    Text(it, color = MaterialTheme.colorScheme.secondary)
+                }
+
+                if (importedGames.isNotEmpty()) {
+                    LibraryCard(games = importedGames)
                 }
 
                 Text(
-                    text = "Сканер только читает ограниченные заголовки EXE. " +
-                        "Он не запускает игровые файлы и не устанавливает Wine.",
+                    text = "Текущий этап не запускает EXE. Сначала игра безопасно импортируется, " +
+                        "затем подключим и проверим Windows runtime.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuntimeStatusCard(
+    runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
+    nativeDiagnostic: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Runtime environment", fontWeight = FontWeight.Bold)
+            when (runtimeInspection.state) {
+                RuntimeState.NOT_INSTALLED -> Text("Linux/Wine runtime ещё не установлен.")
+                RuntimeState.INCOMPLETE -> {
+                    Text("Runtime directory существует, но он неполный.")
+                    runtimeInspection.missingItems.forEach { Text("• " + it) }
+                }
+                RuntimeState.FILES_PRESENT -> Text(
+                    "Ожидаемые файлы присутствуют. Реальная проверка запуска ещё требуется."
+                )
+            }
+            Text(
+                text = "Ожидаемый путь: " +
+                    runtimeInspection.runtimeRoot.relativeTo(runtimeInspection.runtimeRoot.parentFile),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider()
+            Text("Native bridge", fontWeight = FontWeight.Bold)
+            Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun SelectedExecutableCard(
+    candidate: ExecutableCandidate,
+    importing: Boolean,
+    onImport: () -> Unit
+) {
+    val isValidPe = candidate.peInspection?.isValidPe == true
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
+            Text(candidate.relativePath)
+            Text(
+                text = "Архитектура: " +
+                    (candidate.peInspection?.architecture?.displayName ?: "не определена"),
+                style = MaterialTheme.typography.bodySmall
+            )
+            candidate.peInspection?.diagnostic?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall)
+            }
+
+            if (!isValidPe) {
+                Text(
+                    "Заголовок PE не прошёл проверку. Выбери другой EXE.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Button(
+                onClick = onImport,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = isValidPe && !importing
+            ) {
+                Text(if (importing) "Импортирование…" else "Импортировать игру")
             }
         }
     }
@@ -274,7 +381,7 @@ private fun ExecutableRow(
     onSelect: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(candidate.displayName, fontWeight = FontWeight.Medium)
+        Text(candidate.relativePath, fontWeight = FontWeight.Medium)
         val architecture = candidate.peInspection?.architecture?.displayName
             ?: "Заголовок PE не распознан"
         Text(
@@ -296,9 +403,38 @@ private fun ExecutableRow(
             onClick = onSelect,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isSelected) "Выбран для запуска" else "Выбрать этот EXE")
+            Text(if (isSelected) "Выбран" else "Выбрать этот EXE")
         }
         HorizontalDivider()
+    }
+}
+
+@Composable
+private fun LibraryCard(games: List<ImportedGame>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Библиотека", fontWeight = FontWeight.Bold)
+            games.forEach { game ->
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(game.title, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = game.executableRelativePath + " · " + game.architecture,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = formatFileSize(game.totalBytes) +
+                            " · runtime пока не подключён",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                HorizontalDivider()
+            }
+        }
     }
 }
 
