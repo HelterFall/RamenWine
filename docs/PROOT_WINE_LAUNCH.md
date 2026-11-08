@@ -81,9 +81,9 @@ PRoot's documented CLI supports the rootfs, bind and initial-working-directory o
 
 ## Display preconditions
 
-The command builder refuses to construct a launch if the Wayland socket is absent. This prevents a misleading process start when there is no compositor to display the game's window.
+The command builder refuses to construct a launch if the Wayland socket is absent or is not an actual Unix-domain socket (checked with Android lstat). This prevents a regular file or stale placeholder from masquerading as a compositor endpoint.
 
-The intended display endpoint is an Android-host Unix socket supplied by a future RamenWine display backend. No compositor is currently integrated or selected. Piperella is documented separately as a GPL-3.0 research reference, not as an approved dependency. The builder currently checks that the configured socket path exists and is short enough for Android AF_UNIX; it does not itself create or verify a live compositor socket. Therefore this launcher is not connected to a user-facing Play button.
+The intended display endpoint is an Android-host Unix socket supplied by a future RamenWine display backend. No compositor is currently integrated or selected. Wawona is documented as an MIT technical reference, but its Android target is an application rather than a reusable AAR. The GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. Therefore this launcher is still not connected to a user-facing Play button.
 
 Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
 
@@ -96,7 +96,7 @@ The process supervisor:
 - waits for the output stream to reach EOF before delivering the exit callback, including the manual-stop path;
 - supports graceful termination followed by forced termination and reports an error if PRoot remains alive.
 
-JVM regression tests exercise merged output, natural exit and a termination trap that writes a final diagnostic line. The implementation has not yet been validated against Wine child-process trees on a physical Android device. A production session manager must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
+JVM regression tests exercise merged output, natural exit and a termination trap that writes a final diagnostic line. The GameLaunchCoordinator closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
 
 ## Validation gates before enabling Play
 

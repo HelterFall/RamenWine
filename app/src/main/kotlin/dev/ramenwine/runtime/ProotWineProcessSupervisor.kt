@@ -75,8 +75,13 @@ class ProotWineProcessSession internal constructor(
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
-                        withContext(callbackDispatcher) {
-                            onOutput(line)
+                        try {
+                            withContext(callbackDispatcher) {
+                                onOutput(line)
+                            }
+                        } catch (_: Exception) {
+                            // A UI/log consumer failure must not stop draining
+                            // the child pipe and potentially block the process.
                         }
                     }
                 }
