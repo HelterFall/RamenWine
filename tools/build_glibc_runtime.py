@@ -62,6 +62,14 @@ RUNTIME_PACKAGES = (
     "libc6:arm64",
     "libgcc-s1:arm64",
     "libstdc++6:arm64",
+    # Box64's pinned build wraps Wayland and XKB APIs. These ARM64 libraries
+    # are the native targets for those wrappers; amd64 copies remain available
+    # to the Wine Unix driver and as Box64's emulation fallback.
+    "libwayland-client0:arm64",
+    "libwayland-cursor0:arm64",
+    "libwayland-egl1:arm64",
+    "libxkbcommon0:arm64",
+    "libxkbregistry0:arm64",
     "zlib1g:arm64",
     "zlib1g:amd64",
     "libc6:amd64",
