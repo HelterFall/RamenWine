@@ -366,6 +366,25 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink|escapes"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
+    def test_rejects_unresolved_dependency_in_non_core_box64_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            optional_library = (
+                backend / "rootfs" / "usr" / "lib" / "box64-x86_64-linux-gnu"
+                / "liboptional.so.1"
+            )
+            self._write_elf64_dynamic(
+                optional_library,
+                package_runtime.ELF_MACHINE_X86_64,
+                needed=("libmissing-optional-api.so.1",),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "unresolved ELF dependency.*libmissing-optional-api.so.1",
+            ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
     def test_rejects_missing_wine_preloader(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
