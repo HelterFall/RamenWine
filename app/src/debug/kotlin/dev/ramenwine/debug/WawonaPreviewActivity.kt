@@ -232,14 +232,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                 statusView.text = "Ошибка остановки SHM-клиента: " +
                     (it.message ?: it.javaClass.simpleName)
             }
-        statusView.text = "Остановка SHM-клиента…"
-        beginSmokePolling(smoke, stopping = true)
+        statusView.text =
+            "Stop request отправлен. Upstream не предоставляет join для SHM-потока."
     }
 
-    private fun beginSmokePolling(
-        smoke: WawonaSmokeTestSession,
-        stopping: Boolean = false
-    ) {
+    private fun beginSmokePolling(smoke: WawonaSmokeTestSession) {
         pollRunnable?.let(mainHandler::removeCallbacks)
         pollStartedAt = SystemClock.uptimeMillis()
         val poll = object : Runnable {
@@ -247,22 +244,17 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                 val running = runCatching { smoke.isWestonSimpleShmRunning() }
                     .getOrDefault(false)
                 if (running) {
-                    statusView.text = if (stopping) {
-                        "Ожидание остановки SHM-клиента…"
-                    } else {
-                        "weston-simple-shm активен · проверь цветное SHM-окно"
-                    }
+                    statusView.text =
+                        "weston-simple-shm запущен · проверь цветное SHM-окно"
                     if (SystemClock.uptimeMillis() - pollStartedAt < SMOKE_POLL_LIMIT_MS) {
                         mainHandler.postDelayed(this, SMOKE_POLL_INTERVAL_MS)
-                    } else if (stopping) {
-                        statusView.text =
-                            "SHM-клиент не подтвердил остановку; закрытие compositor продолжится."
                     } else {
                         statusView.text =
-                            "SHM-клиент всё ещё активен. Проверь окно и нажми Stop перед закрытием."
+                            "SHM-клиент всё ещё активен. Нажми Stop перед закрытием."
                     }
                 } else if (displaySession != null) {
-                    statusView.text = "SHM-клиент завершился. Compositor продолжает работать."
+                    statusView.text =
+                        "SHM-клиент завершился естественно. Compositor продолжает работать."
                 }
             }
         }
@@ -309,35 +301,17 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         session: GameDisplaySession,
         onClosed: () -> Unit
     ) {
-        val smoke = session as? WawonaSmokeTestSession
-        if (smoke != null) {
-            runCatching { smoke.stopWestonSimpleShm() }
-        }
-
-        // Upstream exposes an asynchronous detached SHM-client thread. Wait for
-        // its native running flag to clear before destroying the Vulkan surface.
-        val startedAt = SystemClock.uptimeMillis()
-        val finishClose = object : Runnable {
-            override fun run() {
-                val running = smoke?.let {
-                    runCatching { it.isWestonSimpleShmRunning() }.getOrDefault(false)
-                } ?: false
-                if (running && SystemClock.uptimeMillis() - startedAt < SMOKE_STOP_LIMIT_MS) {
-                    mainHandler.postDelayed(this, SMOKE_POLL_INTERVAL_MS)
-                } else {
-                    runCatching {
-                        nativeExecutor.execute {
-                            runCatching { session.close() }
-                            mainHandler.post { onClosed() }
-                        }
-                    }.onFailure {
-                        session.close()
-                        onClosed()
-                    }
-                }
+        // GameDisplaySession.close() requests native SHM stop, applies the
+        // upstream-compatible grace window, then destroys the Surface and core.
+        runCatching {
+            nativeExecutor.execute {
+                runCatching { session.close() }
+                mainHandler.post { onClosed() }
             }
+        }.onFailure {
+            runCatching { session.close() }
+            onClosed()
         }
-        mainHandler.post(finishClose)
     }
 
     override fun onPause() {
@@ -379,6 +353,5 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
     private companion object {
         const val SMOKE_POLL_INTERVAL_MS = 150L
         const val SMOKE_POLL_LIMIT_MS = 30_000L
-        const val SMOKE_STOP_LIMIT_MS = 2_000L
     }
 }
