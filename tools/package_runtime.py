@@ -346,6 +346,24 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
     require_pe_i386(wayland_i386_pe, "Wine 32-bit Wayland PE driver")
 
+    for library_name in (
+        "libwayland-client.so.0",
+        "libwayland-cursor.so.0",
+        "libwayland-egl.so.1",
+        "libxkbcommon.so.0",
+        "libxkbregistry.so.0",
+    ):
+        library = resolve_guest_file(
+            rootfs,
+            "/usr/lib/x86_64-linux-gnu/" + library_name,
+        )
+        require_elf64(
+            library,
+            "Wine Wayland dependency " + library_name,
+            ELF_MACHINE_X86_64,
+        )
+
+
 
 def safe_relative_path(value: str) -> str:
     """Apply the same path constraints as the Android runtime installer."""
