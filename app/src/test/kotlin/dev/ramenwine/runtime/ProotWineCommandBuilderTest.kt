@@ -245,6 +245,64 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsPrefixWaylandRegistryCommandWithoutStartingAnImportedGame() {
+        val fixture = Fixture()
+        try {
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.CONFIGURE_WAYLAND_PREFIX
+                )
+            )
+
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe",
+                command.guestExecutablePath
+            )
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe",
+                    "add",
+                    "HKCU\\Software\\Wine\\Drivers",
+                    "/v",
+                    "Graphics",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    "wayland",
+                    "/f"
+                ),
+                command.arguments.takeLast(12)
+            )
+            assertTrue(command.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
+            assertTrue(command.unsetEnvironment.contains("DISPLAY"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWineRegistryCommandForWaylandPrefixConfiguration() {
+        val fixture = Fixture()
+        try {
+            fixture.wineReg.delete()
+            val error = runCatching {
+                fixture.build(
+                    fixture.request().copy(
+                        operation = ProotWineOperation.CONFIGURE_WAYLAND_PREFIX
+                    )
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine registry command"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsMissingWaylandProbeExecutable() {
         val fixture = Fixture()
         try {
@@ -566,6 +624,10 @@ class ProotWineCommandBuilderTest {
         val wineboot = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+        )
+        val wineReg = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
         )
         val waylandProbeAmd64 = regular(
             rootfs,
