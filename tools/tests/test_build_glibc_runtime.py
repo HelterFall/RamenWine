@@ -61,6 +61,13 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             self.assertIn("APT::Architecture=amd64", options)
             self.assertIn("Dir::Etc::sourceparts=-", options)
 
+    def test_host_packages_include_complete_wayland_build_tools(self) -> None:
+        self.assertIn("libwayland-dev", build_glibc_runtime.HOST_PACKAGES)
+        self.assertIn("libwayland-bin", build_glibc_runtime.HOST_PACKAGES)
+        self.assertIn("libxkbcommon-dev", build_glibc_runtime.HOST_PACKAGES)
+        self.assertIn("libxkbregistry-dev", build_glibc_runtime.HOST_PACKAGES)
+        self.assertIn("wayland-scanner", build_glibc_runtime.REQUIRED_TOOLS)
+
     def test_runtime_package_sources_cover_arm64_and_amd64(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
