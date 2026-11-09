@@ -92,9 +92,11 @@ Upstream separates Vulkan surface cleanup from Rust compositor shutdown. RamenWi
 1. Start the Rust Wayland core and create its socket.
 2. Verify the socket is a real AF_UNIX socket.
 3. Attach the Android `Surface` to the upstream Vulkan renderer.
-4. On close, call `nativeDestroySurface(surface)`.
-5. Then call `nativeShutdown()` to stop/free the Rust core.
-6. Release the process-wide lease.
+4. Synchronize the initial logical output size with `nativeSyncOutputSize(width, height)`.
+5. Apply the Wawona clean-install graphics defaults (system Vulkan WSI, ANGLE, automatic compositor backend).
+6. On close, call `nativeDestroySurface(surface)`.
+7. Then call `nativeShutdown()` to stop/free the Rust core.
+8. Release the process-wide lease.
 
 Resize calls upstream `nativeResizeSurface` and then synchronizes the logical output size. The RamenWine session close is idempotent; a second start remains blocked until the first session releases its lease.
 
@@ -102,7 +104,9 @@ Resize calls upstream `nativeResizeSurface` and then synchronizes the logical ou
 
 Upstream derives `XDG_RUNTIME_DIR` as `<cacheDir>/wawona-runtime`. Its current JNI contains a fallback to `/data/local/tmp/wawona-runtime` when the path plus its socket-name reserve would exceed `sockaddr_un.sun_path`.
 
-RamenWine must never accept that fallback. The backend:
+Wawona also documents that a stale `wayland-0.lock` or `instance.lock` can leave a socket path present while every client connection is refused. Before starting the core, RamenWine removes those two lock paths only when `lstat` proves each is a regular file owned by the app UID. It refuses symlinks, sockets, directories or files owned by another UID; the live Wayland socket is separately checked and cleaned only as an app-owned socket.
+
+RamenWine must never accept the `/data/local/tmp` fallback. The backend:
 
 - passes canonical app-private `filesDir` and `cacheDir` paths to JNI;
 - checks the runtime directory resolves directly under the app cache directory;
