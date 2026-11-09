@@ -5,24 +5,26 @@
 
 ## Decision
 
-Keep the backend interface, but do not build several runtimes in parallel. The first end-to-end launch target is **glibc Linux rootfs + PRoot + Box64 + Wine 11 WoW64 with the Wayland driver**. This matches the command builder already in the app and lets Wine connect to the Wawona Wayland socket. Bionic-native Wine remains a later experiment only after the first visual novel launches.
+Keep the backend interface, but do not build several runtimes in parallel. The first end-to-end launch target is **an ARM64 Linux/glibc rootfs + an Android/Bionic PRoot host + ARM64 Linux Box64 + x86-64 glibc Wine 11 WoW64 with the Wayland driver**. The ARM64 rootfs contains both the ARM64 loader for Box64 and the x86-64 loader/library payload for Wine; this is a multi-ABI guest, not an x86-64-only rootfs. Wine connects to the Wawona Wayland socket. Bionic-native Wine remains a later experiment only after the first visual novel launches.
 
 The Bionic path is an experiment, not yet the default production runtime. Current public ARM64EC Proton/Wine packages for Android are explicitly marked as testing builds and may be unstable. The fallback must remain available until a device/game compatibility corpus shows which path is more reliable.
 
 ## Why this first path
 
-The PRoot route matches the launch command and Wine-prefix code already present in RamenWine. It can keep Wine and its x86-64 Linux dependencies inside an isolated rootfs while the Android app owns the PRoot host process and the Wayland socket.
+The PRoot route matches the launch command and Wine-prefix code already present in RamenWine. The guest is a normal ARM64 glibc userspace so its native Box64 executable can run there; the x86-64 Wine loader and libraries are added as a second guest ABI. The Android app separately owns the Android/Bionic PRoot host process and the Wayland socket.
 
 Advantages:
 - Established Android deployment model.
-- Keeps glibc-oriented Wine binaries and their dependencies together in a rootfs.
+- Keeps the Android/Bionic PRoot host separate from the ARM64 Linux/glibc guest.
+- Runs Box64 as an ARM64 Linux/glibc guest process, with x86-64 Wine and its dependencies packaged alongside as a second guest ABI.
 - Allows per-game Wine prefixes and a conventional Linux userspace.
 - Does not require Android root access.
 - Can use Wine's Wayland driver to connect to the Wawona socket without introducing X11/Xwayland in the first milestone.
 
 Costs and limitations:
 - PRoot uses ptrace to intercept guest syscalls and rewrite paths; this adds overhead.
-- The x86-64 Wine loader and libraries must be complete and compatible with the selected Box64 build.
+- The ARM64 glibc rootfs needs a second x86-64 glibc loader/library closure for Wine; both ABI trees must be pinned and validated.
+- Box64 must be built for ARM64 Linux/glibc inside an ARM64 PRoot/chroot environment. Its native Termux/Bionic build is explicitly marked experimental by upstream and documented as not running Linux binaries.
 - Android GPU/audio integration still needs host-side bridges and compatible libraries.
 - A rootfs is larger than a Bionic-native Wine package.
 
@@ -47,7 +49,7 @@ The app recognizes backend package IDs:
 |---|---|
 | `bionic-arm64ec-fex` | Bionic-native ARM64EC Wine + FEX execution |
 | `bionic-x64-box64` | Bionic-compatible x86-64 Wine + Box64 |
-| `glibc-proot-box64` | glibc rootfs + PRoot + Box64 + Wine |
+| `glibc-proot-box64` | ARM64 glibc rootfs + Android/Bionic PRoot host + ARM64 Linux Box64 + x86-64 Wine |
 
 The backend inventory is stored under:
 
@@ -135,7 +137,7 @@ Not implemented yet:
 
 ## Rule
 
-The current target is one glibc + PRoot + Box64 + Wine Wayland path. Bionic/FEX remains deferred. Reconsider the backend only if the selected path is blocked by a demonstrated technical limitation or a measured incompatibility with the chosen visual-novel fixture.
+The current target is one ARM64 glibc rootfs + Android PRoot + ARM64 Linux Box64 + x86-64 Wine Wayland path. Bionic/FEX remains deferred. Reconsider the backend only if the selected path is blocked by a demonstrated technical limitation or a measured incompatibility with the chosen visual-novel fixture.
 
 
 ## Offline runtime package format
@@ -148,10 +150,16 @@ Expected archive layout:
 ```text
 runtime-manifest.json
 payload/
-  bin/
-    wine
-  lib/
-    ...
+  host/
+    bin/proot
+    lib/...
+  rootfs/
+    lib/ld-linux-aarch64.so.1
+    lib64/ld-linux-x86-64.so.2
+    usr/bin/box64
+    usr/bin/wine
+    usr/bin/wineboot
+    usr/lib/x86_64-linux-gnu/wine/...
 ```
 
 Example manifest:
@@ -169,6 +177,16 @@ Example manifest:
       "executable": true
     },
     {
+      "path": "rootfs/lib/ld-linux-aarch64.so.1",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
+      "path": "rootfs/lib64/ld-linux-x86-64.so.2",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
       "path": "rootfs/usr/bin/box64",
       "sha256": "REPLACE_WITH_64_HEX_SHA256",
       "executable": true
@@ -177,6 +195,16 @@ Example manifest:
       "path": "rootfs/usr/bin/wine",
       "sha256": "REPLACE_WITH_64_HEX_SHA256",
       "executable": true
+    },
+    {
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": false
+    },
+    {
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": false
     }
   ],
   "symlinks": [
