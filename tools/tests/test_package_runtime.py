@@ -69,11 +69,11 @@ class RuntimePackagerTests(unittest.TestCase):
     ) -> Path:
         """Write a tiny ELF64 fixture with PT_DYNAMIC and an optional PT_INTERP."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        strings = bytearray(b"\\x00")
+        strings = bytearray(b"\x00")
 
         def add_string(value: str) -> int:
             offset = len(strings)
-            strings.extend(value.encode("utf-8") + b"\\x00")
+            strings.extend(value.encode("utf-8") + b"\x00")
             return offset
 
         dynamic_tags: list[tuple[int, int]] = [
@@ -109,13 +109,13 @@ class RuntimePackagerTests(unittest.TestCase):
         )
         string_table_offset = dynamic_offset + len(dynamic_data)
         interpreter_bytes = (
-            interpreter.encode("ascii") + b"\\x00"
+            interpreter.encode("ascii") + b"\x00"
             if interpreter is not None else b""
         )
         interpreter_offset = string_table_offset + len(strings)
         file_size = interpreter_offset + len(interpreter_bytes)
 
-        ident = b"\\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
+        ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
         header = struct.pack(
             "<16sHHIQQQIHHHHHH",
             ident, 3, machine, 1, 0, 64, 0, 0, 64, 56,
