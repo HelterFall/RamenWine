@@ -4,6 +4,8 @@ import dev.ramenwine.display.AndroidWaylandSocketValidator
 import dev.ramenwine.display.WaylandSocketValidator
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -61,22 +63,40 @@ internal class WinePrefixInitializer(
                         "It will not be used or overwritten automatically."
                 )
             }
-
-            val initializationCommand = withContext(Dispatchers.IO) {
-                ProotWineCommandBuilder.build(
-                    request.copy(operation = ProotWineOperation.INITIALIZE_PREFIX),
-                    socketValidator
-                )
+            if (prefixDirectory.exists()) {
+                if (!prefixDirectory.isDirectory || prefixDirectory.list()?.isEmpty() != true) {
+                    throw IOException(
+                        "The Wine prefix contains files but has no complete registry. " +
+                            "It will not be overwritten automatically."
+                    )
+                }
             }
 
-            val exit = CompletableDeferred<Int>()
-            val processSession = processSupervisor.start(
-                command = initializationCommand,
-                onOutput = { line -> onOutput("[wineboot] " + line) },
-                onExit = { exitCode -> exit.complete(exitCode) }
-            )
+            // Run wineboot in a fresh per-attempt directory. Only promote the
+            // directory after both registry files and the win64 marker exist.
+            // A failed/aborted first boot therefore cannot poison future retries.
+            val stagingPrefixId = UUID.randomUUID().toString()
+            val stagingPrefixDirectory = createStagingPrefixDirectory(stagingPrefixId)
+            var processSession: ProotWineProcessSession? = null
 
             try {
+                val initializationCommand = withContext(Dispatchers.IO) {
+                    ProotWineCommandBuilder.build(
+                        request.copy(
+                            operation = ProotWineOperation.INITIALIZE_PREFIX,
+                            prefixId = stagingPrefixId
+                        ),
+                        socketValidator
+                    )
+                }
+
+                val exit = CompletableDeferred<Int>()
+                processSession = processSupervisor.start(
+                    command = initializationCommand,
+                    onOutput = { line -> onOutput("[wineboot] " + line) },
+                    onExit = { exitCode -> exit.complete(exitCode) }
+                )
+
                 val exitCode = withTimeout(initializationTimeoutMillis) {
                     exit.await()
                 }
@@ -85,37 +105,101 @@ internal class WinePrefixInitializer(
                         "Wine prefix initialization failed with exit code $exitCode."
                     )
                 }
-                if (!isInitialized(prefixDirectory)) {
+                if (!isInitialized(stagingPrefixDirectory)) {
                     throw IOException(
                         "wineboot exited successfully but did not create a complete 64-bit " +
                             "Wine prefix (system.reg, user.reg and #arch=win64)."
                     )
                 }
+
+                promoteStagedPrefix(stagingPrefixDirectory, prefixDirectory)
             } catch (error: Throwable) {
-                // Do not leave an initialization process running after timeout,
-                // cancellation, or a failed postcondition.
+                // Stop first, then remove only the unique staging directory
+                // created by this attempt. Never delete or mutate an old prefix.
                 withContext(NonCancellable) {
-                    if (processSession.isAlive()) {
-                        runCatching { processSession.stop() }
+                    processSession?.let { session ->
+                        if (session.isAlive()) {
+                            runCatching { session.stop() }
+                        }
                     }
+                    stagingPrefixDirectory.deleteRecursively()
                 }
                 throw error
             }
         }
     }
 
-    private fun resolvePrefixDirectory(gameId: String): File {
-        if (!GAME_ID_PATTERN.matches(gameId)) {
+    private fun resolvePrefixRoot(createIfMissing: Boolean = false): File {
+        val filesRoot = filesDirectory.canonicalFile
+        val prefixRootPath = File(filesRoot, "prefixes")
+        if (Files.isSymbolicLink(prefixRootPath.toPath())) {
+            throw IOException("Wine prefix root must not be a symbolic link.")
+        }
+        if (!prefixRootPath.exists() && createIfMissing && !prefixRootPath.mkdirs()) {
+            throw IOException("Could not create Wine prefix root.")
+        }
+        val prefixRoot = prefixRootPath.canonicalFile
+        requireContained(filesRoot, prefixRoot, "Wine prefix root")
+        if (prefixRoot.exists() && !prefixRoot.isDirectory) {
+            throw IOException("Wine prefix root is not a directory.")
+        }
+        return prefixRoot
+    }
+
+    private fun resolvePrefixDirectory(prefixId: String): File {
+        if (!GAME_ID_PATTERN.matches(prefixId)) {
             throw IOException("Invalid game ID for Wine prefix.")
         }
 
-        val filesRoot = filesDirectory.canonicalFile
-        val prefixRoot = File(filesRoot, "prefixes").canonicalFile
-        requireContained(filesRoot, prefixRoot, "Wine prefix root")
-
-        val prefixDirectory = File(prefixRoot, gameId).canonicalFile
+        val prefixRoot = resolvePrefixRoot()
+        val prefixPath = File(prefixRoot, prefixId)
+        if (Files.isSymbolicLink(prefixPath.toPath())) {
+            throw IOException("Wine prefix directory must not be a symbolic link.")
+        }
+        val prefixDirectory = prefixPath.canonicalFile
         requireContained(prefixRoot, prefixDirectory, "Wine prefix directory")
         return prefixDirectory
+    }
+
+    private fun createStagingPrefixDirectory(prefixId: String): File {
+        val prefixRoot = resolvePrefixRoot(createIfMissing = true)
+        val prefixPath = File(prefixRoot, prefixId)
+        if (Files.isSymbolicLink(prefixPath.toPath()) || prefixPath.exists()) {
+            throw IOException("Wine prefix staging directory already exists or is unsafe.")
+        }
+        if (!prefixPath.mkdir()) {
+            throw IOException("Could not create Wine prefix staging directory.")
+        }
+        val stagingDirectory = prefixPath.canonicalFile
+        requireContained(prefixRoot, stagingDirectory, "Wine prefix staging directory")
+        return stagingDirectory
+    }
+
+    private fun promoteStagedPrefix(stagingDirectory: File, destination: File) {
+        val prefixRoot = resolvePrefixRoot()
+        val canonicalStaging = stagingDirectory.canonicalFile
+        val canonicalDestination = destination.canonicalFile
+        requireContained(prefixRoot, canonicalStaging, "Wine prefix staging directory")
+        requireContained(prefixRoot, canonicalDestination, "Wine prefix directory")
+
+        if (canonicalDestination.exists()) {
+            if (
+                !canonicalDestination.isDirectory ||
+                canonicalDestination.list()?.isEmpty() != true
+            ) {
+                throw IOException(
+                    "The destination Wine prefix changed during initialization; " +
+                        "it will not be overwritten."
+                )
+            }
+            if (!canonicalDestination.delete()) {
+                throw IOException("Could not replace the empty Wine prefix directory.")
+            }
+        }
+
+        if (!canonicalStaging.renameTo(canonicalDestination)) {
+            throw IOException("Could not activate the initialized Wine prefix.")
+        }
     }
 
     private fun requireContained(parent: File, child: File, label: String) {

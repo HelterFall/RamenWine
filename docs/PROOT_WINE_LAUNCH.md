@@ -141,13 +141,13 @@ PRoot's documented CLI supports the rootfs, bind and initial-working-directory o
 
 ## Wine prefix initialization
 
-Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither \`system.reg\` nor \`user.reg\` exists, it builds a separate PRoot command:
+Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither `system.reg` nor `user.reg` exists, the initializer creates a fresh UUID-named staging prefix and builds a separate PRoot command whose `WINEPREFIX` points at that staging directory:
 
-\`\`\`text
+```text
 /usr/bin/env -i <guest environment assignments> /usr/bin/box64 /usr/bin/wine /usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe --init
-\`\`\`
+```
 
-The initializer serializes concurrent requests, tags output with `[wineboot]`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both `system.reg` and `user.reg` exist and `system.reg` contains `#arch=win64`. A prefix marked `#arch=win32` is rejected: Wine 11's new WoW64 mode cannot use a pure 32-bit prefix. If either registry is missing, or the architecture marker is absent or incorrect, the prefix fails closed rather than being overwritten automatically.
+The initializer serializes concurrent requests, tags output with `[wineboot]`, and waits up to five minutes. A non-zero exit, timeout, cancellation or failed postcondition stops the bootstrap process and deletes only that attempt's staging directory. The existing per-game prefix is never partially overwritten. A successful exit is accepted only when both `system.reg` and `user.reg` exist in the staging directory and `system.reg` contains `#arch=win64`; only then is the staging directory renamed to the persistent `prefixes/<game-id>` path. A prefix marked `#arch=win32` is rejected: Wine 11's new WoW64 mode cannot use a pure 32-bit prefix. A pre-existing incomplete or non-empty prefix without both registries is preserved and rejected rather than silently reset.
 
 Wineboot is a PE program (`MODULE = wineboot.exe` in Wine 11), not a Linux ELF launcher. RamenWine places it under `x86_64-windows` and passes its full path to `/usr/bin/wine`, which loads it with `--init`. The initializer accepts success only after both registry files exist.
 

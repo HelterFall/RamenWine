@@ -139,6 +139,37 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun usesSeparateWinePrefixIdDuringPrefixInitialization() {
+        val fixture = Fixture()
+        try {
+            val stagingPrefixId = "fedcba98-7654-3210-fedc-ba9876543210"
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.INITIALIZE_PREFIX,
+                    prefixId = stagingPrefixId
+                )
+            )
+            val guestPrefix = "/prefixes/" + stagingPrefixId
+
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(
+                command.arguments.drop(envIndex + 2)
+                    .contains("WINEPREFIX=" + guestPrefix)
+            )
+            assertTrue(
+                command.arguments.contains(
+                    "--bind=" + File(fixture.filesDirectory, "prefixes/$stagingPrefixId")
+                        .canonicalPath + ":" + guestPrefix
+                )
+            )
+            assertTrue(File(fixture.rootfs, "prefixes/$stagingPrefixId").isDirectory)
+            assertFalse(File(fixture.rootfs, "prefixes/" + fixture.gameId).exists())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsMissingWinebootExecutableForPrefixInitialization() {
         val fixture = Fixture()
         try {

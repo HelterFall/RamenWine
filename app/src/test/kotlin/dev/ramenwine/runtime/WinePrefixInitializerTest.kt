@@ -57,7 +57,7 @@ class WinePrefixInitializerTest {
 
             assertTrue(error is IOException)
             assertTrue(error?.message.orEmpty().contains("exit code 7"))
-            assertFalse(File(fixture.prefixDirectory, "system.reg").exists())
+            assertFalse(fixture.prefixDirectory.exists())
         } finally {
             fixture.close()
         }
@@ -97,8 +97,34 @@ class WinePrefixInitializerTest {
 
             assertTrue(error is IOException)
             assertTrue(error?.message.orEmpty().contains("#arch=win64"))
+            assertFalse(fixture.prefixDirectory.exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun retriesWinebootAfterFailedStagingAttempt() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix-win32")
+        try {
+            val initializer = fixture.initializer()
+            val firstError = runCatching {
+                initializer.ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(firstError is IOException)
+            assertFalse(fixture.prefixDirectory.exists())
+
+            fixture.useFixtureScript("create-prefix")
+            initializer.ensureInitialized(fixture.request()) {}
+
             assertTrue(File(fixture.prefixDirectory, "system.reg").isFile)
             assertTrue(File(fixture.prefixDirectory, "user.reg").isFile)
+            assertTrue(
+                File(fixture.prefixDirectory, "system.reg")
+                    .readText()
+                    .contains("#arch=win64")
+            )
         } finally {
             fixture.close()
         }
@@ -199,6 +225,11 @@ class WinePrefixInitializerTest {
             initializationTimeoutMillis = 5_000L
         )
 
+        fun useFixtureScript(mode: String) {
+            proot.writeText(makeProotScript(mode))
+            check(proot.setExecutable(true))
+        }
+
         override fun close() {
             root.deleteRecursively()
         }
@@ -232,12 +263,16 @@ class WinePrefixInitializerTest {
                 """.trimIndent() + "\n"
             }
 
-            val escapedPrefix = prefixDirectory.absolutePath
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
             return shebang + """
+                import sys
                 from pathlib import Path
-                prefix = Path('$escapedPrefix')
+                prefix_binding = next(
+                    argument.split("=", 1)[1]
+                    for argument in sys.argv
+                    if argument.startswith("--bind=") and ":/prefixes/" in argument
+                )
+                host_prefix = prefix_binding.rsplit(":/prefixes/", 1)[0]
+                prefix = Path(host_prefix)
                 prefix.mkdir(parents=True, exist_ok=True)
                 counter = prefix / "wineboot-count"
                 count = int(counter.read_text() if counter.exists() else "0") + 1

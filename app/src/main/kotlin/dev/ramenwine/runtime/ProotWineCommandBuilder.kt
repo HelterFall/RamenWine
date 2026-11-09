@@ -20,7 +20,8 @@ data class ProotWineLaunchRequest(
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
     val locale: String = "C.UTF-8",
-    val operation: ProotWineOperation = ProotWineOperation.RUN_GAME
+    val operation: ProotWineOperation = ProotWineOperation.RUN_GAME,
+    val prefixId: String = game.id
 )
 
 data class ProotWineCommand(
@@ -47,6 +48,7 @@ object ProotWineCommandBuilder {
     ): ProotWineCommand {
         require(request.hostUid >= 0) { "Invalid Android UID." }
         require(ID_PATTERN.matches(request.game.id)) { "Invalid imported game ID." }
+        require(ID_PATTERN.matches(request.prefixId)) { "Invalid Wine prefix ID." }
         require(request.game.relativeDirectory == "games/" + request.game.id) {
             "Imported game directory does not match its ID."
         }
@@ -165,7 +167,7 @@ object ProotWineCommandBuilder {
         val prefixDirectory = ensurePrivateDirectory(
             filesRoot,
             File(filesRoot, "prefixes"),
-            request.game.id,
+            request.prefixId,
             "Wine prefix"
         )
         val homeDirectory = ensurePrivateDirectory(
@@ -217,7 +219,7 @@ object ProotWineCommandBuilder {
         }
 
         val guestGameDirectory = "/games/" + request.game.id
-        val guestPrefixDirectory = "/prefixes/" + request.game.id
+        val guestPrefixDirectory = "/prefixes/" + request.prefixId
         val guestHomeDirectory = "/home/ramen"
         val guestTempDirectory = "/tmp"
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
