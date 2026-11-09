@@ -216,6 +216,12 @@ class WawonaSurfaceView @JvmOverloads constructor(
                     }
                     val pressed = event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS
                     dispatchNative {
+                        // nativeKeyboardFocus targets Wawona's last hit-tested
+                        // Wayland window. Mouse hover/enter updates that target;
+                        // focus it on a real primary click before delivering it.
+                        if (pressed && button == BTN_LEFT) {
+                            WawonaNative.nativeKeyboardFocus(true)
+                        }
                         WawonaNative.nativePointerButton(
                             button,
                             if (pressed) 1 else 0,
@@ -260,6 +266,10 @@ class WawonaSurfaceView @JvmOverloads constructor(
                             command.y,
                             command.timestamp
                         )
+                    }
+
+                    is TouchMouseInputMapper.Command.KeyboardFocus -> {
+                        WawonaNative.nativeKeyboardFocus(command.focused)
                     }
 
                     is TouchMouseInputMapper.Command.PointerButton -> {
