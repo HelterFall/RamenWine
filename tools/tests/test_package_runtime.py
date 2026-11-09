@@ -276,6 +276,17 @@ class RuntimePackagerTests(unittest.TestCase):
                 rootfs / "usr" / "lib" / "x86_64-linux-gnu" / library_name,
                 package_runtime.ELF_MACHINE_X86_64,
             )
+        for library_name in (
+            "libwayland-client.so.0",
+            "libwayland-cursor.so.0",
+            "libwayland-egl.so.1",
+            "libxkbcommon.so.0",
+            "libxkbregistry.so.0",
+        ):
+            self._write_elf64(
+                rootfs / "usr" / "lib" / "aarch64-linux-gnu" / library_name,
+                package_runtime.ELF_MACHINE_AARCH64,
+            )
         wine = self._write_elf64(
             rootfs / "usr" / "bin" / "wine",
             package_runtime.ELF_MACHINE_X86_64,
@@ -382,6 +393,52 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "unresolved ELF dependency.*libmissing-optional-api.so.1",
+            ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_missing_arm64_wayland_wrapper_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            missing = (
+                backend / "rootfs" / "usr" / "lib" / "aarch64-linux-gnu"
+                / "libwayland-client.so.0"
+            )
+            missing.unlink()
+
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_arm64_xkb_wrapper_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            library = (
+                backend / "rootfs" / "usr" / "lib" / "aarch64-linux-gnu"
+                / "libxkbcommon.so.0"
+            )
+            self._write_elf64(
+                library,
+                package_runtime.ELF_MACHINE_X86_64,
+            )
+
+            with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_unresolved_dependency_in_arm64_wayland_wrapper_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            library = (
+                backend / "rootfs" / "usr" / "lib" / "aarch64-linux-gnu"
+                / "libwayland-client.so.0"
+            )
+            self._write_elf64_dynamic(
+                library,
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libmissing-wayland-native.so.0",),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "unresolved ELF dependency.*libmissing-wayland-native.so.0",
             ):
                 package_runtime.validate_glibc_proot_box64(backend)
 
