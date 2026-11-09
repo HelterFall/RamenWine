@@ -94,6 +94,30 @@ ELF Header:
                 "libwawona.so",
             )
 
+
+    def test_accepts_all_jni_exports_required_by_the_kotlin_adapter(self) -> None:
+        output = "\\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(
+                package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS,
+                start=1,
+            )
+        )
+        package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
+
+    def test_rejects_missing_wawona_jni_export_before_packaging(self) -> None:
+        output = (
+            "  1: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            + package_wawona_apk.WAWONA_JNI_CLASS_PREFIX
+            + "nativeInit\\n"
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing required Wawona JNI exports: nativeApplySettings",
+        ):
+            package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
+
     def test_parses_dt_needed_and_soname(self) -> None:
         output = """
  0x0000000000000001 (NEEDED) Shared library: [libwayland-server.so]
@@ -308,6 +332,35 @@ ELF Header:
                     "main",
                     "llvm-readelf",
                 )
+
+
+    def test_readelf_reader_checks_exported_jni_methods_on_core_library(self) -> None:
+        from types import SimpleNamespace
+
+        commands = []
+        methods = package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS
+        dynamic_symbols = "\\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(methods, start=1)
+        )
+        elf_metadata = """
+ELF Header:
+  Class:                             ELF64
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x4000
+"""
+
+        def fake_readelf(command, **_kwargs):
+            commands.append(command)
+            output = dynamic_symbols if "--dyn-syms" in command else elf_metadata
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        with patch.object(package_wawona_apk.subprocess, "run", side_effect=fake_readelf):
+            reader = package_wawona_apk.make_readelf_reader("llvm-readelf")
+            reader("libwawona.so", b"fixture-elf")
+
+        self.assertTrue(any("--dyn-syms" in command for command in commands))
 
     def test_asset_extraction_preserves_only_allowlisted_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
