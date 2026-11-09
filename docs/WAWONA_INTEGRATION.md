@@ -69,6 +69,42 @@ Run the packager tests without Nix:
 python -m unittest discover -s tools/tests -v
 ```
 
+## Observed artifact for the pinned revision
+
+The Wawona upstream Actions run [`Gate: products` #41941778312](https://github.com/Wawona/Wawona/actions/runs/41941778312) ran on the exact pinned commit `d298ddd25726fec0977285aa5f57181110c966a6`. Its Android-specific child job **Build: Android / Android debug APK** completed successfully, including the upstream Play-safe graphics-bundle verification and artifact upload. The Android emulator ADB runtime smoke child job also completed successfully. The overall multi-platform `Gate: products` run was marked failed because unrelated Linux/macOS/Apple-platform product jobs failed; do not interpret that aggregate result as an Android APK failure.
+
+The published upstream `product-android-apk` artifact (artifact ID `13377766663`) had a ZIP size of 93,193,378 bytes and artifact digest:
+
+```text
+sha256:04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953
+```
+
+The APK inside it was 93,192,914 bytes, with SHA-256:
+
+```text
+60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37
+```
+
+Its `product-manifest.json` records the same upstream revision and Nix store output `/nix/store/z2q69igr3rcnl3vhm32miak4fpiir7qf-wawona-android`.
+
+An independent ELF-header/DT_NEEDED inspection of this real APK found 27 ARM64 shared-object entries. The required roots, recursive dependencies and the two explicit auxiliary roots resolve to 11 libraries (about 83.3 MiB), with no unresolved non-system dependency:
+
+```text
+libEGL_angle.so
+libGLESv2_angle.so
+libanowaw.so
+libvk_swiftshader.so
+libwawona.so
+libwayland-client.so
+libwayland-cursor.so
+libwayland-server.so
+libweston_simple_shm.so
+libxkbcommon.so
+libzstd.so
+```
+
+The other 16 entries are not part of this runtime closure; they include standalone shell, SSH, Niri, Fuzzel, Foot and other desktop/helper binaries. The APK contains 75 XKB asset files, 8 font files, 23 Weston data files and one Vulkan ICD manifest (107 selected files, about 13.4 MiB total). This is the reference closure for future pin updates. It is not evidence that RamenWine itself has rendered the SHM client on a device.
+
 ## Runtime ownership and lifecycle
 
 The adapter is split across:
