@@ -153,6 +153,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
     }
 
     override fun onSurfaceDestroyed(surface: Surface) {
+        if (pendingSurface === surface) {
+            pendingSurface = null
+            pendingWidth = 0
+            pendingHeight = 0
+        }
         releaseDisplay("Android Surface уничтожена")
     }
 
@@ -277,7 +282,7 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                     runCatching {
                         nativeExecutor.execute {
                             runCatching { session.close() }
-                            mainHandler.post(onClosed)
+                            mainHandler.post { onClosed() }
                         }
                     }.onFailure {
                         session.close()
