@@ -72,6 +72,26 @@ object ProotWineCommandBuilder {
         requireContained(backendRoot, rootfs, "Linux rootfs")
         requireDirectory(rootfs, "Linux rootfs")
 
+        // Box64 itself is an ARM64 Android/Bionic executable. The Wine loader
+        // and its Wayland driver are x86-64 Linux files inside the guest rootfs.
+        // Validate both driver halves before launching: the PE .drv is loaded
+        // by Wine, while the Unix .so links against the guest Wayland libraries.
+        runtimeFile(
+            rootfs,
+            GLIBC_LOADER_PATH,
+            "x86-64 glibc loader"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_UNIX_DRIVER_PATH,
+            "Wine Wayland Unix driver"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_PE_DRIVER_PATH,
+            "Wine Wayland PE driver"
+        )
+
         val proot = executableFile(backendRoot, "host/bin/proot")
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
@@ -80,7 +100,7 @@ object ProotWineCommandBuilder {
         executableFile(rootfs, "usr/bin/wine")
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
             // Wine packages expose wineboot as an executable/symlink beside
-            // the unified wine loader.
+            // the unified Wine loader.
             executableFile(rootfs, "usr/bin/wineboot")
         }
 
@@ -198,7 +218,13 @@ object ProotWineCommandBuilder {
             "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
             "TMPDIR" to guestTempDirectory,
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
+            // LD_LIBRARY_PATH is for the ARM64/Bionic PRoot + Box64 host process.
             "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
+            // BOX64_LD_LIBRARY_PATH is separate: it searches x86-64 ELF libraries
+            // inside the guest rootfs (glibc, Wayland and Wine Unix libraries).
+            "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
+            "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
+            "WINEARCH" to "win64",
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/usr/local/bin:/usr/bin:/bin",
@@ -260,6 +286,17 @@ object ProotWineCommandBuilder {
         return file
     }
 
+    private fun runtimeFile(root: File, relativePath: String, label: String): File {
+        val normalized = SafeGamePath.normalizeRelativePath(relativePath)
+            ?: throw IOException("Unsafe " + label + " path.")
+        val file = File(root, normalized).canonicalFile
+        requireContained(root, file, label)
+        if (!file.isFile || !file.canRead()) {
+            throw IOException("Required " + label + " is missing or unreadable: " + relativePath)
+        }
+        return file
+    }
+
     private fun ensurePrivateDirectory(
         allowedRoot: File,
         parent: File,
@@ -307,6 +344,17 @@ object ProotWineCommandBuilder {
     }
 
     private const val MAX_UNIX_SOCKET_PATH_BYTES = 108
+    private const val GLIBC_LOADER_PATH = "lib64/ld-linux-x86-64.so.2"
+    private const val WINE_WAYLAND_UNIX_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+    private const val WINE_WAYLAND_PE_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+    private const val GUEST_X64_LIBRARY_PATH =
+        "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
+    private const val GUEST_WINE_DLL_PATH =
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
     private val LOCALE_PATTERN = Regex("[A-Za-z0-9_.@-]{1,64}")
