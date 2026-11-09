@@ -63,48 +63,48 @@ jobs:
               "$artifact_zip" | shasum -a 256 -c -
 
             python - <<'PY'
-            import hashlib
-            import json
-            import shutil
-            import zipfile
-            from pathlib import Path, PurePosixPath
+          import hashlib
+          import json
+          import shutil
+          import zipfile
+          from pathlib import Path, PurePosixPath
 
-            archive_path = Path("dist/wawona-product-android.zip")
-            apk_path = Path("dist/Wawona-upstream.apk")
-            expected_revision = "d298ddd25726fec0977285aa5f57181110c966a6"
-            expected_apk_sha256 = "60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37"
+          archive_path = Path("dist/wawona-product-android.zip")
+          apk_path = Path("dist/Wawona-upstream.apk")
+          expected_revision = "d298ddd25726fec0977285aa5f57181110c966a6"
+          expected_apk_sha256 = "60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37"
 
-            with zipfile.ZipFile(archive_path) as artifact:
-                names = artifact.namelist()
-                apk_members = [
-                    name for name in names
-                    if PurePosixPath(name).name.lower() == "wawona.apk"
-                ]
-                manifest_members = [
-                    name for name in names
-                    if PurePosixPath(name).name == "product-manifest.json"
-                ]
-                if len(apk_members) != 1 or len(manifest_members) != 1:
-                    raise SystemExit(
-                        "Expected exactly one Wawona.apk and product-manifest.json "
-                        "in the upstream artifact."
-                    )
+          with zipfile.ZipFile(archive_path) as artifact:
+              names = artifact.namelist()
+              apk_members = [
+                  name for name in names
+                  if PurePosixPath(name).name.lower() == "wawona.apk"
+              ]
+              manifest_members = [
+                  name for name in names
+                  if PurePosixPath(name).name == "product-manifest.json"
+              ]
+              if len(apk_members) != 1 or len(manifest_members) != 1:
+                  raise SystemExit(
+                      "Expected exactly one Wawona.apk and product-manifest.json "
+                      "in the upstream artifact."
+                  )
 
-                manifest = json.loads(artifact.read(manifest_members[0]))
-                manifest_text = json.dumps(manifest, sort_keys=True)
-                if expected_revision not in manifest_text or "wawona-android" not in manifest_text:
-                    raise SystemExit("Upstream product manifest does not match the pinned Android revision.")
+              manifest = json.loads(artifact.read(manifest_members[0]))
+              manifest_text = json.dumps(manifest, sort_keys=True)
+              if expected_revision not in manifest_text or "wawona-android" not in manifest_text:
+                  raise SystemExit("Upstream product manifest does not match the pinned Android revision.")
 
-                with artifact.open(apk_members[0]) as source, apk_path.open("wb") as target:
-                    shutil.copyfileobj(source, target)
+              with artifact.open(apk_members[0]) as source, apk_path.open("wb") as target:
+                  shutil.copyfileobj(source, target)
 
-            digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
-            if digest != expected_apk_sha256:
-                raise SystemExit(f"Unexpected upstream APK SHA-256: {digest}")
-            if apk_path.stat().st_size != 93192914:
-                raise SystemExit(f"Unexpected upstream APK size: {apk_path.stat().st_size}")
-            print(f"Verified pinned Wawona APK: {apk_path} ({apk_path.stat().st_size} bytes)")
-            PY
+          digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+          if digest != expected_apk_sha256:
+              raise SystemExit(f"Unexpected upstream APK SHA-256: {digest}")
+          if apk_path.stat().st_size != 93192914:
+              raise SystemExit(f"Unexpected upstream APK size: {apk_path.stat().st_size}")
+          print(f"Verified pinned Wawona APK: {apk_path} ({apk_path.stat().st_size} bytes)")
+          PY
             echo "build_from_source=false" >> "$GITHUB_OUTPUT"
           else
             echo "Pinned upstream artifact is unavailable/expired; falling back to the reproducible Nix build."
