@@ -1,7 +1,7 @@
 # RamenWine development status
 
 **Snapshot:** 2026-11-09  
-**Current milestone:** Android host, safe executable inspection, private game import, offline runtime package installation and a pinned Wawona display-backend prototype.
+**Current milestone:** finish a real Windows execution runtime and launch an original visual-novel test executable. The installable APK is a final packaging step only.
 
 ## Implemented
 
@@ -39,7 +39,7 @@
 - A pinned Wawona APK extractor that lazily stages only the JNI roots, recursive ELF dependency closure (including versioned SONAMEs), optional SwiftShader ICD library and selected assets; Python regression tests cover dependency closure, unresolved libraries, asset traversal and unrelated payload exclusion.
 - Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file; its runtime directory must also stay inside app-private cache storage.
 - A process-wide Wine-prefix initialization lock shared across GameLaunchCoordinator instances.
-- Focused GitHub Actions checks: Python runtime-packager tests and JVM unit tests only; APK packaging, artifact upload, lint and NDK/CMake setup are deferred.
+- Focused GitHub Actions checks: Python runtime-packager tests and JVM unit tests only. The Wawona/APK packaging workflow is manual-only and must not run during normal runtime development.
 
 ## Current Android user flow
 
@@ -51,7 +51,7 @@
 6. Save the game title, relative path, EXE path, architecture and import size in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
 
-The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder, process supervisor, WinePrefixInitializer, GameLaunchCoordinator and WawonaDisplayBackend are implemented as a separate runtime layer, but they are not connected to a Play action: the pinned Wawona native payload still has to be built/staged and its renderer must pass a physical-device smoke test. Prefix initialization is tested with a controlled fake PRoot process; a real Wine package/rootfs and physical-device launch remain unverified.
+The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder, process supervisor, WinePrefixInitializer, GameLaunchCoordinator and WawonaDisplayBackend are implemented as a separate runtime layer, but there is no real Wine package/rootfs and no user-facing Play flow yet. Prefix initialization is tested with a controlled fake PRoot process only. The immediate goal is not another APK: it is to produce a launchable runtime package, prove that Wine initializes a prefix, then open an original Win32 GUI test and finally a visual-novel executable.
 
 ## Runtime backend strategy
 
@@ -61,7 +61,7 @@ RamenWine supports three backend package IDs in its runtime inventory:
 - bionic-x64-box64
 - glibc-proot-box64
 
-The Bionic-native path is the performance experiment. The glibc + PRoot path is retained as a compatibility fallback. Public Bionic ARM64EC/Hangover packages are research inputs and need device/game validation before production use.
+For the first end-to-end launch, prioritize the glibc-proot-box64 contract already implemented in ProotWineCommandBuilder: ARM64 Android PRoot host, Box64, an x86-64 glibc Wine 11 WoW64 build, and Wine's Wayland driver connected to the Wawona socket. This is a prototype choice to reach the first visible window, not a claim that it is the final fastest backend. Defer Bionic ARM64EC/FEX and Bionic x64/Box64 until the first launch works; do not branch into multiple runtime backends in parallel.
 
 The offline ZIP format is documented in Android Runtime Backends. The package builder lives in tools/package_runtime.py.
 
@@ -99,19 +99,17 @@ See Android Display Backend Research and [Wawona Integration](WAWONA_INTEGRATION
 
 The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The latest focused branch run, #131 on PR tree `7e674b7` (source changes from `135ac7e`), passed the Python runtime-packager suite and Gradle `testDebugUnitTest`; this includes the Wawona APK extractor tests, Android/Kotlin compilation and Wawona lease/path regression tests. The focused workflow does not build an APK, run lint, set up NDK/CMake or build the pinned Wawona native payload. Host CI success does not substitute for physical Android/ARM64 device validation.
 
-## Next engineering steps
+## Next engineering steps — runtime first, APK last
 
-1. Build the pinned Wawona APK with Nix and stage the reviewed JNI dependency closure/assets using tools/package_wawona_apk.py.
-2. Run the Python/JVM checks and assemble an APK with the generated Wawona payload; inspect native dependency closure and 16 KB page compatibility.
-3. Validate the Wayland socket, a native wl_shm client, Vulkan surface presentation, resize and input on a physical ARM64 device.
-4. Complete the third-party license inventory for the exact staged native dependency closure before any distributable release.
-5. Connect WawonaSurfaceView and WawonaDisplayBackend to the Compose Surface lifecycle and GameLaunchCoordinator; retain one active session per app process.
-6. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
-7. Build a glibc rootfs + PRoot + Box64 fallback package.
-8. Validate wineboot, prefix state, Wine Wayland driver selection and process teardown on a real ARM64 device.
-9. Run an original Win32 GDI/GUI executable, then broaden to x86-64 and WoW64.
-10. Add graphics/audio backend probing only after the first Wine window renders.
-11. Build a reproducible visual-novel compatibility matrix on physical ARM64 devices.
+1. Freeze the first target backend to glibc-proot-box64; keep Bionic/FEX as later experiments.
+2. Produce a reproducible runtime package containing an ARM64 Android PRoot host, Box64, an x86-64 glibc rootfs, Wine 11 WoW64, wineboot, and the Wine Wayland driver plus its exact shared-library/protocol dependencies.
+3. Add a package inventory gate that rejects a runtime without the Box64/Wine/Wineboot binaries, glibc loader, and both Wine Wayland driver halves. FILES_PRESENT must mean the package is structurally launch-ready, not merely that an arbitrary manifest file list exists.
+4. Validate the package independently of the APK: verify hashes/ELF architectures, run PRoot and Box64 smoke commands in the rootfs, then prove wineboot --init creates both registry files. Do not start another APK build for these checks.
+5. Make Wine connect to Wawona over the bound Wayland socket and validate a small original Win32 GUI/GDI executable. Diagnose runtime logs and process teardown before opening game-specific work.
+6. Add the first Play/session flow only after the runtime contract and compositor endpoint are proven; wire it to the existing imported-game record and GameLaunchCoordinator.
+7. Launch an original, redistributable visual-novel test fixture; record engine, architecture, render path, input, audio, resume and save/load results. Expand compatibility from this first working fixture rather than trying every engine at once.
+8. Complete the exact third-party license/NOTICE audit and runtime-package provenance/signing before distributing runtime binaries.
+9. Only after the above gates pass, manually run the final APK packaging workflow once and verify the installable artifact on a physical ARM64 Android device.
 
 ## Engineering rules
 
@@ -120,7 +118,8 @@ The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900
 - A SHA-256 match does not authenticate a runtime publisher.
 - Never execute game files during scanning or import.
 - Do not remove system APIs solely to shrink the package.
-- Prefer local/offline runtime packages; the first launch must not depend on downloading binaries.
+- Prefer a reproducible runtime package with pinned sources, checksums and provenance; do not bundle/download it through repeated APK builds.
+- Do not assemble or upload an APK during runtime development. The Wawona/APK workflow is reserved for one deliberate final packaging run after the visual-novel launch milestone passes.
 - Keep a fallback backend and per-game compatibility profiles.
 
 
