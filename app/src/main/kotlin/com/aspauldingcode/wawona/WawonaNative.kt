@@ -56,6 +56,12 @@ object WawonaNative {
     external fun nativeTouchCancel()
     external fun nativeTouchFrame()
 
+    // Upstream in-process Wayland SHM demo client. This deliberately provides
+    // a small GDI-like rendering smoke test without launching a Linux desktop.
+    external fun nativeRunWestonSimpleSHM(): Boolean
+    external fun nativeStopWestonSimpleSHM()
+    external fun nativeIsWestonSimpleSHMRunning(): Boolean
+
     external fun nativeKeyEvent(keycode: Int, state: Int, timestampMs: Int)
     external fun nativePointerMotion(x: Double, y: Double, timestampMs: Int)
     external fun nativePointerButton(buttonCode: Int, state: Int, timestampMs: Int)
