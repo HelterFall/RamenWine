@@ -42,7 +42,8 @@ data class ProotWineCommand(
 object ProotWineCommandBuilder {
     fun build(
         request: ProotWineLaunchRequest,
-        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator
+        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator,
+        prootTempDirectoryValidator: (File) -> Boolean = ::supportsExecutableTempFiles
     ): ProotWineCommand {
         require(request.hostUid >= 0) { "Invalid Android UID." }
         require(ID_PATTERN.matches(request.game.id)) { "Invalid imported game ID." }
@@ -185,6 +186,16 @@ object ProotWineCommandBuilder {
             "PRoot temporary"
         )
 
+        // The pinned PRoot extracts its ELF loader into PROOT_TMP_DIR and
+        // checks that the extracted file is executable. Catch noexec cache
+        // mounts here rather than failing later inside the child process.
+        if (!prootTempDirectoryValidator(prootTempDirectory)) {
+            throw IOException(
+                "PRoot temporary directory does not permit executable files: " +
+                    prootTempDirectory.absolutePath
+            )
+        }
+
         val displayDirectory = request.display.hostRuntimeDirectory.canonicalFile
         requireContained(cacheRoot, displayDirectory, "Wayland runtime directory")
         requireDirectory(displayDirectory, "Wayland runtime directory")
@@ -307,6 +318,28 @@ object ProotWineCommandBuilder {
         )
     }
 
+
+    private fun supportsExecutableTempFiles(directory: File): Boolean {
+        if (!directory.isDirectory || !directory.canWrite() || !directory.canExecute()) {
+            return false
+        }
+
+        val probe = try {
+            File.createTempFile("proot-check-", ".tmp", directory)
+        } catch (_: IOException) {
+            return false
+        } catch (_: SecurityException) {
+            return false
+        }
+
+        val executable = try {
+            probe.setExecutable(true, true) && probe.canExecute()
+        } catch (_: SecurityException) {
+            false
+        }
+        val removed = !probe.exists() || probe.delete()
+        return executable && removed
+    }
 
     private fun ensureGuestDirectory(rootfs: File, guestAbsolutePath: String) {
         if (!guestAbsolutePath.startsWith('/')) {

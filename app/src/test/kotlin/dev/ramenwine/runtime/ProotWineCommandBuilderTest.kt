@@ -156,6 +156,29 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun refusesProotTempDirectoryWithoutExecutableFileSupport() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request(),
+                    WaylandSocketValidator { it.isFile },
+                    prootTempDirectoryValidator = { false }
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(
+                error?.message.orEmpty().contains(
+                    "PRoot temporary directory does not permit executable files"
+                )
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsRuntimeMissingBox64BundledLibunwind() {
         val fixture = Fixture()
         try {
