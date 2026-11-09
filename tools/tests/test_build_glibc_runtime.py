@@ -131,6 +131,7 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
         self.assertIn("libwayland-cursor0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libxkbcommon0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libxkbregistry0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("xkb-data", build_glibc_runtime.RUNTIME_PACKAGES)
 
 
 if __name__ == "__main__":

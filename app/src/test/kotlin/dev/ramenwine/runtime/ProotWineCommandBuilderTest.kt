@@ -73,6 +73,7 @@ class ProotWineCommandBuilderTest {
             assertEquals("win64", guestEnvironment["WINEARCH"])
             assertEquals("/run/user/10123", guestEnvironment["XDG_RUNTIME_DIR"])
             assertEquals("wayland-0", guestEnvironment["WAYLAND_DISPLAY"])
+            assertEquals("/usr/share/X11/xkb", guestEnvironment["XKB_CONFIG_ROOT"])
             assertEquals("/prefixes/" + fixture.gameId, guestEnvironment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertEquals(

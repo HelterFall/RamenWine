@@ -71,6 +71,7 @@ RUNTIME_PACKAGES = (
     "libwayland-egl1:amd64",
     "libxkbcommon0:amd64",
     "libxkbregistry0:amd64",
+    "xkb-data",
     "gstreamer1.0-plugins-base:amd64",
     "gstreamer1.0-plugins-good:amd64",
     "fonts-dejavu-core",

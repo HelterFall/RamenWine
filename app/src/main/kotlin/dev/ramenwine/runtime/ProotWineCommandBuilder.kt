@@ -227,6 +227,7 @@ object ProotWineCommandBuilder {
             "WINEDEBUG" to "err+all",
             "WAYLAND_DISPLAY" to request.display.socketName,
             "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
+            "XKB_CONFIG_ROOT" to "/usr/share/X11/xkb",
             "TMPDIR" to guestTempDirectory,
             "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
             "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
