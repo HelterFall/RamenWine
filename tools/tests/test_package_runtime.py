@@ -75,7 +75,7 @@ class RuntimePackagerTests(unittest.TestCase):
         data = bytearray(0x80 + 6)
         data[:2] = b"MZ"
         struct.pack_into("<I", data, 0x3C, 0x80)
-        data[0x80:0x84] = b"PE\\x00\\x00"
+        data[0x80:0x84] = b"PE\x00\x00"
         struct.pack_into("<H", data, 0x84, package_runtime.PE_MACHINE_I386)
         path.write_bytes(data)
         path.chmod(0o644)
