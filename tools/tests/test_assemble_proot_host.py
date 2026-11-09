@@ -120,6 +120,15 @@ class ProotHostAssemblyTests(unittest.TestCase):
         )
         self.assertEqual("30", metadata["androidNdkVersion"])
         self.assertEqual(
+            assemble_proot_host.sha256_file(host / "bin" / "proot"),
+            metadata["stagedSha256"]["bin/proot"],
+        )
+        self.assertEqual(
+            assemble_proot_host.sha256_file(host / "libexec" / "proot" / "loader"),
+            metadata["stagedSha256"]["libexec/proot/loader"],
+        )
+        self.assertIn("lib/libtalloc.so.2", metadata["stagedSha256"])
+        self.assertEqual(
             "753611f410d002cfcd3f3dc2ef49aad532089d3180b436c060a90bf0fcb64df2",
             metadata["androidNdkArchiveSha256"],
         )

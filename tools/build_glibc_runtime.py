@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import assemble_proot_host
 import package_runtime
 
 UBUNTU_BASE_URL = (
@@ -137,6 +138,116 @@ def run(command: list[str], cwd: Path | None = None, extra_env: dict[str, str] |
 
 def output(command: list[str]) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def validate_proot_host_provenance(host_root: Path) -> None:
+    """Require a pinned, intact PRoot host artifact produced by our assembler."""
+    host_root = host_root.resolve(strict=True)
+    manifest_path = host_root / "PROVENANCE.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("PRoot host provenance is missing or invalid JSON.") from error
+
+    expected_fields = {
+        "formatVersion": 1,
+        "target": "android-bionic-arm64",
+        "termuxPackagesCommit": assemble_proot_host.TERMUX_PACKAGES_COMMIT,
+        "androidNdkVersion": assemble_proot_host.TERMUX_NDK_VERSION,
+        "androidNdkArchiveSha256": assemble_proot_host.TERMUX_NDK_ARCHIVE_SHA256,
+        "androidSdkCommandLineToolsRevision":
+            assemble_proot_host.TERMUX_SDK_COMMANDLINE_TOOLS_REVISION,
+        "androidSdkCommandLineToolsSha256":
+            assemble_proot_host.TERMUX_SDK_COMMANDLINE_TOOLS_SHA256,
+        "androidBuildToolsVersion": assemble_proot_host.TERMUX_ANDROID_BUILD_TOOLS_VERSION,
+    }
+    for key, expected in expected_fields.items():
+        if manifest.get(key) != expected:
+            raise ValueError(f"PRoot host provenance mismatch for {key}.")
+
+    package_sources = manifest.get("packageSources")
+    if not isinstance(package_sources, dict) or set(package_sources) != set(
+        assemble_proot_host.EXPECTED_PACKAGES
+    ):
+        raise ValueError("PRoot host provenance does not list the exact pinned Termux packages.")
+    for package_name, expected_version in assemble_proot_host.EXPECTED_PACKAGES.items():
+        record = package_sources.get(package_name)
+        if not isinstance(record, dict):
+            raise ValueError(f"PRoot host provenance is missing package {package_name}.")
+        if (
+            record.get("version") != expected_version
+            or record.get("architecture") != "aarch64"
+            or record.get("sourceCommit") != assemble_proot_host.TERMUX_PACKAGES_COMMIT
+            or not isinstance(record.get("debSha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", record["debSha256"])
+        ):
+            raise ValueError(f"PRoot host package provenance is invalid for {package_name}.")
+
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("PRoot host provenance has no staged file inventory.")
+    if (
+        files.get("proot") != "host/bin/proot"
+        or files.get("loader") != "host/libexec/proot/loader"
+    ):
+        raise ValueError("PRoot host provenance has unexpected executable paths.")
+
+    libraries = files.get("libraries")
+    if not isinstance(libraries, list) or not libraries:
+        raise ValueError("PRoot host provenance has no shared-library inventory.")
+    library_names: list[str] = []
+    for value in libraries:
+        if (
+            not isinstance(value, str)
+            or not value.startswith("host/lib/")
+            or "/" in value[len("host/lib/"):]
+            or value == "host/lib/"
+            or "\\" in value
+        ):
+            raise ValueError("PRoot host provenance contains an unsafe library path.")
+        library_names.append(value[len("host/lib/"):])
+    if len(set(library_names)) != len(library_names):
+        raise ValueError("PRoot host provenance contains duplicate library paths.")
+
+    library_directory = host_root / "lib"
+    actual_library_names = {
+        path.name for path in library_directory.iterdir()
+        if path.name.startswith("lib") and ".so" in path.name
+    }
+    if actual_library_names != set(library_names):
+        raise ValueError("PRoot host shared-library inventory does not match its provenance.")
+
+    expected_staged_paths = {
+        "bin/proot",
+        "libexec/proot/loader",
+        *("lib/" + name for name in library_names),
+    }
+    staged_hashes = manifest.get("stagedSha256")
+    if not isinstance(staged_hashes, dict) or set(staged_hashes) != expected_staged_paths:
+        raise ValueError("PRoot host provenance has an incomplete staged SHA-256 inventory.")
+
+    for relative_path in sorted(expected_staged_paths):
+        if (
+            relative_path.startswith("/")
+            or "\\" in relative_path
+            or any(part in ("", ".", "..") for part in relative_path.split("/"))
+        ):
+            raise ValueError("PRoot host provenance contains an unsafe staged path.")
+        candidate = host_root.joinpath(*relative_path.split("/"))
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(host_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"PRoot host staged file is missing or escapes the payload: {relative_path}"
+            ) from error
+        expected_digest = staged_hashes[relative_path]
+        if not isinstance(expected_digest, str) or not re.fullmatch(
+            r"[a-f0-9]{64}", expected_digest
+        ):
+            raise ValueError(f"PRoot host provenance has an invalid hash for {relative_path}.")
+        if sha256_file(resolved) != expected_digest:
+            raise ValueError(f"PRoot host staged file hash mismatch: {relative_path}")
 
 
 def validate_arguments(snapshot: str, version: str, jobs: int) -> None:
@@ -506,8 +617,9 @@ def build(args: argparse.Namespace) -> None:
         raise ValueError("work-dir must be empty; choose a new directory to protect existing files.")
 
     host = args.proot_host.resolve(strict=True)
-    # Fail before downloading/building the large ARM64 + Wine guest. The exact
-    # same validator runs again against backend/host before the final ZIP.
+    # Require the pinned Termux source/toolchain provenance and staged hashes
+    # before validating ELF dependencies or beginning the expensive guest build.
+    validate_proot_host_provenance(host)
     package_runtime.validate_android_proot_host_payload(host)
 
     if not args.skip_host_dependencies:

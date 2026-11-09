@@ -21,6 +21,91 @@ spec.loader.exec_module(build_glibc_runtime)
 
 
 class BuildGlibcRuntimeTests(unittest.TestCase):
+    def _make_proot_host_with_provenance(self, root: Path) -> Path:
+        host = root / "proot-host"
+        for relative, content in (
+            ("bin/proot", b"pinned-proot"),
+            ("libexec/proot/loader", b"pinned-loader"),
+            ("lib/libtalloc.so.2", b"talloc"),
+            ("lib/libandroid-shmem.so", b"android-shmem"),
+        ):
+            path = host / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+        files = {
+            "proot": "host/bin/proot",
+            "loader": "host/libexec/proot/loader",
+            "libraries": [
+                "host/lib/libandroid-shmem.so",
+                "host/lib/libtalloc.so.2",
+            ],
+        }
+        staged_hashes = {
+            "bin/proot": build_glibc_runtime.sha256_file(host / "bin" / "proot"),
+            "libexec/proot/loader": build_glibc_runtime.sha256_file(
+                host / "libexec" / "proot" / "loader"
+            ),
+            "lib/libandroid-shmem.so": build_glibc_runtime.sha256_file(
+                host / "lib" / "libandroid-shmem.so"
+            ),
+            "lib/libtalloc.so.2": build_glibc_runtime.sha256_file(
+                host / "lib" / "libtalloc.so.2"
+            ),
+        }
+        assembler = build_glibc_runtime.assemble_proot_host
+        provenance = {
+            "formatVersion": 1,
+            "target": "android-bionic-arm64",
+            "termuxPackagesCommit": assembler.TERMUX_PACKAGES_COMMIT,
+            "androidNdkVersion": assembler.TERMUX_NDK_VERSION,
+            "androidNdkArchiveSha256": assembler.TERMUX_NDK_ARCHIVE_SHA256,
+            "androidSdkCommandLineToolsRevision": assembler.TERMUX_SDK_COMMANDLINE_TOOLS_REVISION,
+            "androidSdkCommandLineToolsSha256": assembler.TERMUX_SDK_COMMANDLINE_TOOLS_SHA256,
+            "androidBuildToolsVersion": assembler.TERMUX_ANDROID_BUILD_TOOLS_VERSION,
+            "packageSources": {
+                name: {
+                    "version": version,
+                    "architecture": "aarch64",
+                    "debSha256": "a" * 64,
+                    "sourceCommit": assembler.TERMUX_PACKAGES_COMMIT,
+                }
+                for name, version in assembler.EXPECTED_PACKAGES.items()
+            },
+            "files": files,
+            "stagedSha256": staged_hashes,
+        }
+        (host / "PROVENANCE.json").write_text(
+            json.dumps(provenance, indent=2) + "\\n",
+            encoding="utf-8",
+        )
+        return host
+
+    def test_accepts_exact_pinned_proot_host_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            host = self._make_proot_host_with_provenance(Path(temporary))
+            build_glibc_runtime.validate_proot_host_provenance(host)
+
+    def test_rejects_proot_host_from_different_termux_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            host = self._make_proot_host_with_provenance(Path(temporary))
+            manifest_path = host / "PROVENANCE.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["termuxPackagesCommit"] = "0" * 40
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "termuxPackagesCommit"):
+                build_glibc_runtime.validate_proot_host_provenance(host)
+
+    def test_rejects_modified_proot_host_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            host = self._make_proot_host_with_provenance(Path(temporary))
+            with (host / "bin" / "proot").open("ab") as output:
+                output.write(b"tampered")
+
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                build_glibc_runtime.validate_proot_host_provenance(host)
+
     def test_accepts_current_pinned_snapshot_and_runtime_version(self) -> None:
         build_glibc_runtime.validate_arguments(
             "20261109T000000Z",
@@ -47,12 +132,7 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
     def test_invalid_proot_host_is_rejected_before_guest_build_setup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            host = root / "proot-host"
-            (host / "bin").mkdir(parents=True)
-            (host / "libexec" / "proot").mkdir(parents=True)
-            (host / "lib").mkdir()
-            (host / "bin" / "proot").write_bytes(b"fixture")
-            (host / "libexec" / "proot" / "loader").write_bytes(b"fixture")
+            host = self._make_proot_host_with_provenance(root)
             work = root / "work"
             work.mkdir()
             args = type("Args", (), {
@@ -79,6 +159,7 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                     build_glibc_runtime.build(args)
 
             validate_host.assert_called_once_with(host.resolve())
+            build_glibc_runtime.validate_proot_host_provenance(host)
             install_host.assert_not_called()
             self.assertFalse((work / "backend").exists())
 

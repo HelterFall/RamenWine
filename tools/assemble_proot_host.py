@@ -251,6 +251,14 @@ def stage_host_payload(
                 "loader": "host/libexec/proot/loader",
                 "libraries": [f"host/lib/{name}" for name in sorted(copied_libraries)],
             },
+            "stagedSha256": {
+                "bin/proot": sha256_file(staged_proot),
+                "libexec/proot/loader": sha256_file(staged_loader),
+                **{
+                    f"lib/{name}": sha256_file(staged_host / "lib" / name)
+                    for name in sorted(copied_libraries)
+                },
+            },
         }
         provenance_path = staged_host / "PROVENANCE.json"
         provenance_path.write_text(
