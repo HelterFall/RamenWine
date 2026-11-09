@@ -25,18 +25,14 @@ ZIP digest, product manifest revision, and inner APK digest before extracting
 any native files. This avoids rebuilding the pinned Wawona compositor with Nix
 when the reviewed artifact is available.
 
-Download the upstream `product-android-apk` artifact ZIP, then run:
+Download the upstream `product-android-apk` artifact ZIP, then pass its path to Gradle. The `prepareWawonaPayload` task runs automatically before `preBuild`, uses the NDK's host `llvm-readelf`, verifies the pinned outer ZIP, product manifest and inner APK hashes, and writes the generated source set under `app/build/generated/wawona`:
 
 ```bash
-WAWONA_REVISION=d298ddd25726fec0977285aa5f57181110c966a6
-READELF="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name llvm-readelf -print -quit)"
-
-python tools/package_wawona_apk.py \\
-  --artifact-zip /path/to/wawona-product-android-apk.zip \\
-  --readelf "$READELF" \\
-  --revision "$WAWONA_REVISION" \\
-  --output app/build/generated/wawona
+gradle --no-daemon :app:assembleDebug \
+  -PwawonaArtifactZip=/path/to/wawona-product-android-apk.zip
 ```
+
+The equivalent environment variable is `WAWONA_ARTIFACT_ZIP`. When neither is supplied, this optional task is skipped and a previously generated source set is left intact; clean source/JVM-only builds therefore remain possible without the large native payload.
 
 The Nix build below remains available to rebuild the same pinned source and
 produce a fresh APK for review. Do not use the old prebuilt Wawona APK release:
