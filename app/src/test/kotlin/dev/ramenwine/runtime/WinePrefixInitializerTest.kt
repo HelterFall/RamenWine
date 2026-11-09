@@ -41,7 +41,13 @@ class WinePrefixInitializerTest {
                     .contains("#arch=win64")
             )
             assertEquals("1", File(fixture.prefixDirectory, "wineboot-count").readText())
+            assertEquals("1", File(fixture.prefixDirectory, "wayland-config-count").readText())
+            assertEquals(
+                "graphics=wayland-v1",
+                File(fixture.prefixDirectory, ".ramenwine-wayland-driver").readText()
+            )
             assertTrue(output.any { it.contains("wineboot finished") })
+            assertTrue(output.any { it.contains("[wine-wayland]") })
         } finally {
             fixture.close()
         }
@@ -131,6 +137,69 @@ class WinePrefixInitializerTest {
     }
 
     @Test
+    fun configuresAnExistingWin64PrefixForWaylandWithoutRunningWineboot() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+
+            fixture.initializer().ensureInitialized(fixture.request()) {}
+
+            assertFalse(File(fixture.prefixDirectory, "wineboot-count").exists())
+            assertEquals("1", File(fixture.prefixDirectory, "wayland-config-count").readText())
+            assertEquals(
+                "graphics=wayland-v1",
+                File(fixture.prefixDirectory, ".ramenwine-wayland-driver").readText()
+            )
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun skipsWaylandRegistryCommandWhenPrefixMarkerIsCurrent() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, ".ramenwine-wayland-driver")
+                .writeText("graphics=wayland-v1")
+
+            fixture.initializer().ensureInitialized(fixture.request()) {}
+
+            assertFalse(File(fixture.prefixDirectory, "wayland-config-count").exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun doesNotPromoteStagingPrefixWhenWaylandRegistryCommandFails() = runBlocking {
+        val fixture = Fixture(fixtureScript = "wayland-config-exit-9")
+        try {
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("reg.exe exit code 9"))
+            assertFalse(fixture.prefixDirectory.exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
     fun refusesToOverwritePartiallyInitializedPrefix() = runBlocking {
         val fixture = Fixture(fixtureScript = "create-prefix")
         try {
@@ -182,6 +251,10 @@ class WinePrefixInitializerTest {
             regular(
                 rootfs,
                 "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
             )
             regular(rootfs, "lib/ld-linux-aarch64.so.1")
             regular(rootfs, "lib64/ld-linux-x86-64.so.2")
@@ -274,6 +347,32 @@ class WinePrefixInitializerTest {
                 host_prefix = prefix_binding.rsplit(":/prefixes/", 1)[0]
                 prefix = Path(host_prefix)
                 prefix.mkdir(parents=True, exist_ok=True)
+                if any(argument.endswith("/reg.exe") for argument in sys.argv):
+                    required = [
+                        "add",
+                        "HKCU\\Software\\Wine\\Drivers",
+                        "/v",
+                        "Graphics",
+                        "/t",
+                        "REG_SZ",
+                        "/d",
+                        "wayland",
+                        "/f",
+                    ]
+                    if any(item not in sys.argv for item in required):
+                        print("invalid Wayland registry command", flush=True)
+                        sys.exit(10)
+                    if "$fixtureScript" == "wayland-config-exit-9":
+                        print("Wayland registry command failed", flush=True)
+                        sys.exit(9)
+                    config_counter = prefix / "wayland-config-count"
+                    config_count = int(
+                        config_counter.read_text() if config_counter.exists() else "0"
+                    ) + 1
+                    config_counter.write_text(str(config_count))
+                    print("Wayland graphics driver configured", flush=True)
+                    sys.exit(0)
+
                 counter = prefix / "wineboot-count"
                 count = int(counter.read_text() if counter.exists() else "0") + 1
                 counter.write_text(str(count))
