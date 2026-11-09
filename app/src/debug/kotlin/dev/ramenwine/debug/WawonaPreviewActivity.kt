@@ -327,6 +327,26 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         mainHandler.post(finishClose)
     }
 
+    override fun onPause() {
+        releaseDisplay("Приложение приостановлено")
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!closing && ::surfaceView.isInitialized) {
+            surfaceView.post {
+                if (closing || isFinishing || isDestroyed) return@post
+                val surface = surfaceView.holder.surface
+                val width = surfaceView.width
+                val height = surfaceView.height
+                if (surface.isValid && width > 0 && height > 0) {
+                    onSurfaceChanged(surface, width, height)
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
         closing = true
         generation += 1
