@@ -83,7 +83,11 @@ internal class WinePrefixInitializer(
                 val initializationCommand = withContext(Dispatchers.IO) {
                     ProotWineCommandBuilder.build(
                         request.copy(
-                            operation = ProotWineOperation.INITIALIZE_PREFIX,
+                            operation = if (request.operation == ProotWineOperation.RUN_WAYLAND_PROBE) {
+                                ProotWineOperation.INITIALIZE_PROBE_PREFIX
+                            } else {
+                                ProotWineOperation.INITIALIZE_PREFIX
+                            },
                             prefixId = stagingPrefixId
                         ),
                         socketValidator
