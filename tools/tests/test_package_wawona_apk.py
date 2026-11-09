@@ -353,7 +353,11 @@ ELF Header:
 
         def fake_readelf(command, **_kwargs):
             commands.append(command)
-            output = dynamic_symbols if "--dyn-syms" in command else elf_metadata
+            output = (
+                elf_metadata + "\\n" + dynamic_symbols
+                if "--dyn-syms" in command
+                else elf_metadata
+            )
             return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
         with patch.object(package_wawona_apk.subprocess, "run", side_effect=fake_readelf):
