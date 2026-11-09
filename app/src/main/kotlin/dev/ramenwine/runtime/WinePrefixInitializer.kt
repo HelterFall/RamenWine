@@ -55,6 +55,7 @@ internal class WinePrefixInitializer(
                             "will not be overwritten automatically."
                     )
                 }
+                ensureWaylandGraphicsDriver(request, request.game.id, prefixDirectory, onOutput)
                 return@withLock
             }
             if (hasSystemRegistry || hasUserRegistry) {
@@ -116,6 +117,12 @@ internal class WinePrefixInitializer(
                     )
                 }
 
+                ensureWaylandGraphicsDriver(
+                    request,
+                    stagingPrefixId,
+                    stagingPrefixDirectory,
+                    onOutput
+                )
                 promoteStagedPrefix(stagingPrefixDirectory, prefixDirectory)
             } catch (error: Throwable) {
                 // Stop first, then remove only the unique staging directory
@@ -130,6 +137,68 @@ internal class WinePrefixInitializer(
                 }
                 throw error
             }
+        }
+    }
+
+    /**
+     * Force Wine's native Wayland driver in this prefix. WAYLAND_DISPLAY alone
+     * is not a sufficient selection policy when more than one graphics driver
+     * is available; this app intentionally ships no X11 server.
+     *
+     * The sidecar marker is written only after reg.exe exits successfully, so
+     * an interrupted or failed setup is retried on the next launch.
+     */
+    private suspend fun ensureWaylandGraphicsDriver(
+        request: ProotWineLaunchRequest,
+        prefixId: String,
+        prefixDirectory: File,
+        onOutput: (String) -> Unit
+    ) {
+        val marker = File(prefixDirectory, WAYLAND_CONFIGURATION_MARKER)
+        if (Files.isSymbolicLink(marker.toPath())) {
+            throw IOException("Wine Wayland configuration marker must not be a symbolic link.")
+        }
+        if (marker.exists()) {
+            if (!marker.isFile) {
+                throw IOException("Wine Wayland configuration marker is not a regular file.")
+            }
+            if (marker.readText(Charsets.UTF_8) == WAYLAND_CONFIGURATION_VERSION) {
+                return
+            }
+        }
+
+        val command = withContext(Dispatchers.IO) {
+            ProotWineCommandBuilder.build(
+                request.copy(
+                    operation = ProotWineOperation.CONFIGURE_WAYLAND_PREFIX,
+                    prefixId = prefixId
+                ),
+                socketValidator
+            )
+        }
+        val exit = CompletableDeferred<Int>()
+        var processSession: ProotWineProcessSession? = null
+        try {
+            processSession = processSupervisor.start(
+                command = command,
+                onOutput = { line -> onOutput("[wine-wayland] " + line) },
+                onExit = { exitCode -> exit.complete(exitCode) }
+            )
+            val exitCode = withTimeout(initializationTimeoutMillis) { exit.await() }
+            if (exitCode != 0) {
+                throw IOException(
+                    "Could not enable Wine's native Wayland graphics driver " +
+                        "(reg.exe exit code $exitCode)."
+                )
+            }
+            marker.writeText(WAYLAND_CONFIGURATION_VERSION, Charsets.UTF_8)
+        } catch (error: Throwable) {
+            withContext(NonCancellable) {
+                processSession?.let { session ->
+                    if (session.isAlive()) runCatching { session.stop() }
+                }
+            }
+            throw error
         }
     }
 
@@ -246,6 +315,8 @@ internal class WinePrefixInitializer(
         private const val SYSTEM_REGISTRY = "system.reg"
         private const val USER_REGISTRY = "user.reg"
         private const val WINE_PREFIX_ARCHITECTURE_MARKER = "#arch=win64"
+        private const val WAYLAND_CONFIGURATION_MARKER = ".ramenwine-wayland-driver"
+        private const val WAYLAND_CONFIGURATION_VERSION = "graphics=wayland-v1"
         private const val REGISTRY_HEADER_LINE_LIMIT = 16
         private val GAME_ID_PATTERN =
             Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
