@@ -86,17 +86,19 @@ class BuildProotHostTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unmarked or partial"):
                 build_proot_host.patch_pinned_proot_recipe(source)
 
-    def test_rejects_missing_pinned_proot_cli_option(self) -> None:
+    def test_rejects_recipe_that_drops_the_extracted_cli_option_guard(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = make_pinned_proot_source(Path(temporary))
-            header = source / "src/cli/proot.h"
-            header.write_text(
-                header.read_text(encoding="utf-8").replace(
-                    '.name = "--kill-on-exit"\\n', ""
+            build_proot_host.patch_pinned_proot_recipe(source)
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8").replace(
+                    "for required_option in --rootfs --bind --pwd --kill-on-exit --link2symlink --sysvipc; do",
+                    "for required_option in --rootfs --bind; do",
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "does not define.*--kill-on-exit"):
+            with self.assertRaisesRegex(ValueError, "source/cleanup validation is missing"):
                 build_proot_host.validate_pinned_proot_source_contract(source)
 
     def test_rejects_termux_recipe_without_android_shmem(self) -> None:
