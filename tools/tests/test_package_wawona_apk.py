@@ -37,6 +37,27 @@ class WawonaApkPackagerTests(unittest.TestCase):
                 )
                 self.assertIn("libwayland-server.so.0", selected)
 
+    def test_accepts_elf64_aarch64_header(self) -> None:
+        package_wawona_apk.validate_arm64_elf_header(
+            """
+ELF Header:
+  Class:                             ELF64
+  Machine:                           AArch64
+""",
+            "libwawona.so",
+        )
+
+    def test_rejects_non_arm64_elf_header(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not an AArch64 ELF binary"):
+            package_wawona_apk.validate_arm64_elf_header(
+                """
+ELF Header:
+  Class:                             ELF64
+  Machine:                           Advanced Micro Devices X86-64
+""",
+                "libwawona.so",
+            )
+
     def test_parses_dt_needed_and_soname(self) -> None:
         output = """
  0x0000000000000001 (NEEDED) Shared library: [libwayland-server.so]
