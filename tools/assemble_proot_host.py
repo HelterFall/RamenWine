@@ -112,7 +112,10 @@ def safe_copy_regular_or_relative_symlink(source: Path, destination: Path, root:
         target = os.readlink(source)
         if not target or os.path.isabs(target) or "\\" in target or "\x00" in target:
             raise ValueError(f"unsafe absolute or invalid shared-library symlink: {source} -> {target!r}")
-        resolved = (source.parent / target).resolve(strict=True)
+        # Resolve the candidate before requiring it to exist: an escaping
+        # symlink may intentionally point to a non-existent path outside the
+        # package root, and must still be rejected as an escape.
+        resolved = (source.parent / target).resolve(strict=False)
         try:
             resolved.relative_to(root.resolve(strict=True))
         except ValueError as error:
