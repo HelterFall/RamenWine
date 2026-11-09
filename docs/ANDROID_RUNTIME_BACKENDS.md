@@ -9,15 +9,28 @@ Keep the backend interface, but do not build several runtimes in parallel. The f
 
 The Bionic path is an experiment, not yet the default production runtime. Current public ARM64EC Proton/Wine packages for Android are explicitly marked as testing builds and may be unstable. The fallback must remain available until a device/game compatibility corpus shows which path is more reliable.
 
-## Why two paths
+## Why this first path
 
-### First launch path: glibc rootfs + PRoot
+The PRoot route matches the launch command and Wine-prefix code already present in RamenWine. It can keep Wine and its x86-64 Linux dependencies inside an isolated rootfs while the Android app owns the PRoot host process and the Wayland socket.
 
-This path packages an x86-64 Linux root filesystem with Wine and its guest libraries, then enters it through an ARM64 Android/Bionic PRoot executable. Box64 runs the x86-64 Linux Wine loader under the Android host process. Wine must include both halves of its Wayland driver and connect to the Wawona socket bound into the guest.
+Advantages:
+- Established Android deployment model.
+- Keeps glibc-oriented Wine binaries and their dependencies together in a rootfs.
+- Allows per-game Wine prefixes and a conventional Linux userspace.
+- Does not require Android root access.
+- Can use Wine's Wayland driver to connect to the Wawona socket without introducing X11/Xwayland in the first milestone.
 
-For the first milestone, use one pinned Wine 11 WoW64 build and one pinned Box64 build. Do not add X11/Xwayland, DXVK, VKD3D, game launchers, Steam, or multiple Wine versions until an original Win32 GDI window is visible through Wayland.
+Costs and limitations:
+- PRoot uses ptrace to intercept guest syscalls and rewrite paths; this adds overhead.
+- The x86-64 Wine loader and libraries must be complete and compatible with the selected Box64 build.
+- Android GPU/audio integration still needs host-side bridges and compatible libraries.
+- A rootfs is larger than a Bionic-native Wine package.
 
-### Deferred experiment: Bionic-native Wine
+References:
+- [Winlator official site](https://www.winlator.org/) — describes the Android Wine + Box64 stack and PRoot/rootfs architecture.
+- [Termux PRoot-Distro documentation](https://github.com/termux/proot-distro) — describes PRoot's ptrace-based syscall interception and unprivileged rootfs operation.
+
+## Deferred experiment: Bionic-native Wine
 
 A Wine build targeting Android's Bionic libc can run in the Android app environment without a glibc rootfs and without PRoot. This may reduce package size and PRoot syscall overhead, but its ARM64EC/FEX and x86-64/Box64 variants require separate validation. Do not implement these paths in parallel with the first launch target.
 
@@ -25,21 +38,6 @@ Reference implementation/release:
 - [GameNative/proton-wine releases](https://github.com/GameNative/proton-wine/releases)
 
 Its Android-specific ARM64EC releases document Bionic fixes and FEX integration, but mark the builds as testing/unstable. Treat these as future research inputs, not as a runtime dependency for the first launch.
-
-Advantages:
-- Established Android deployment model.
-- Keeps glibc-oriented Linux binaries together in a rootfs.
-- Allows per-game Wine prefixes and a conventional Linux userspace.
-- Does not require Android root access.
-
-Costs and limitations:
-- PRoot uses ptrace to intercept guest syscalls and rewrite paths. This has measurable overhead and must be benchmarked.
-- Android GPU/audio integration still needs host-side bridges and compatible libraries.
-- A rootfs is larger than a Bionic-native Wine package.
-
-References:
-- [Winlator official site](https://www.winlator.org/) — describes the Android Wine + Box86/Box64 stack and credits PRoot, rootfs, Mesa, DXVK, VKD3D and D8VK.
-- [Termux PRoot-Distro documentation](https://github.com/termux/proot-distro) — describes PRoot's ptrace-based syscall interception and unprivileged rootfs operation.
 
 ## Runtime router contract
 
