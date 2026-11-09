@@ -346,6 +346,14 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
         self.assertIn("libwine:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("coreutils:arm64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("zlib1g:arm64", build_glibc_runtime.RUNTIME_PACKAGES)
+        for package in (
+            "libwayland-client0:arm64",
+            "libwayland-cursor0:arm64",
+            "libwayland-egl1:arm64",
+            "libxkbcommon0:arm64",
+            "libxkbregistry0:arm64",
+        ):
+            self.assertIn(package, build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("zlib1g:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libwayland-client0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libwayland-cursor0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
