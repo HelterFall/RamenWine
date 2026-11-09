@@ -32,7 +32,8 @@
 - Serialized display-session resize/close operations and JVM regression tests for idempotent cleanup and concurrent PRoot stop calls.
 - JVM regression tests for command construction, process output/termination and rejection of placeholder Wayland socket files.
 - A compositor-facing GameDisplayBackend/GameDisplaySession contract that accepts an Android Surface and exports a per-session Wayland endpoint.
-- Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file.
+- Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file; its runtime directory must also stay inside app-private cache storage.
+- A process-wide Wine-prefix initialization lock shared across GameLaunchCoordinator instances.
 - Focused GitHub Actions checks: Python runtime-packager tests and JVM unit tests only; APK packaging, artifact upload, lint and NDK/CMake setup are deferred.
 
 ## Current Android user flow
@@ -90,7 +91,7 @@ See Android Display Backend Research for the findings and integration gates. The
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The current branch head (685dd61, run #86) passed all 5 Python runtime-packager tests and Gradle testDebugUnitTest, including the new Wine-prefix initialization and path-containment tests. The focused workflow does not build an APK, run lint, or set up NDK/CMake. Host CI success does not substitute for physical Android/ARM64 device validation.
+The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The current branch code head (945a4ed, run #88) passed all 5 Python runtime-packager tests and Gradle testDebugUnitTest, including Wine-prefix bootstrap, cross-coordinator serialization and Wayland/prefix path-containment tests. The focused workflow does not build an APK, run lint, or set up NDK/CMake. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 

@@ -96,7 +96,7 @@ The JVM tests use a controlled fake PRoot process that creates the expected regi
 
 ## Display preconditions
 
-The command builder refuses to construct a launch if the Wayland socket is absent or is not an actual Unix-domain socket (checked with Android lstat). This prevents a regular file or stale placeholder from masquerading as a compositor endpoint.
+The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. This prevents a regular file, stale placeholder or external directory from masquerading as a compositor endpoint.
 
 The intended display endpoint is an Android-host Unix socket supplied by a future RamenWine display backend. No compositor is currently integrated or selected. Wawona is documented as an MIT technical reference, but its Android target is an application rather than a reusable AAR. The GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. Therefore this launcher is still not connected to a user-facing Play button.
 
@@ -111,7 +111,7 @@ The process supervisor:
 - waits for the output stream to reach EOF before delivering the exit callback, including the manual-stop path;
 - supports graceful termination followed by forced termination and reports an error if PRoot remains alive.
 
-JVM regression tests exercise merged output, natural exit, deterministic final-output draining, concurrent stop calls, graceful-to-forced termination escalation, prefix initialization and fail-closed prefix checks. The GameLaunchCoordinator runs prefix initialization before starting the selected game and closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
+JVM regression tests exercise merged output, natural exit, deterministic final-output draining, concurrent stop calls, graceful-to-forced termination escalation, prefix initialization and fail-closed prefix checks. The process-wide prefix lock is shared between coordinator instances, while each display-session lease serializes resize and close. The GameLaunchCoordinator runs prefix initialization before starting the selected game and closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
 
 ## Validation gates before enabling Play
 
