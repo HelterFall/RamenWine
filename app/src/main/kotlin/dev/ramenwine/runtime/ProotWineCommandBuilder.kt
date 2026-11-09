@@ -223,7 +223,7 @@ object ProotWineCommandBuilder {
             "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
             "TMPDIR" to guestTempDirectory,
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
-            // LD_LIBRARY_PATH is for the ARM64/Bionic PRoot + Box64 host process.
+            // LD_LIBRARY_PATH resolves Bionic dependencies for PRoot only; host/lib is not bound into the guest rootfs.
             "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
             // BOX64_LD_LIBRARY_PATH is separate: it searches x86-64 ELF libraries
             // inside the guest rootfs (glibc, Wayland and Wine Unix libraries).

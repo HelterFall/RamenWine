@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import stat
+import struct
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -43,6 +44,255 @@ class PackageFile:
 class PackageSymlink:
     relative_path: str
     target: str
+
+
+
+@dataclass(frozen=True)
+class Elf64Info:
+    machine: int
+    interpreter: str | None
+
+
+ELF_MACHINE_AARCH64 = 183
+ELF_MACHINE_X86_64 = 62
+ELF_PT_INTERP = 3
+PE_MACHINE_AMD64 = 0x8664
+
+
+def resolve_guest_file(rootfs: Path, guest_path: str) -> Path:
+    """Resolve a guest absolute path, interpreting absolute symlinks inside rootfs."""
+    if not guest_path.startswith("/") or "\\" in guest_path or "\x00" in guest_path:
+        raise ValueError(f"unsafe guest path: {guest_path!r}")
+
+    root_real = rootfs.resolve(strict=True)
+    pending = list(PurePosixPath(guest_path).parts[1:])
+    resolved_parts: list[str] = []
+    followed_links = 0
+
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not resolved_parts:
+                raise ValueError(f"guest symlink escapes rootfs: {guest_path}")
+            resolved_parts.pop()
+            continue
+
+        candidate = root_real.joinpath(*resolved_parts, part)
+        try:
+            metadata = candidate.lstat()
+        except OSError as error:
+            raise ValueError(f"required guest path is missing: {guest_path}") from error
+
+        if stat.S_ISLNK(metadata.st_mode):
+            followed_links += 1
+            if followed_links > 40:
+                raise ValueError(f"too many guest symlinks while resolving: {guest_path}")
+            target = os.readlink(candidate)
+            if not target or "\\" in target or "\x00" in target:
+                raise ValueError(f"invalid guest symlink target: {guest_path}")
+            target_path = PurePosixPath(target)
+            if target_path.is_absolute():
+                resolved_parts = []
+                target_parts = list(target_path.parts[1:])
+            else:
+                target_parts = list(target_path.parts)
+            pending = target_parts + pending
+            continue
+
+        if pending and not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"non-directory component in guest path: {guest_path}")
+        resolved_parts.append(part)
+
+    result = root_real.joinpath(*resolved_parts)
+    try:
+        metadata = result.stat()
+    except OSError as error:
+        raise ValueError(f"required guest path is missing: {guest_path}") from error
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError(f"required guest path is not a regular file: {guest_path}")
+    return result
+
+
+def read_elf64(path: Path, label: str) -> Elf64Info:
+    """Read the ELF64 machine and PT_INTERP fields without external tools."""
+    try:
+        file_size = path.stat().st_size
+        with path.open("rb") as stream:
+            ident = stream.read(16)
+            if len(ident) != 16 or ident[:4] != b"\x7fELF":
+                raise ValueError(f"{label} is not an ELF file: {path}")
+            if ident[4] != 2:
+                raise ValueError(f"{label} must be ELF64: {path}")
+            if ident[5] != 1:
+                raise ValueError(f"{label} must be little-endian ELF: {path}")
+
+            header = ident + stream.read(48)
+            if len(header) != 64:
+                raise ValueError(f"{label} has a truncated ELF header: {path}")
+            fields = struct.unpack_from("<HHIQQQIHHHHHH", header, 16)
+            machine = fields[1]
+            program_header_offset = fields[4]
+            program_header_size = fields[8]
+            program_header_count = fields[9]
+            if program_header_count > 4096:
+                raise ValueError(f"{label} has an unreasonable ELF program-header count.")
+
+            interpreter: str | None = None
+            if program_header_count:
+                if program_header_size < 56:
+                    raise ValueError(f"{label} has an invalid ELF program-header size.")
+                for index in range(program_header_count):
+                    offset = program_header_offset + index * program_header_size
+                    if offset < 64 or offset + 56 > file_size:
+                        raise ValueError(f"{label} has a truncated ELF program header.")
+                    stream.seek(offset)
+                    entry = stream.read(56)
+                    if len(entry) != 56:
+                        raise ValueError(f"{label} has a truncated ELF program header.")
+                    values = struct.unpack("<IIQQQQQQ", entry)
+                    segment_type = values[0]
+                    if segment_type != ELF_PT_INTERP:
+                        continue
+                    if interpreter is not None:
+                        raise ValueError(f"{label} has multiple PT_INTERP segments.")
+                    interpreter_offset = values[2]
+                    interpreter_size = values[5]
+                    if (
+                        interpreter_size < 2
+                        or interpreter_size > 4096
+                        or interpreter_offset + interpreter_size > file_size
+                    ):
+                        raise ValueError(f"{label} has an invalid PT_INTERP segment.")
+                    stream.seek(interpreter_offset)
+                    raw_interpreter = stream.read(interpreter_size)
+                    if (
+                        len(raw_interpreter) != interpreter_size
+                        or not raw_interpreter.endswith(b"\x00")
+                        or b"\x00" in raw_interpreter[:-1]
+                    ):
+                        raise ValueError(f"{label} has a malformed PT_INTERP string.")
+                    interpreter = raw_interpreter[:-1].decode("ascii")
+                    if not interpreter.startswith("/"):
+                        raise ValueError(f"{label} has a non-absolute ELF interpreter.")
+            return Elf64Info(machine=machine, interpreter=interpreter)
+    except (OSError, struct.error, UnicodeDecodeError) as error:
+        raise ValueError(f"could not inspect ELF file for {label}: {path}") from error
+
+
+def require_elf64(
+    path: Path,
+    label: str,
+    expected_machine: int,
+    expected_interpreter: str | None = None,
+) -> Elf64Info:
+    info = read_elf64(path, label)
+    if info.machine != expected_machine:
+        raise ValueError(
+            f"{label} has the wrong ELF machine: expected {expected_machine}, got {info.machine}"
+        )
+    if expected_interpreter is not None and info.interpreter != expected_interpreter:
+        raise ValueError(
+            f"{label} must use interpreter {expected_interpreter}, got {info.interpreter!r}"
+        )
+    return info
+
+
+def require_executable(path: Path, label: str) -> None:
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError(f"{label} is missing or not executable: {path}")
+
+
+def require_pe_amd64(path: Path, label: str) -> None:
+    try:
+        file_size = path.stat().st_size
+        with path.open("rb") as stream:
+            dos_header = stream.read(64)
+            if len(dos_header) != 64 or dos_header[:2] != b"MZ":
+                raise ValueError(f"{label} is not a PE image: {path}")
+            pe_offset = struct.unpack_from("<I", dos_header, 0x3C)[0]
+            if pe_offset < 64 or pe_offset + 6 > file_size:
+                raise ValueError(f"{label} has an invalid PE header offset: {path}")
+            stream.seek(pe_offset)
+            pe_header = stream.read(6)
+            if len(pe_header) != 6 or pe_header[:4] != b"PE\x00\x00":
+                raise ValueError(f"{label} has no PE signature: {path}")
+            machine = struct.unpack_from("<H", pe_header, 4)[0]
+            if machine != PE_MACHINE_AMD64:
+                raise ValueError(
+                    f"{label} must target AMD64 (0x8664), got 0x{machine:04x}"
+                )
+    except (OSError, struct.error) as error:
+        raise ValueError(f"could not inspect PE file for {label}: {path}") from error
+
+
+def validate_glibc_proot_box64(root: Path) -> None:
+    """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
+    backend_root = root.resolve(strict=True)
+    if not backend_root.is_dir():
+        raise ValueError("runtime backend root must be a directory")
+
+    host_library_directory = backend_root / "host" / "lib"
+    if not host_library_directory.is_dir():
+        raise ValueError("PRoot host library directory is missing.")
+
+    proot_path = backend_root / "host" / "bin" / "proot"
+    try:
+        proot_real = proot_path.resolve(strict=True)
+        proot_real.relative_to(backend_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot host executable is missing or escapes the backend.") from error
+    require_executable(proot_real, "PRoot host executable")
+    require_elf64(
+        proot_real,
+        "PRoot host executable",
+        ELF_MACHINE_AARCH64,
+        "/system/bin/linker64",
+    )
+
+    rootfs = backend_root / "rootfs"
+    if not rootfs.is_dir():
+        raise ValueError("ARM64 Linux/glibc rootfs directory is missing.")
+
+    arm64_loader = resolve_guest_file(rootfs, "/lib/ld-linux-aarch64.so.1")
+    require_elf64(arm64_loader, "ARM64 glibc loader", ELF_MACHINE_AARCH64)
+
+    x64_loader = resolve_guest_file(rootfs, "/lib64/ld-linux-x86-64.so.2")
+    require_elf64(x64_loader, "x86-64 glibc loader", ELF_MACHINE_X86_64)
+
+    box64 = resolve_guest_file(rootfs, "/usr/bin/box64")
+    require_executable(box64, "Box64 guest executable")
+    require_elf64(
+        box64,
+        "Box64 guest executable",
+        ELF_MACHINE_AARCH64,
+        "/lib/ld-linux-aarch64.so.1",
+    )
+
+    wine = resolve_guest_file(rootfs, "/usr/bin/wine")
+    require_executable(wine, "Wine unified loader")
+    require_elf64(
+        wine,
+        "Wine unified loader",
+        ELF_MACHINE_X86_64,
+        "/lib64/ld-linux-x86-64.so.2",
+    )
+
+    wineboot = resolve_guest_file(rootfs, "/usr/bin/wineboot")
+    require_executable(wineboot, "Wineboot entry point")
+
+    wayland_unix = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so",
+    )
+    require_elf64(wayland_unix, "Wine Wayland Unix driver", ELF_MACHINE_X86_64)
+
+    wayland_pe = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv",
+    )
+    require_pe_amd64(wayland_pe, "Wine Wayland PE driver")
 
 
 def safe_relative_path(value: str) -> str:
@@ -274,6 +524,9 @@ def main() -> int:
             raise ValueError("max-bytes must be between 1 byte and 64 GiB")
 
         root_real = args.root.resolve(strict=True)
+        if args.backend == "glibc-proot-box64":
+            validate_glibc_proot_box64(root_real)
+
         output_resolved = args.output.resolve(strict=False)
         try:
             output_resolved.relative_to(root_real)
