@@ -90,6 +90,7 @@ class WinePrefixInitializerTest {
             "runtime/current/backends/" + RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
         ).apply { mkdirs() }
         private val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
+        private val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         private val proot = executable(
             backendRoot,
             "host/bin/proot",
