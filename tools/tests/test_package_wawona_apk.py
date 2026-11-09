@@ -49,6 +49,40 @@ ELF Header:
             "libwawona.so",
         )
 
+    def test_accepts_16kb_aligned_arm64_load_segments(self) -> None:
+        output = """
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x4000
+  LOAD           0x004000 0x0000000000004000 0x0000000000004000 0x001000 0x001000 RW  0x4000
+"""
+        package_wawona_apk.validate_arm64_elf_16kb_alignment(output, "libwawona.so")
+
+    def test_rejects_4kb_arm64_load_segments(self) -> None:
+        output = """
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x1000
+"""
+        with self.assertRaisesRegex(ValueError, "not 16 KB page-size compatible"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                output,
+                "libwawona.so",
+            )
+
+    def test_rejects_misaligned_arm64_load_segment(self) -> None:
+        output = """
+  LOAD           0x001000 0x0000000000004000 0x0000000000004000 0x001000 0x001000 R E 0x4000
+"""
+        with self.assertRaisesRegex(ValueError, "not congruent"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                output,
+                "libwawona.so",
+            )
+
+    def test_rejects_arm64_elf_without_load_segments(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no ELF PT_LOAD segments"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                "There are no program headers.",
+                "libwawona.so",
+            )
+
     def test_rejects_non_arm64_elf_header(self) -> None:
         with self.assertRaisesRegex(ValueError, "not an AArch64 ELF binary"):
             package_wawona_apk.validate_arm64_elf_header(

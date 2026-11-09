@@ -81,7 +81,7 @@ The three required JNI/renderer roots and their recursive ELF `DT_NEEDED` closur
 
 The generated directory is ignored by Git and included through the Android `main` source set. A clean checkout can still run JVM/Python tests without the optional generated native payload. The runtime adapter fails clearly when its Wawona assets or libraries are not present.
 
-Before following ELF dependencies, the extractor uses NDK `llvm-readelf` to require ELF64/AArch64 for every selected shared library, including versioned SONAMEs. It calculates the input APK SHA-256 as a stream (without reading the whole APK into memory) and records that hash, the pinned revision supplied by the build command, each staged library SHA-256 and extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
+Before following ELF dependencies, the extractor uses NDK `llvm-readelf` to require ELF64/AArch64 and 16-KB-compatible `PT_LOAD` alignment for every selected shared library, including versioned SONAMEs. Every load segment must have `p_align >= 0x4000` and valid file-offset/virtual-address congruence. A library built only for 4-KB pages is rejected before it enters the Gradle native source set. The packager requests wide program-header output so a wrapped `readelf` table cannot hide alignment fields. It calculates the input APK SHA-256 as a stream (without reading the whole APK into memory) and records that hash, the pinned revision supplied by the build command, the required Android ELF page size, each staged library SHA-256 and extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
 
 Run the packager tests without Nix:
 
@@ -107,7 +107,7 @@ The APK inside it was 93,192,914 bytes, with SHA-256:
 
 Its `product-manifest.json` records the same upstream revision and Nix store output `/nix/store/z2q69igr3rcnl3vhm32miak4fpiir7qf-wawona-android`.
 
-An independent ELF-header/DT_NEEDED inspection of this real APK found 27 ARM64 shared-object entries. The required roots, recursive dependencies and the two explicit auxiliary roots resolve to 11 libraries (about 83.3 MiB), with no unresolved non-system dependency:
+An independent ELF-header/DT_NEEDED inspection of this real APK found 27 ARM64 shared-object entries. The required roots, recursive dependencies and the two explicit auxiliary roots resolve to 11 libraries (about 83.3 MiB), with no unresolved non-system dependency. Each of the 11 selected libraries was independently checked with `readelf -Wl`; all PT_LOAD segments use `p_align=0x4000` and satisfy 16-KB alignment:
 
 ```text
 libEGL_angle.so

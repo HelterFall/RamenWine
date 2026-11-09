@@ -77,6 +77,7 @@ NEEDED_RE = re.compile(r"\(NEEDED\).*Shared library: \[([^\]]+)\]")
 SONAME_RE = re.compile(r"\(SONAME\).*Library soname: \[([^\]]+)\]")
 ELF_CLASS_RE = re.compile(r"Class:\s*ELF64")
 ELF_MACHINE_RE = re.compile(r"Machine:\s*AArch64", re.IGNORECASE)
+ANDROID_MIN_ELF_PAGE_SIZE = 16 * 1024
 
 
 def safe_archive_path(name: str) -> str:
@@ -101,6 +102,44 @@ def validate_arm64_elf_header(readelf_output: str, filename: str) -> None:
         raise ValueError(f"{filename} is not an ELF64 shared library.")
     if not ELF_MACHINE_RE.search(readelf_output):
         raise ValueError(f"{filename} is not an AArch64 ELF binary.")
+
+
+def validate_arm64_elf_16kb_alignment(readelf_output: str, filename: str) -> None:
+    """Require every bundled Android ARM64 PT_LOAD segment to support 16 KiB pages."""
+    segments: list[tuple[int, int, int]] = []
+    for line in readelf_output.splitlines():
+        fields = line.split()
+        if not fields or fields[0] != "LOAD":
+            continue
+        if len(fields) < 8:
+            raise ValueError(f"{filename} has an invalid ELF PT_LOAD header.")
+        try:
+            file_offset = int(fields[1], 0)
+            virtual_address = int(fields[2], 0)
+            alignment = int(fields[-1], 0)
+        except ValueError as error:
+            raise ValueError(f"{filename} has an invalid ELF PT_LOAD alignment.") from error
+        segments.append((file_offset, virtual_address, alignment))
+
+    if not segments:
+        raise ValueError(f"{filename} has no ELF PT_LOAD segments.")
+
+    page_size = ANDROID_MIN_ELF_PAGE_SIZE
+    for file_offset, virtual_address, alignment in segments:
+        if (
+            alignment < page_size
+            or alignment % page_size != 0
+            or alignment & (alignment - 1) != 0
+        ):
+            raise ValueError(
+                f"{filename} is not 16 KB page-size compatible: "
+                f"PT_LOAD p_align is 0x{alignment:x}, expected at least 0x{page_size:x}."
+            )
+        if file_offset % alignment != virtual_address % alignment:
+            raise ValueError(
+                f"{filename} has an invalid ELF PT_LOAD alignment: "
+                "file offset and virtual address are not congruent."
+            )
 
 
 def sha256_file(path: Path) -> str:
@@ -244,7 +283,7 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
             temp.write(data)
             temp.flush()
             result = subprocess.run(
-                [readelf, "--file-header", "--dynamic", temp.name],
+                [readelf, "--wide", "--file-header", "--program-headers", "--dynamic", temp.name],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -254,6 +293,7 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
                 f"llvm-readelf failed for {filename}: {result.stderr.strip()}"
             )
         validate_arm64_elf_header(result.stdout, filename)
+        validate_arm64_elf_16kb_alignment(result.stdout, filename)
         return parse_dynamic_dependencies(result.stdout)
 
     return read_dependencies
@@ -380,6 +420,7 @@ def package_apk(
             "revision": revision,
             "apkSha256": sha256_file(apk_path),
             "abi": "arm64-v8a",
+            "androidMinElfPageSizeBytes": ANDROID_MIN_ELF_PAGE_SIZE,
             "rootLibraries": list(ROOT_LIBRARIES),
             "optionalRootLibraries": [
                 name for name in OPTIONAL_ROOT_LIBRARIES
