@@ -26,7 +26,7 @@
 - Python tests for archive output, traversal, case collisions, virtual mount symlinks and symlink escape.
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
-- PRoot launch preflight now rejects a missing x86-64 glibc loader or either half of Wine's Wayland driver; it separates Android/Bionic `LD_LIBRARY_PATH` from the guest x86-64 `BOX64_LD_LIBRARY_PATH` and sets the packaged Wine driver paths.
+- PRoot launch preflight now requires both the ARM64 glibc loader (for ARM64 Linux Box64) and the x86-64 glibc loader (for Wine), plus both halves of Wine's Wayland driver; Android/Bionic `LD_LIBRARY_PATH` is reserved for the PRoot host and guest x86-64 libraries use `BOX64_LD_LIBRARY_PATH`.
 - Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback.
 - WinePrefixInitializer that runs Box64 → wineboot --init for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
 - GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
@@ -62,7 +62,7 @@ RamenWine supports three backend package IDs in its runtime inventory:
 - bionic-x64-box64
 - glibc-proot-box64
 
-For the first end-to-end launch, prioritize the glibc-proot-box64 contract already implemented in ProotWineCommandBuilder: ARM64 Android PRoot host, Box64, an x86-64 glibc Wine 11 WoW64 build, and Wine's Wayland driver connected to the Wawona socket. This is a prototype choice to reach the first visible window, not a claim that it is the final fastest backend. Defer Bionic ARM64EC/FEX and Bionic x64/Box64 until the first launch works; do not branch into multiple runtime backends in parallel.
+For the first end-to-end launch, prioritize the glibc-proot-box64 contract: an ARM64 Android/Bionic PRoot host, an ARM64 Linux/glibc guest rootfs, an ARM64 Linux Box64 executable inside that guest, and an x86-64 glibc Wine 11 WoW64 payload installed alongside the ARM64 userspace. The rootfs must provide both `lib/ld-linux-aarch64.so.1` (Box64) and `lib64/ld-linux-x86-64.so.2` (Wine), plus Wine's Wayland driver connected to the Wawona socket. This is a prototype choice to reach the first visible window, not a claim that it is the final fastest backend. Do not use Box64's native Termux/Bionic build: upstream labels it experimental and says it will not run Linux binaries. Defer Bionic ARM64EC/FEX and Bionic x64/Box64 until the first launch works; do not branch into multiple runtime backends in parallel.
 
 The offline ZIP format is documented in Android Runtime Backends. The package builder lives in tools/package_runtime.py.
 
@@ -103,8 +103,8 @@ The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900
 ## Next engineering steps — runtime first, APK last
 
 1. Freeze the first target backend to glibc-proot-box64; keep Bionic/FEX as later experiments.
-2. Produce a reproducible runtime package containing an ARM64 Android PRoot host, Box64, an x86-64 glibc rootfs, Wine 11 WoW64, wineboot, and the Wine Wayland driver plus its exact shared-library/protocol dependencies.
-3. Keep runtime inventory separate from launch readiness: the current PRoot command builder rejects a missing glibc loader or either Wine Wayland driver half before starting. Tighten the UI state later so a generic `FILES_PRESENT` manifest is never presented as proof that Wine is launch-ready.
+2. Produce a reproducible runtime package containing an ARM64 Android/Bionic PRoot host, an ARM64 glibc rootfs, ARM64 Linux Box64, and x86-64 Wine 11 WoW64 with wineboot, the Wine Wayland driver and both ABI dependency closures.
+3. Keep runtime inventory separate from launch readiness: the PRoot command builder rejects a missing ARM64 or x86-64 glibc loader, or either Wine Wayland driver half, before starting. Tighten the UI state later so a generic `FILES_PRESENT` manifest is never presented as proof that Wine is launch-ready.
 4. Validate the package independently of the APK: verify hashes/ELF architectures, run PRoot and Box64 smoke commands in the rootfs, then prove wineboot --init creates both registry files. Do not start another APK build for these checks.
 5. Make Wine connect to Wawona over the bound Wayland socket and validate a small original Win32 GUI/GDI executable. Diagnose runtime logs and process teardown before opening game-specific work.
 6. Add the first Play/session flow only after the runtime contract and compositor endpoint are proven; wire it to the existing imported-game record and GameLaunchCoordinator.
