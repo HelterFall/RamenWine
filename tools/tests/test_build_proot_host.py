@@ -77,9 +77,7 @@ class BuildProotHostTests(unittest.TestCase):
             source = make_pinned_proot_source(Path(temporary))
             recipe = source / "packages/proot/build.sh"
             recipe.write_text(
-                recipe.read_text(encoding="utf-8") + "
-case SIGTERM:
-",
+                recipe.read_text(encoding="utf-8") + "\ncase SIGTERM:\n",
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "unmarked or partial"):
@@ -169,8 +167,15 @@ case SIGTERM:
 
             def record_run(command, cwd=None, extra_env=None):
                 commands.append((command, cwd, extra_env))
+                if command[:2] == ["git", "init"]:
+                    make_pinned_proot_source(Path(command[2]))
                 if len(command) > 1 and command[1] == str(build_proot_host.ASSEMBLER):
-                    (output / "host").mkdir(parents=True, exist_ok=True)
+                    host_payload = output / "host"
+                    host_payload.mkdir(parents=True, exist_ok=True)
+                    (host_payload / "PROVENANCE.json").write_text(
+                        '{"formatVersion":1,"target":"android-bionic-arm64"}',
+                        encoding="utf-8",
+                    )
 
             def record_subprocess(command, **kwargs):
                 if command[:3] == ["git", "-C", str(work / "termux-packages")]:
@@ -194,6 +199,20 @@ case SIGTERM:
                 build_proot_host.ASSEMBLER = original_assembler
 
             self.assertEqual(output / "host", result)
+            import json
+            provenance = json.loads((output / "host" / "PROVENANCE.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                build_proot_host.PROOT_SIGTERM_PATCH_ID,
+                provenance["downstreamPatches"]["prootTermination"]["id"],
+            )
+            self.assertEqual(
+                "packages/proot/build.sh",
+                provenance["downstreamPatches"]["prootTermination"]["file"],
+            )
+            self.assertEqual(
+                64,
+                len(provenance["downstreamPatches"]["prootTermination"]["recipeSha256"]),
+            )
             self.assertTrue(any(
                 command[:4] == ["git", "-C", str(work / "termux-packages"), "fetch"]
                 and build_proot_host.TERMUX_PACKAGES_COMMIT in command
