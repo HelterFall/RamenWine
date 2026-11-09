@@ -198,6 +198,20 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsRuntimeMissingWaylandXkbRegistryLibrary() {
+        val fixture = Fixture()
+        try {
+            fixture.xkbRegistry.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("XKB registry library"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsRuntimeMissingArm64GlibcLoader() {
         val fixture = Fixture()
         try {
@@ -399,6 +413,26 @@ class ProotWineCommandBuilderTest {
         val wineWaylandI386Pe = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
+        )
+        val waylandClient = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-client.so.0"
+        )
+        val waylandCursor = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0"
+        )
+        val waylandEgl = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1"
+        )
+        val xkbCommon = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
+        )
+        val xkbRegistry = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
         )
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
