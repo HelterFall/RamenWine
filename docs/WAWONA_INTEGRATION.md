@@ -76,12 +76,12 @@ The adapter is split across:
 - `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`.
 `WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
 - `WawonaDisplayBackend.kt`: starts the compositor, verifies its live socket, attaches an Android `Surface`, and returns a `GameDisplaySession`.
-- `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events after its owner enables input.
+- `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events only after `bindSession()` receives a Wawona-owned session. Every event is serialized through that session's process-wide lease; stale Surface events are ignored after the lease is released.
 - `GameLaunchCoordinator`: remains the owner that joins a supplied display session with the PRoot process lifecycle.
 
 ### Process-global restriction
 
-Upstream Android JNI uses process-global `g_core`, Vulkan instance/device/surface, swapchain and render-thread state. `nativeInit` is not a factory for independent compositor objects. RamenWine consequently enforces one active Wawona session per app process and serializes every JNI operation through a lease guard.
+Upstream Android JNI uses process-global `g_core`, Vulkan instance/device/surface, swapchain and render-thread state. `nativeInit` is not a factory for independent compositor objects. RamenWine consequently enforces one active Wawona session per app process and serializes startup, resize, input, surface teardown and shutdown through a session-specific lease guard. Input events carrying an old lease are dropped rather than reaching a later compositor session.
 
 Do not remove this limit unless the upstream Android renderer and JNI lifecycle are redesigned to own independent core and renderer instances.
 
