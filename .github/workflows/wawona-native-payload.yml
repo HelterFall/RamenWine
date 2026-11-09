@@ -129,6 +129,7 @@ jobs:
               "lib/arm64-v8a/libwawona.so",
               "lib/arm64-v8a/libEGL_angle.so",
               "lib/arm64-v8a/libGLESv2_angle.so",
+              "lib/arm64-v8a/libweston_simple_shm.so",
               "assets/wawona/provenance.json",
               "assets/wawona/xkb",
               "assets/wawona/fonts",
@@ -144,7 +145,9 @@ jobs:
               packaged_libraries = {
                   Path(name).name
                   for name in names
-                  if name.startswith("lib/arm64-v8a/") and name.endswith(".so")
+                  if name.startswith("lib/arm64-v8a/") and (
+                      name.endswith(".so") or ".so." in Path(name).name
+                  )
               }
               expected_libraries = set(provenance["bundledLibraries"])
               missing_libraries = sorted(expected_libraries - packaged_libraries)
