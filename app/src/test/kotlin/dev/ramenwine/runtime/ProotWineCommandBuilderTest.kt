@@ -207,6 +207,20 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsRuntimeMissingWinePreloader() {
+        val fixture = Fixture()
+        try {
+            fixture.winePreloader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wine-preloader"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsRuntimeMissingWineWaylandPeDriver() {
         val fixture = Fixture()
         try {
@@ -422,6 +436,10 @@ class ProotWineCommandBuilderTest {
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineServer = executable(rootfs, "usr/bin/wineserver")
+        val winePreloader = executable(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
+        )
         val wineboot = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"

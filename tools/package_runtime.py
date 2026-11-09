@@ -812,6 +812,20 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/lib64/ld-linux-x86-64.so.2",
     )
 
+    # The Linux x86-64 loader starts the preloader from the native unix
+    # directory. Wine 11 enables this component on Linux hosts with a known
+    # architecture, and its own makefile installs it beside the Unix loader.
+    wine_preloader = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader",
+    )
+    require_executable(wine_preloader, "Wine x86-64 preloader")
+    require_elf64(
+        wine_preloader,
+        "Wine x86-64 preloader",
+        ELF_MACHINE_X86_64,
+    )
+
     wineboot = resolve_guest_file(
         rootfs,
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
@@ -881,6 +895,7 @@ def validate_glibc_proot_box64(root: Path) -> None:
     x64_entry_points = [
         "/usr/bin/wine",
         "/usr/bin/wineserver",
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader",
         "/" + wayland_unix.relative_to(rootfs.resolve()).as_posix(),
         *[
             box64_library_directory + "/" + library_name

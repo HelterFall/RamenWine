@@ -145,6 +145,7 @@ object ProotWineCommandBuilder {
         )
         executableFile(rootfs, "usr/bin/wine")
         executableFile(rootfs, WINE_SERVER_PATH)
+        executableFile(rootfs, WINE_PRELOADER_PATH)
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
             runtimeFile(rootfs, WINEBOOT_PE_RELATIVE_PATH, "wineboot PE program")
         }
@@ -455,6 +456,8 @@ object ProotWineCommandBuilder {
     private const val WINEBOOT_PE_RELATIVE_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     private const val WINE_SERVER_PATH = "usr/bin/wineserver"
+    private const val WINE_PRELOADER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
     private const val GUEST_ARM64_LIBRARY_PATH =
         "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =
