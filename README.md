@@ -237,4 +237,4 @@ The Android host scaffold currently includes:
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
 
-Piperella Wayland Compositor is currently a research reference only. It is GPL-3.0 and requires Android API 36, so it has not been added as a direct dependency.
+Wawona is the current MIT-licensed Wayland compositor reference, but its Android target is a full application with a process-global Rust/JNI compositor and Nix-staged native dependencies, not a reusable AAR. It has not been integrated. Piperella remains a separate GPL-3.0/API-36 research reference and is not a direct dependency.

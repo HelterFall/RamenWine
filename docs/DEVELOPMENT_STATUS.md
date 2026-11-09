@@ -89,13 +89,13 @@ See Android Display Backend Research for the findings and integration gates. The
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The new PRoot process-supervisor regression tests are on the current work branch and require their own CI result. Host CI success does not substitute for physical Android/ARM64 device validation.
+The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The current branch's earlier successful focused run (#77, head ecf9383) passed the 5 Python packager tests and JVM unit tests, but it predates the latest lifecycle changes. Run #79 on head c1d9e9b failed two process-stop tests. The latest head serializes stop requests and uses a signal.pause fixture; no new Actions run has been reported for that head yet, so it remains unverified. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 
 1. Complete CI verification for import progress and the display-research documentation commit.
 2. Decide the RamenWine distribution license before considering any GPL-3.0 compositor integration.
-3. Implement the first RamenWine-owned compositor adapter behind GameDisplayBackend. Wawona is the MIT-licensed reference, but its current Android target is an application with Nix-staged native dependencies rather than a reusable Gradle library.
+3. Prototype a RamenWine-owned Wawona adapter behind GameDisplayBackend. First package/review the Rust static library and Nix-staged Android native dependencies, then wrap Wawona's process-global compositor as a single-active-session backend. Wawona is not a reusable Gradle library and does not provide independent per-session compositor instances.
 4. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
 5. Build a glibc rootfs + PRoot + Box64 fallback package.
 6. Run the same original Windows GUI test executable through each backend.

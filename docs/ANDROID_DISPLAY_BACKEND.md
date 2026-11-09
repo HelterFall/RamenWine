@@ -128,17 +128,28 @@ A compositor candidate must pass:
 
 ## Wawona integration assessment
 
-The current upstream [Wawona compositor](https://github.com/Wawona/Wawona) is MIT-licensed and its Android application declares minSdk 24, so its license and Android floor are compatible with RamenWine's current minSdk 26.
+The current upstream [Wawona compositor](https://github.com/Wawona/Wawona) is MIT-licensed and its Android application declares minSdk 24, so its license and Android floor are compatible with RamenWine's current minSdk 26. The upstream project has evolved: the Wayland compositor core is now Rust, with Kotlin/JNI Android host integration and a Vulkan renderer.
 
 It is **not** a drop-in Android library today:
 
 - The upstream Android Gradle project is an application module, not a published reusable AAR.
-- Its Android CMake target expects the repository's Rust core, generated protocol sources, Weston dependencies and native libraries staged by its Nix build.
-- The Kotlin surface is coupled to Wawona's global WawonaNative JNI object, preferences, session activities and machine model. Copying only WawonaSurfaceView would not provide a working compositor.
+- Its Android CMake target combines JNI/rendering sources with a Rust backend static library and generated protocol/shader sources. The Nix build stages many native dependencies, including libwayland, xkbcommon, pixman, expat, OpenSSL, zstd/lz4, Weston components, ANGLE and iland.
+- The Android API is application-shaped: WawonaNative is a singleton, nativeInit(cacheDir) creates one process-global core, and the native code starts the fixed socket name wayland-0 under its XDG_RUNTIME_DIR. It also sets WAYLAND_DISPLAY in the host process environment.
+- The native renderer keeps one global Vulkan surface/swapchain. nativeDestroySurface tears down the surface but deliberately preserves the Wayland core; nativeShutdown stops and frees the core. Those are different lifecycle operations and must not be conflated.
+- The Kotlin surface is coupled to Wawona's preferences, session activities and machine model. Copying only WawonaSurfaceView would not provide a working compositor.
 - Its fallback Studio native build uses stub render/backend sources, so it is not a runtime integration path.
 
-**Current decision:** use Wawona as the MIT-licensed technical reference and potential source for a later, separately reviewed RamenWine-owned native adapter. Do not add its full Android app as a Gradle dependency or copy the large application UI into RamenWine.
+**Current decision:** use Wawona as the MIT-licensed technical reference and potential basis for a separately reviewed RamenWine-owned adapter. Do not add its full Android app as a Gradle dependency or copy the large application UI into RamenWine.
 
-RamenWine now defines a small GameDisplayBackend / GameDisplaySession boundary. A real backend must attach to an Android Surface, return its live Wayland socket endpoint, resize with the surface, and stop/unlink cleanly when the session closes. No implementation is registered yet, so this is an integration contract, not a claim that the app can display a Wine window.
+A future adapter must explicitly handle Wawona's process-global model. RamenWine currently has a per-game GameDisplaySession contract; the first Wawona adapter would therefore need to enforce one active compositor/game session per app process, expose the actual app-private runtime directory plus live wayland-0 socket, attach/detach the Android Surface independently from stopping the core, and serialize shutdown. It must not claim to support multiple independent compositor sessions.
 
-The PRoot command builder also checks the socket node type with Android lstat(2). A same-named regular file is rejected; a backend cannot satisfy the launch precondition by merely creating a placeholder file.
+RamenWine now defines a GameDisplayBackend / GameDisplaySession boundary. A real backend must attach to an Android Surface, return its live Wayland socket endpoint, resize with the surface, and stop/unlink cleanly when the session closes. No implementation is registered yet, so this is an integration contract, not a claim that the app can display a Wine window.
+
+The PRoot command builder checks the socket node type with Android lstat(2). A same-named regular file is rejected; a backend cannot satisfy the launch precondition by merely creating a placeholder file.
+
+## Related upstream sources
+
+- [Wawona changelog](https://github.com/Wawona/Wawona/blob/master/CHANGELOG.md) — Rust-core migration and Android support
+- [Wawona Android Gradle project](https://github.com/Wawona/Wawona/tree/master/android/app) — application module and Kotlin host
+- [Wawona Android JNI implementation](https://github.com/Wawona/Wawona/blob/master/src/platform/android/android_jni.c) — process-global compositor and Vulkan surface lifecycle
+- [Wawona Android Nix build](https://github.com/Wawona/Wawona/blob/master/dependencies/wawona/android.nix) — staged native dependencies
