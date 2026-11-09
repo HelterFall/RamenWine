@@ -70,7 +70,7 @@ class ProotWineCommandBuilderTest {
                     "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
                 guestEnvironment["WINEDLLPATH"]
             )
-            assertEquals("win64", guestEnvironment["WINEARCH"])
+            assertEquals("wow64", guestEnvironment["WINEARCH"])
             assertEquals("/run/user/10123", guestEnvironment["XDG_RUNTIME_DIR"])
             assertEquals("wayland-0", guestEnvironment["WAYLAND_DISPLAY"])
             assertEquals("/usr/share/X11/xkb", guestEnvironment["XKB_CONFIG_ROOT"])
