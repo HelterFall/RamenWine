@@ -12,6 +12,7 @@ class TouchMouseInputMapperTest {
         assertEquals(
             listOf(
                 TouchMouseInputMapper.Command.PointerEnter(24.0, 48.0, 100),
+                TouchMouseInputMapper.Command.KeyboardFocus(true),
                 TouchMouseInputMapper.Command.PointerButton(0x110, true, 100)
             ),
             mapper.pointerDown(7, 24.0, 48.0, 100)
