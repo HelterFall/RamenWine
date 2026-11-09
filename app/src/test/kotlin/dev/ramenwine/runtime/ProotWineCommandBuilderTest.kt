@@ -122,6 +122,20 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsRuntimeMissingArm64GlibcLoader() {
+        val fixture = Fixture()
+        try {
+            fixture.arm64GlibcLoader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("ARM64 glibc loader"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsRuntimeMissingX64GlibcLoader() {
         val fixture = Fixture()
         try {
@@ -279,6 +293,7 @@ class ProotWineCommandBuilderTest {
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineboot = executable(rootfs, "usr/bin/wineboot")
+        val arm64GlibcLoader = regular(rootfs, "lib/ld-linux-aarch64.so.1")
         val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
         val wineWaylandUnix = regular(
             rootfs,
