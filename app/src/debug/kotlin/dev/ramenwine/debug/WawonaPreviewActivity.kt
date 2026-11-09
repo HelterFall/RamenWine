@@ -66,7 +66,9 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
             setPadding(8, 8, 8, 4)
         })
         root.addView(TextView(this).apply {
-            text = "Только тест графики. Wine и импортированные EXE не запускаются."
+            text = "Технический тест графики Wawona. Он не запускает игры или Wine. " +
+                "При успехе должно появиться цветное тестовое окно; чёрный экран означает, " +
+                "что отрисовку ещё нужно починить."
             textSize = 12f
             setPadding(8, 0, 8, 4)
         })
@@ -94,7 +96,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
             pendingSurface = surface
             pendingWidth = widthPx
             pendingHeight = heightPx
-            statusView.text = "Завершаю предыдущую native-сессию…"
+            statusView.text = if (closePending) {
+                "Закрываю предыдущую графическую сессию…"
+            } else {
+                "Wawona уже запускается; ожидаю готовности графики…"
+            }
             return
         }
 
