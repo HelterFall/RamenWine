@@ -19,6 +19,19 @@ spec.loader.exec_module(build_proot_host)
 
 
 class BuildProotHostTests(unittest.TestCase):
+    def test_requires_fuse_device_before_starting_docker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fake_fuse = Path(temporary) / "fuse"
+            with (
+                patch.object(build_proot_host, "FUSE_DEVICE", fake_fuse),
+                patch.object(build_proot_host.shutil, "which", return_value="/usr/bin/tool"),
+                patch.object(build_proot_host, "run") as run_command,
+            ):
+                with self.assertRaisesRegex(ValueError, "requires /dev/fuse"):
+                    build_proot_host.require_tools()
+
+            run_command.assert_not_called()
+
     def test_rejects_overlapping_work_and_output_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

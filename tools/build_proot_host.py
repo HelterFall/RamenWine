@@ -16,6 +16,7 @@ TERMUX_REPOSITORY = "https://github.com/termux/termux-packages.git"
 TERMUX_PACKAGES_COMMIT = "29a6879366dad92650fb7db7719c5a4b1b9d55f1"
 BUILDER_IMAGE = "ramenwine-termux-package-builder:" + TERMUX_PACKAGES_COMMIT
 ASSEMBLER = Path(__file__).with_name("assemble_proot_host.py")
+FUSE_DEVICE = Path("/dev/fuse")
 
 
 def run(
@@ -48,6 +49,10 @@ def require_tools() -> None:
     ]
     if missing:
         raise ValueError("Required host tools are missing: " + ", ".join(missing))
+    if not FUSE_DEVICE.exists():
+        raise ValueError(
+            "The Termux Docker builder requires /dev/fuse on the Ubuntu build host."
+        )
     run(["docker", "info"])
 
 
