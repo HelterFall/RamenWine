@@ -467,6 +467,83 @@ def validate_elf_dependency_closure(
 
     return len(visited)
 
+def validate_box64_x64_library_bundle(
+    rootfs: Path,
+    relative_directory: str,
+) -> int:
+    """Validate every shipped Box64 x86-64 shared library and its symlink target.
+
+    Box64's bundle contains libraries loaded on demand as guest applications
+    request wrapped APIs. Checking only the three libraries used by Wine's
+    loader misses wrong-ABI or escaping libraries that would fail much later.
+    """
+    root_real = rootfs.resolve(strict=True)
+    directory = rootfs.joinpath(*PurePosixPath(relative_directory).parts)
+    try:
+        real_directory = directory.resolve(strict=True)
+        real_directory.relative_to(root_real)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            "Box64 x86-64 library directory is missing or escapes the guest rootfs."
+        ) from error
+    if not real_directory.is_dir():
+        raise ValueError("Box64 x86-64 library path is not a directory.")
+
+    required_libraries = (
+        "libstdc++.so.6",
+        "libgcc_s.so.1",
+        "libunwind.so.8",
+    )
+    guest_directory = "/" + PurePosixPath(relative_directory).as_posix()
+    for name in required_libraries:
+        library = resolve_guest_file(rootfs, guest_directory + "/" + name)
+        try:
+            library.relative_to(real_directory)
+        except ValueError as error:
+            raise ValueError(
+                "Required Box64 x86-64 library escapes its bundle: " + name
+            ) from error
+        require_elf64(
+            library,
+            "Box64 bundled x86-64 library " + name,
+            ELF_MACHINE_X86_64,
+        )
+
+    inspected: set[Path] = set()
+    for current, child_directories, filenames in os.walk(
+        real_directory, followlinks=False
+    ):
+        child_directories[:] = sorted(
+            name
+            for name in child_directories
+            if not (Path(current) / name).is_symlink()
+        )
+        for filename in sorted(filenames):
+            if not filename.startswith("lib") or ".so" not in filename:
+                continue
+            candidate = Path(current) / filename
+            guest_path = "/" + candidate.relative_to(root_real).as_posix()
+            resolved = resolve_guest_file(rootfs, guest_path)
+            try:
+                resolved.relative_to(real_directory)
+            except ValueError as error:
+                raise ValueError(
+                    "Box64 shared library escapes its x86-64 bundle: " + filename
+                ) from error
+            if resolved in inspected:
+                continue
+            require_elf64(
+                resolved,
+                "Box64 bundled x86-64 library " + filename,
+                ELF_MACHINE_X86_64,
+            )
+            inspected.add(resolved)
+
+    if not inspected:
+        raise ValueError("Box64 x86-64 library bundle contains no shared libraries.")
+    return len(inspected)
+
+
 def require_elf64(
     path: Path,
     label: str,
@@ -776,20 +853,7 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
 
     box64_library_directory = "/usr/lib/box64-x86_64-linux-gnu"
-    for library_name in (
-        "libstdc++.so.6",
-        "libgcc_s.so.1",
-        "libunwind.so.8",
-    ):
-        library = resolve_guest_file(
-            rootfs,
-            box64_library_directory + "/" + library_name,
-        )
-        require_elf64(
-            library,
-            "Box64 bundled x86-64 library " + library_name,
-            ELF_MACHINE_X86_64,
-        )
+    validate_box64_x64_library_bundle(rootfs, box64_library_directory)
 
     wine = resolve_guest_file(rootfs, "/usr/bin/wine")
     require_executable(wine, "Wine unified loader")
