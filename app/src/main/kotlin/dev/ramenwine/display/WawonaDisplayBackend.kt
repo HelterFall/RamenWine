@@ -63,6 +63,28 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                 applyHostKeymap()
 
                 WawonaNative.nativeSetSurface(surface)
+                // Mirror WawonaSettings' clean-install defaults so the host
+                // stays on Android's system Vulkan WSI + bundled ANGLE.
+                WawonaNative.nativeSyncOutputSize(widthPx, heightPx)
+                WawonaNative.nativeApplySettings(
+                    false, // forceServerSideDecorations
+                    true,  // autoRetinaScaling
+                    0,     // automatic rendering backend
+                    true,  // respectSafeArea
+                    false, // renderMacOSPointer
+                    false, // swapCmdAsCtrl
+                    true,  // universalClipboard
+                    true,  // colorSyncSupport
+                    true,  // nestedCompositorsSupport
+                    false, // useMetal4ForNested
+                    true,  // multipleClients
+                    true,  // waypipeRSSupport
+                    false, // enableTCPListener
+                    1234,  // tcpPort
+                    "system",
+                    "angle",
+                    "auto"
+                )
                 if (!surface.isValid) {
                     throw IOException("Android game surface became invalid during attach.")
                 }
