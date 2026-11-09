@@ -46,6 +46,17 @@ class GameLaunchCoordinator(
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
         require(hostUid >= 0) { "Invalid Android UID." }
 
+        // Catch damaged or incorrectly-architected packages before starting
+        // the compositor or PRoot. This also covers runtimes installed before
+        // the installer gained its device-side ABI validation.
+        withContext(Dispatchers.IO) {
+            val backendDirectory = File(
+                appContext.filesDir,
+                "runtime/current/backends/" + RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
+            )
+            GlibcRuntimeAbiValidator.validate(backendDirectory)
+        }
+
         // The compositor must own a live socket before the command builder
         // validates it and maps its runtime directory into the PRoot guest.
         val displaySession = displayBackend.start(surface, widthPx, heightPx)
