@@ -20,6 +20,10 @@ class GameLaunchCoordinator(
     private val processSupervisor: ProotWineProcessSupervisor = ProotWineProcessSupervisor()
 ) {
     private val appContext = context.applicationContext
+    private val prefixInitializer = WinePrefixInitializer(
+        filesDirectory = appContext.filesDir,
+        processSupervisor = processSupervisor
+    )
 
     suspend fun launch(
         game: ImportedGame,
@@ -49,6 +53,10 @@ class GameLaunchCoordinator(
                 hostUid = hostUid,
                 locale = locale
             )
+            // Never launch the game in an empty or partially-created prefix.
+            // The initializer is a no-op once both Wine registry files exist.
+            prefixInitializer.ensureInitialized(request, onOutput)
+
             val command = withContext(Dispatchers.IO) {
                 ProotWineCommandBuilder.build(request)
             }

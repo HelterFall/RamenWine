@@ -56,6 +56,68 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsWinebootPrefixInitializationCommand() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.INITIALIZE_PREFIX
+            )
+            val command = fixture.build(request)
+
+            assertEquals("/usr/bin/wineboot", command.guestExecutablePath)
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineboot", "--init"),
+                command.arguments.takeLast(3)
+            )
+            assertFalse(command.arguments.contains("/usr/bin/wine"))
+            assertEquals(
+                "/prefixes/" + fixture.gameId,
+                command.environment["WINEPREFIX"]
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWinebootExecutableForPrefixInitialization() {
+        val fixture = Fixture()
+        try {
+            fixture.wineboot.delete()
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.INITIALIZE_PREFIX
+            )
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wineboot"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsPrefixParentSymlinkEscapingPrivateFilesDirectory() {
+        val fixture = Fixture()
+        val outside = Files.createTempDirectory("ramenwine-prefix-outside").toFile()
+        try {
+            Files.createSymbolicLink(
+                File(fixture.filesDirectory, "prefixes").toPath(),
+                outside.toPath()
+            )
+
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine prefix root"))
+            assertFalse(File(outside, fixture.gameId).exists())
+        } finally {
+            outside.deleteRecursively()
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsUnsafeExecutablePath() {
         val fixture = Fixture(executableRelativePath = "../outside.exe")
         try {
@@ -155,6 +217,7 @@ class ProotWineCommandBuilderTest {
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val wineboot = executable(rootfs, "usr/bin/wineboot")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {

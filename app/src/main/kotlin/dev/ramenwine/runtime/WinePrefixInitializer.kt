@@ -1,0 +1,133 @@
+package dev.ramenwine.runtime
+
+import dev.ramenwine.display.AndroidWaylandSocketValidator
+import dev.ramenwine.display.WaylandSocketValidator
+import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+/**
+ * Creates a new per-game Wine prefix before the selected Windows executable is
+ * started. A prefix is ready only when both Wine registry files are present.
+ *
+ * The prefix lock prevents two launches from running wineboot into the same
+ * directory at the same time.
+ */
+internal class WinePrefixInitializer(
+    private val filesDirectory: File,
+    private val processSupervisor: ProotWineProcessSupervisor,
+    private val socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator,
+    private val initializationTimeoutMillis: Long = DEFAULT_INITIALIZATION_TIMEOUT_MILLIS
+) {
+    private val prefixMutex = Mutex()
+
+    init {
+        require(initializationTimeoutMillis > 0L) {
+            "Wine prefix initialization timeout must be positive."
+        }
+    }
+
+    suspend fun ensureInitialized(
+        request: ProotWineLaunchRequest,
+        onOutput: (String) -> Unit
+    ) {
+        prefixMutex.withLock {
+            val prefixDirectory = resolvePrefixDirectory(request.game.id)
+            val hasSystemRegistry = File(prefixDirectory, SYSTEM_REGISTRY).isFile
+            val hasUserRegistry = File(prefixDirectory, USER_REGISTRY).isFile
+
+            if (hasSystemRegistry && hasUserRegistry) {
+                return@withLock
+            }
+            if (hasSystemRegistry || hasUserRegistry) {
+                throw IOException(
+                    "The Wine prefix is only partially initialized. " +
+                        "It will not be used or overwritten automatically."
+                )
+            }
+
+            val initializationCommand = withContext(Dispatchers.IO) {
+                ProotWineCommandBuilder.build(
+                    request.copy(operation = ProotWineOperation.INITIALIZE_PREFIX),
+                    socketValidator
+                )
+            }
+
+            val exit = CompletableDeferred<Int>()
+            val processSession = processSupervisor.start(
+                command = initializationCommand,
+                onOutput = { line -> onOutput("[wineboot] " + line) },
+                onExit = { exitCode -> exit.complete(exitCode) }
+            )
+
+            try {
+                val exitCode = withTimeout(initializationTimeoutMillis) {
+                    exit.await()
+                }
+                if (exitCode != 0) {
+                    throw IOException(
+                        "Wine prefix initialization failed with exit code $exitCode."
+                    )
+                }
+                if (!isInitialized(prefixDirectory)) {
+                    throw IOException(
+                        "wineboot exited successfully but did not create both Wine registry files."
+                    )
+                }
+            } catch (error: Throwable) {
+                // Do not leave an initialization process running after timeout,
+                // cancellation, or a failed postcondition.
+                withContext(NonCancellable) {
+                    if (processSession.isAlive()) {
+                        runCatching { processSession.stop() }
+                    }
+                }
+                throw error
+            }
+        }
+    }
+
+    private fun resolvePrefixDirectory(gameId: String): File {
+        if (!GAME_ID_PATTERN.matches(gameId)) {
+            throw IOException("Invalid game ID for Wine prefix.")
+        }
+
+        val filesRoot = filesDirectory.canonicalFile
+        val prefixRoot = File(filesRoot, "prefixes").canonicalFile
+        requireContained(filesRoot, prefixRoot, "Wine prefix root")
+
+        val prefixDirectory = File(prefixRoot, gameId).canonicalFile
+        requireContained(prefixRoot, prefixDirectory, "Wine prefix directory")
+        return prefixDirectory
+    }
+
+    private fun requireContained(parent: File, child: File, label: String) {
+        val canonicalParent = parent.canonicalFile
+        val canonicalChild = child.canonicalFile
+        val prefix = canonicalParent.path + File.separator
+        if (
+            canonicalChild != canonicalParent &&
+            !canonicalChild.path.startsWith(prefix)
+        ) {
+            throw IOException(label + " escapes app-private storage.")
+        }
+    }
+
+    private fun isInitialized(prefixDirectory: File): Boolean =
+        File(prefixDirectory, SYSTEM_REGISTRY).isFile &&
+            File(prefixDirectory, USER_REGISTRY).isFile
+
+    private companion object {
+        private const val DEFAULT_INITIALIZATION_TIMEOUT_MILLIS = 5 * 60 * 1000L
+        private const val SYSTEM_REGISTRY = "system.reg"
+        private const val USER_REGISTRY = "user.reg"
+        private val GAME_ID_PATTERN =
+            Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+    }
+}
