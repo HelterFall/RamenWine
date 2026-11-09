@@ -85,6 +85,10 @@ class GameLaunchSession internal constructor(
     val isAlive: Boolean
         get() = processSession.isAlive()
 
+    /** The active Wawona session is exposed only so the SurfaceView can bind its input lease. */
+    val displaySession: GameDisplaySession
+        get() = displayLease.displaySession
+
     val displayCleanupError: Throwable?
         get() = displayLease.closeFailure
 
@@ -113,6 +117,9 @@ internal class DisplaySessionLease(
 
     @Volatile
     private var failure: Throwable? = null
+
+    val displaySession: GameDisplaySession
+        get() = session
 
     val closeFailure: Throwable?
         get() = failure

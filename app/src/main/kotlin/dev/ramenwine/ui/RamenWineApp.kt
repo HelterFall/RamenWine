@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.ramenwine.BuildConfig
+import dev.ramenwine.GamePlayerActivity
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
@@ -39,6 +40,7 @@ import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
+import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
 import dev.ramenwine.runtime.RuntimeState
@@ -164,6 +166,11 @@ fun RamenWineApp() {
                 importing = false
             }
         }
+    }
+
+    val prootRuntimeReady = runtimeInspection.backends.any {
+        it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 &&
+            it.state == RuntimeState.FILES_PRESENT
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -322,12 +329,21 @@ fun RamenWineApp() {
                 }
 
                 if (importedGames.isNotEmpty()) {
-                    LibraryCard(games = importedGames)
+                    LibraryCard(
+                        games = importedGames,
+                        launchEnabled = prootRuntimeReady,
+                        onLaunch = { selectedGame ->
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(GamePlayerActivity.EXTRA_GAME_ID, selectedGame.id)
+                                }
+                            )
+                        }
+                    )
                 }
 
                 Text(
-                    text = "Текущий этап не запускает EXE. Сначала игра безопасно импортируется, " +
-                        "затем подключим и проверим Windows runtime.",
+                    text = "Папка игры сохраняется в библиотеке приложения. Для запуска требуется установленный игровой движок; в игровом режиме отображается только окно новеллы.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -550,7 +566,11 @@ private fun ExecutableRow(
 }
 
 @Composable
-private fun LibraryCard(games: List<ImportedGame>) {
+private fun LibraryCard(
+    games: List<ImportedGame>,
+    launchEnabled: Boolean,
+    onLaunch: (ImportedGame) -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -558,7 +578,7 @@ private fun LibraryCard(games: List<ImportedGame>) {
         ) {
             Text("Библиотека", fontWeight = FontWeight.Bold)
             games.forEach { game ->
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(game.title, fontWeight = FontWeight.Medium)
                     Text(
                         text = game.executableRelativePath + " · " + game.architecture,
@@ -566,11 +586,24 @@ private fun LibraryCard(games: List<ImportedGame>) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = formatFileSize(game.totalBytes) +
-                            " · runtime пока не подключён",
+                        text = formatFileSize(game.totalBytes) + " · добавлена в библиотеку",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
+                    Button(
+                        onClick = { onLaunch(game) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = launchEnabled
+                    ) {
+                        Text("Играть")
+                    }
+                    if (!launchEnabled) {
+                        Text(
+                            "Игровой движок ещё не установлен.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 HorizontalDivider()
             }
