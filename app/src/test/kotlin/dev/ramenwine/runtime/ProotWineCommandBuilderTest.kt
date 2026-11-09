@@ -25,6 +25,17 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertEquals(
+                "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
+                command.environment["BOX64_LD_LIBRARY_PATH"]
+            )
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
+                command.environment["WINEDLLPATH"]
+            )
+            assertEquals("win64", command.environment["WINEARCH"])
             assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
@@ -91,6 +102,34 @@ class ProotWineCommandBuilderTest {
 
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("wineboot"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWineWaylandPeDriver() {
+        val fixture = Fixture()
+        try {
+            fixture.wineWaylandPe.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine Wayland PE driver"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingX64GlibcLoader() {
+        val fixture = Fixture()
+        try {
+            fixture.glibcLoader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("x86-64 glibc loader"))
         } finally {
             fixture.cleanup()
         }
@@ -240,6 +279,15 @@ class ProotWineCommandBuilderTest {
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineboot = executable(rootfs, "usr/bin/wineboot")
+        val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
+        val wineWaylandUnix = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+        )
+        val wineWaylandPe = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+        )
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {
@@ -286,6 +334,13 @@ class ProotWineCommandBuilderTest {
             file.parentFile?.mkdirs()
             file.writeText("test binary")
             file.setExecutable(true)
+            return file
+        }
+
+        private fun regular(parent: File, relativePath: String): File {
+            val file = File(parent, relativePath)
+            file.parentFile?.mkdirs()
+            file.writeText("test runtime file")
             return file
         }
     }
