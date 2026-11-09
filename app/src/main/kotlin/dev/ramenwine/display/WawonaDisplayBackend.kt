@@ -46,10 +46,10 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
 
                 // Upstream JNI sets WAWONA_FILES_DIR, XDG_RUNTIME_DIR and
                 // related process environment variables in its native code.
-                WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
+                WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.canonicalPath)
 
                 nativeInitializationAttempted = true
-                WawonaNative.nativeInit(appContext.cacheDir.absolutePath)
+                WawonaNative.nativeInit(runtimeDirectory.parentFile!!.absolutePath)
                 if (!WawonaNative.nativeIsCompositorReady()) {
                     throw IOException("Wawona Wayland compositor did not start.")
                 }
@@ -206,8 +206,11 @@ internal object WawonaRuntimePaths {
     private const val DIRECTORY_MODE = 0x1C0 // 0700
     private const val FILE_TYPE_MASK = 0xF000
 
-    fun prepare(cacheDirectory: File): File {
+    fun resolveRuntimeDirectory(cacheDirectory: File): File {
         val cacheRoot = cacheDirectory.canonicalFile
+        if (!cacheRoot.isDirectory) {
+            throw IOException("App-private cache directory is unavailable.")
+        }
         val runtimeDirectory = File(cacheRoot, RUNTIME_DIRECTORY_NAME).canonicalFile
         if (runtimeDirectory.parentFile != cacheRoot) {
             throw IOException("Wawona runtime directory escapes app-private cache storage.")
@@ -220,7 +223,11 @@ internal object WawonaRuntimePaths {
                     "unsafe /data/local/tmp fallback."
             )
         }
+        return runtimeDirectory
+    }
 
+    fun prepare(cacheDirectory: File): File {
+        val runtimeDirectory = resolveRuntimeDirectory(cacheDirectory)
         ensurePrivateDirectory(runtimeDirectory)
         removeStaleSocket(File(runtimeDirectory, SOCKET_NAME))
         return runtimeDirectory
