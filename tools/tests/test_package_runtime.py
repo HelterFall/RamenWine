@@ -354,14 +354,14 @@ class RuntimePackagerTests(unittest.TestCase):
             root = Path(temporary)
             backend = self._make_glibc_backend(root)
             external_library = self._write_elf64(
-                root / "outside" / "liboutside.so.1",
+                backend / "rootfs" / "outside" / "liboutside.so.1",
                 package_runtime.ELF_MACHINE_X86_64,
             )
             link = (
                 backend / "rootfs" / "usr" / "lib" / "box64-x86_64-linux-gnu"
                 / "libextra.so.1"
             )
-            link.symlink_to(external_library)
+            link.symlink_to("../../../outside/liboutside.so.1")
 
             with self.assertRaisesRegex(ValueError, "symlink|escapes"):
                 package_runtime.validate_glibc_proot_box64(backend)
