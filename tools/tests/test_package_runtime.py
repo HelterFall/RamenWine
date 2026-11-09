@@ -334,6 +334,38 @@ class RuntimePackagerTests(unittest.TestCase):
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
 
+    def test_rejects_wrong_architecture_in_any_box64_bundled_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            extra_library = (
+                backend / "rootfs" / "usr" / "lib" / "box64-x86_64-linux-gnu"
+                / "libextra.so.1"
+            )
+            self._write_elf64(
+                extra_library,
+                package_runtime.ELF_MACHINE_AARCH64,
+            )
+
+            with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_box64_library_symlink_that_escapes_its_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backend = self._make_glibc_backend(root)
+            external_library = self._write_elf64(
+                root / "outside" / "liboutside.so.1",
+                package_runtime.ELF_MACHINE_X86_64,
+            )
+            link = (
+                backend / "rootfs" / "usr" / "lib" / "box64-x86_64-linux-gnu"
+                / "libextra.so.1"
+            )
+            link.symlink_to(external_library)
+
+            with self.assertRaisesRegex(ValueError, "symlink|escapes"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
     def test_rejects_missing_wine_preloader(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
