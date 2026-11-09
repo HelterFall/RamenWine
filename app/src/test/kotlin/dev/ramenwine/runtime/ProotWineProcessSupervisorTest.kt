@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -159,9 +161,9 @@ class ProotWineProcessSupervisorTest {
                 ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
             )
 
-            val stopResults = kotlinx.coroutines.coroutineScope {
-                val first = kotlinx.coroutines.async { session.stop(3_000L) }
-                val second = kotlinx.coroutines.async { session.stop(3_000L) }
+            val stopResults = coroutineScope {
+                val first = async { session.stop(3_000L) }
+                val second = async { session.stop(3_000L) }
                 listOf(first.await(), second.await())
             }
 
