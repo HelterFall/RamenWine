@@ -1,0 +1,55 @@
+name: Build Android PRoot host payload (manual runtime only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-proot-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout RamenWine
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Termux package build system
+        uses: actions/checkout@v4
+        with:
+          repository: termux/termux-packages
+          ref: 29a6879366dad92650fb7db7719c5a4b1b9d55f1
+          path: termux-packages
+
+      - name: Verify Termux source pin
+        run: |
+          test "$(git -C termux-packages rev-parse HEAD)" = "29a6879366dad92650fb7db7719c5a4b1b9d55f1"
+
+      - name: Build the pinned Termux package-builder image
+        run: |
+          docker build \
+            --file termux-packages/scripts/Dockerfile \
+            --tag ramenwine-termux-package-builder:29a6879366dad92650fb7db7719c5a4b1b9d55f1 \
+            termux-packages/scripts
+
+      - name: Build PRoot and its Android dependencies for ARM64
+        run: |
+          cd termux-packages
+          TERMUX_BUILDER_IMAGE_NAME=ramenwine-termux-package-builder:29a6879366dad92650fb7db7719c5a4b1b9d55f1 \
+          CONTAINER_NAME=ramenwine-termux-package-builder \
+            ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot
+
+      - name: Assemble and validate app-private PRoot host payload
+        run: |
+          python3 tools/assemble_proot_host.py \
+            --packages-dir termux-packages/output \
+            --output-dir artifacts/proot-host
+
+      - name: Upload PRoot host payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ramenwine-proot-host-arm64-${{ github.sha }}
+          path: artifacts/proot-host/host
+          if-no-files-found: error
+          retention-days: 30
