@@ -807,6 +807,49 @@ def validate_android_proot_host_payload(host_root: Path) -> int:
     return validate_android_proot_host_dependency_closure(host_root)
 
 
+PROOT_TERMUX_PACKAGES_COMMIT = "29a6879366dad92650fb7db7719c5a4b1b9d55f1"
+PROOT_SIGTERM_PATCH_ID = "ramenwine-proot-sigterm-cleanup-v1"
+
+
+def validate_proot_shutdown_patch_provenance(host_root: Path) -> None:
+    """Reject PRoot host binaries not built with the Android SIGTERM cleanup patch."""
+    host_root = host_root.resolve(strict=True)
+    manifest_path = host_root / "PROVENANCE.json"
+    try:
+        manifest_real = manifest_path.resolve(strict=True)
+        manifest_real.relative_to(host_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot host SIGTERM cleanup patch provenance is missing or unsafe.") from error
+
+    try:
+        metadata = json.loads(manifest_real.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("PRoot host SIGTERM cleanup patch provenance is invalid.") from error
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("formatVersion") != 1
+        or metadata.get("target") != "android-bionic-arm64"
+        or metadata.get("termuxPackagesCommit") != PROOT_TERMUX_PACKAGES_COMMIT
+    ):
+        raise ValueError("PRoot host provenance does not match the pinned Android build.")
+
+    patches = metadata.get("downstreamPatches")
+    patch = patches.get("prootTermination") if isinstance(patches, dict) else None
+    if not isinstance(patch, dict) or patch.get("id") != PROOT_SIGTERM_PATCH_ID:
+        raise ValueError(
+            "PRoot host was not built with the required SIGTERM tracee-cleanup patch."
+        )
+
+    recipe_hash = patch.get("recipeSha256")
+    if (
+        patch.get("file") != "packages/proot/build.sh"
+        or not isinstance(recipe_hash, str)
+        or len(recipe_hash) != 64
+        or any(character not in "0123456789abcdef" for character in recipe_hash)
+    ):
+        raise ValueError("PRoot SIGTERM cleanup patch provenance hash is malformed.")
+
+
 def validate_glibc_proot_box64(root: Path) -> None:
     """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
     backend_root = root.resolve(strict=True)
@@ -825,6 +868,7 @@ def validate_glibc_proot_box64(root: Path) -> None:
     # Reuse the same strict PRoot host checks in the builder's early preflight
     # and in the final runtime ZIP validation.
     validate_android_proot_host_payload(host_root_real)
+    validate_proot_shutdown_patch_provenance(host_root_real)
 
     rootfs = backend_root / "rootfs"
     try:
