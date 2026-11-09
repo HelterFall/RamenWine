@@ -56,6 +56,60 @@ class WawonaDisplayBackendTest {
     }
 
     @Test
+    fun closeLeaseIsIdempotentAndReleasesAfterSuccess() {
+        val lease = WawonaProcessSessionGuard.acquire()
+        var closeCalls = 0
+
+        WawonaProcessSessionGuard.closeLease(lease) {
+            closeCalls += 1
+        }
+        WawonaProcessSessionGuard.closeLease(lease) {
+            closeCalls += 1
+        }
+
+        assertEquals(1, closeCalls)
+        val nextLease = WawonaProcessSessionGuard.acquire()
+        WawonaProcessSessionGuard.release(nextLease)
+    }
+
+    @Test
+    fun closeLeaseReleasesEvenWhenNativeCleanupThrows() {
+        val lease = WawonaProcessSessionGuard.acquire()
+        val failure = IllegalStateException("native shutdown failed")
+        try {
+            WawonaProcessSessionGuard.closeLease(lease) {
+                throw failure
+            }
+            throw AssertionError("The native cleanup failure must propagate.")
+        } catch (actual: IllegalStateException) {
+            assertSame(failure, actual)
+        }
+
+        val nextLease = WawonaProcessSessionGuard.acquire()
+        WawonaProcessSessionGuard.release(nextLease)
+    }
+
+    @Test
+    fun staleCloseCannotReleaseAnotherActiveSession() {
+        val first = WawonaProcessSessionGuard.acquire()
+        WawonaProcessSessionGuard.release(first)
+        val second = WawonaProcessSessionGuard.acquire()
+
+        WawonaProcessSessionGuard.closeLease(first) {
+            throw AssertionError("A stale lease must not execute cleanup.")
+        }
+
+        try {
+            WawonaProcessSessionGuard.acquire()
+            throw AssertionError("The second session must remain active.")
+        } catch (expected: IllegalStateException) {
+            assertTrue(expected.message!!.contains("one active"))
+        } finally {
+            WawonaProcessSessionGuard.release(second)
+        }
+    }
+
+    @Test
     fun runtimeDirectoryIsResolvedInsideCanonicalCacheRoot() {
         val base = Files.createTempDirectory("ramenwine-cache").toFile()
         try {
