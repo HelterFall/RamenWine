@@ -217,7 +217,7 @@ def require_pe_machine(path: Path, label: str, expected_machine: int) -> None:
                 raise ValueError(f"{label} has an invalid PE header offset: {path}")
             stream.seek(pe_offset)
             pe_header = stream.read(6)
-            if len(pe_header) != 6 or pe_header[:4] != b"PE\\x00\\x00":
+            if len(pe_header) != 6 or pe_header[:4] != b"PE\x00\x00":
                 raise ValueError(f"{label} has no PE signature: {path}")
             machine = struct.unpack_from("<H", pe_header, 4)[0]
             if machine != expected_machine:
