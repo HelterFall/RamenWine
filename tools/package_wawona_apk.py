@@ -14,13 +14,12 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import tempfile
 import zipfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Callable, Iterable
+from typing import Callable
 
 PINNED_WAWONA_REVISION = "d298ddd25726fec0977285aa5f57181110c966a6"
 APK_LIBRARY_ROOT = "lib/arm64-v8a/"
@@ -91,7 +90,7 @@ def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | No
 
 
 def collect_native_closure(
-    apk_libraries: dict[str, bytes],
+    apk_libraries: Mapping[str, bytes],
     read_dependencies: Callable[[str, bytes], tuple[list[str], str | None]],
 ) -> dict[str, bytes]:
     """Return only the root libraries and their APK-resident NEEDED closure."""
