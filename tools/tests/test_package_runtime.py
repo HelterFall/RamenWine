@@ -282,6 +282,12 @@ class RuntimePackagerTests(unittest.TestCase):
             "/lib64/ld-linux-x86-64.so.2",
             executable=True,
         )
+        self._write_elf64(
+            rootfs / "usr" / "bin" / "wineserver",
+            package_runtime.ELF_MACHINE_X86_64,
+            "/lib64/ld-linux-x86-64.so.2",
+            executable=True,
+        )
         self._write_pe64(
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "x86_64-windows" / "wineboot.exe",
@@ -321,6 +327,27 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_missing_wine_server_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "rootfs" / "usr" / "bin" / "wineserver").unlink()
+
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_wine_server(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_elf64(
+                backend / "rootfs" / "usr" / "bin" / "wineserver",
+                package_runtime.ELF_MACHINE_AARCH64,
+                "/lib/ld-linux-aarch64.so.1",
+                executable=True,
+            )
+
+            with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_missing_wow64_i386_ntdll(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -800,6 +800,18 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/lib64/ld-linux-x86-64.so.2",
     )
 
+    # Wine starts this separate Linux process for prefix and session
+    # management. Its ELF dependencies are not necessarily a subset of the
+    # loader's dependency closure, so validate it as an independent entry.
+    wineserver = resolve_guest_file(rootfs, "/usr/bin/wineserver")
+    require_executable(wineserver, "Wine server")
+    require_elf64(
+        wineserver,
+        "Wine server",
+        ELF_MACHINE_X86_64,
+        "/lib64/ld-linux-x86-64.so.2",
+    )
+
     wineboot = resolve_guest_file(
         rootfs,
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
@@ -868,6 +880,7 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
     x64_entry_points = [
         "/usr/bin/wine",
+        "/usr/bin/wineserver",
         "/" + wayland_unix.relative_to(rootfs.resolve()).as_posix(),
         *[
             box64_library_directory + "/" + library_name

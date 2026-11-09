@@ -143,6 +143,7 @@ object ProotWineCommandBuilder {
             "Box64 bundled libunwind",
         )
         executableFile(rootfs, "usr/bin/wine")
+        executableFile(rootfs, WINE_SERVER_PATH)
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
             runtimeFile(rootfs, WINEBOOT_PE_RELATIVE_PATH, "wineboot PE program")
         }
@@ -420,6 +421,7 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
     private const val WINEBOOT_PE_RELATIVE_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+    private const val WINE_SERVER_PATH = "usr/bin/wineserver"
     private const val GUEST_ARM64_LIBRARY_PATH =
         "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =
