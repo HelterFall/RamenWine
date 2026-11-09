@@ -36,7 +36,6 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
         val leaseToken = WawonaProcessSessionGuard.acquire()
         val runtimeDirectory: File
         var nativeInitializationAttempted = false
-        var surfaceAttachmentAttempted = false
 
         try {
             runtimeDirectory = WawonaRuntimePaths.prepare(appContext.cacheDir)
@@ -63,7 +62,6 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                 WawonaNative.nativeSetHostSeatMode(0) // Multi-touch seat mode.
                 applyHostKeymap()
 
-                surfaceAttachmentAttempted = true
                 WawonaNative.nativeSetSurface(surface)
                 if (!surface.isValid) {
                     throw IOException("Android game surface became invalid during attach.")
@@ -78,11 +76,15 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
         } catch (error: Throwable) {
             runCatching {
                 WawonaProcessSessionGuard.withLease(leaseToken) {
-                    if (surfaceAttachmentAttempted) {
-                        WawonaNative.nativeDestroySurface(surface)
-                    }
                     if (nativeInitializationAttempted) {
-                        WawonaNative.nativeShutdown()
+                        try {
+                            // nativeInit creates the Vulkan instance before the
+                            // Android Surface is attached, so failure cleanup
+                            // must destroy the renderer state even on early exit.
+                            WawonaNative.nativeDestroySurface(surface)
+                        } finally {
+                            WawonaNative.nativeShutdown()
+                        }
                     }
                 }
             }
@@ -153,19 +155,15 @@ private class WawonaGameDisplaySession(
     }
 
     override fun close() {
-        WawonaProcessSessionGuard.withLease(leaseToken) {
-            if (closed) return
+        WawonaProcessSessionGuard.closeLease(leaseToken) {
+            if (closed) return@closeLease
             closed = true
             try {
                 // Upstream explicitly separates surface teardown from core
                 // shutdown. Destroy the Vulkan surface first, then stop Rust.
                 WawonaNative.nativeDestroySurface(surface)
             } finally {
-                try {
-                    WawonaNative.nativeShutdown()
-                } finally {
-                    WawonaProcessSessionGuard.release(leaseToken)
-                }
+                WawonaNative.nativeShutdown()
             }
         }
     }
@@ -187,6 +185,16 @@ internal object WawonaProcessSessionGuard {
     fun <T> withLease(token: Any, block: () -> T): T {
         check(activeLease === token) { "The Wawona compositor lease is no longer active." }
         return block()
+    }
+
+    @Synchronized
+    fun closeLease(token: Any, block: () -> Unit) {
+        if (activeLease !== token) return
+        try {
+            block()
+        } finally {
+            activeLease = null
+        }
     }
 
     @Synchronized
