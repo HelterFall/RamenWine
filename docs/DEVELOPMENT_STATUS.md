@@ -34,7 +34,8 @@
 - A compositor-facing GameDisplayBackend/GameDisplaySession contract that accepts an Android Surface and exports a per-session Wayland endpoint.
 - A minimal Wawona JNI compatibility class using the exact upstream package and native symbol names, with ANGLE libraries loaded in upstream order.
 - A WawonaDisplayBackend prototype with one-active-session process guarding, serialized JNI operations, safe surface/core teardown ordering, and app-private XDG_RUNTIME_DIR checks that reject the upstream /data/local/tmp fallback.
-- A Wawona runtime asset installer for XKB/fonts/optional Weston data and a SurfaceView host for basic multi-touch, keyboard and mouse input.
+- Session-bound Wawona input dispatch: touch/key/mouse/scroll JNI events are serialized through the active display lease; events from a released or stale session are dropped.
+- A Wawona runtime asset installer for XKB/fonts/optional Weston data and a SurfaceView host for basic multi-touch, keyboard and mouse input. Input binding is explicit via the owning Wawona GameDisplaySession; Surface destruction disables input before display teardown.
 - A pinned Wawona APK extractor that lazily stages only the JNI roots, recursive ELF dependency closure (including versioned SONAMEs), optional SwiftShader ICD library and selected assets; Python regression tests cover dependency closure, unresolved libraries, asset traversal and unrelated payload exclusion.
 - Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file; its runtime directory must also stay inside app-private cache storage.
 - A process-wide Wine-prefix initialization lock shared across GameLaunchCoordinator instances.
@@ -96,7 +97,7 @@ See Android Display Backend Research and [Wawona Integration](WAWONA_INTEGRATION
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The latest completed focused branch run before the Wawona adapter work (run #89, commit 91fab70) passed the 5 Python runtime-packager tests that existed at that time and Gradle testDebugUnitTest, including Wine-prefix bootstrap, cross-coordinator serialization and Wayland/prefix path-containment tests. The Wawona packager/JVM tests added after 91fab70 have not yet been executed by CI. The focused workflow does not build an APK, run lint, set up NDK/CMake or build the pinned Wawona payload. Host CI success does not substitute for physical Android/ARM64 device validation.
+The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The latest focused branch run, #131 on PR tree `7e674b7` (source changes from `135ac7e`), passed the Python runtime-packager suite and Gradle `testDebugUnitTest`; this includes the Wawona APK extractor tests, Android/Kotlin compilation and Wawona lease/path regression tests. The focused workflow does not build an APK, run lint, set up NDK/CMake or build the pinned Wawona native payload. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 
