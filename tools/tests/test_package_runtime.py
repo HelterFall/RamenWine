@@ -126,6 +126,17 @@ class RuntimePackagerTests(unittest.TestCase):
                 rootfs / "usr" / "lib" / "box64-x86_64-linux-gnu" / library_name,
                 package_runtime.ELF_MACHINE_X86_64,
             )
+        for library_name in (
+            "libwayland-client.so.0",
+            "libwayland-cursor.so.0",
+            "libwayland-egl.so.1",
+            "libxkbcommon.so.0",
+            "libxkbregistry.so.0",
+        ):
+            self._write_elf64(
+                rootfs / "usr" / "lib" / "x86_64-linux-gnu" / library_name,
+                package_runtime.ELF_MACHINE_X86_64,
+            )
         wine = self._write_elf64(
             rootfs / "usr" / "bin" / "wine",
             package_runtime.ELF_MACHINE_X86_64,
@@ -183,6 +194,17 @@ class RuntimePackagerTests(unittest.TestCase):
                 / "wine" / "i386-windows" / "winewayland.drv",
             )
             with self.assertRaisesRegex(ValueError, "wrong PE machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_runtime_missing_wayland_xkb_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            missing_library = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "libxkbregistry.so.0"
+            )
+            missing_library.unlink()
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_proot_loader(self) -> None:
