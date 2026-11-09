@@ -7,6 +7,8 @@ on:
     paths:
       - ".github/workflows/wawona-native-payload.yml"
       - "app/build.gradle.kts"
+      - "app/src/debug/**"
+      - "app/src/main/kotlin/dev/ramenwine/ui/**"
       - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
       - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
       - "tools/package_wawona_apk.py"
@@ -18,6 +20,8 @@ on:
     paths:
       - ".github/workflows/wawona-native-payload.yml"
       - "app/build.gradle.kts"
+      - "app/src/debug/**"
+      - "app/src/main/kotlin/dev/ramenwine/ui/**"
       - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
       - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
       - "tools/package_wawona_apk.py"
