@@ -11,6 +11,7 @@ static LRESULT CALLBACK ProbeWindowProc(
     WPARAM wparam,
     LPARAM lparam
 ) {
+    (void)lparam;
     switch (message) {
     case WM_CREATE:
         g_font = CreateFontW(
@@ -165,12 +166,14 @@ int WINAPI WinMain(
     UpdateWindow(window);
 
     MSG message;
-    while (GetMessageW(&message, NULL, 0, 0) > 0) {
+    BOOL message_result;
+    while ((message_result = GetMessageW(&message, NULL, 0, 0)) > 0) {
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
 
+    int exit_code = message_result == -1 ? 5 : (int)message.wParam;
     DeleteObject(g_background);
     g_background = NULL;
-    return (int)message.wParam;
+    return exit_code;
 }
