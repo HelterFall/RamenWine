@@ -338,7 +338,7 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                 data = bytearray(0x86)
                 data[:2] = b"MZ"
                 data[0x3C:0x40] = (0x80).to_bytes(4, "little")
-                data[0x80:0x84] = b"PE\\x00\\x00"
+                data[0x80:0x84] = b"PE" + bytes(2)
                 data[0x84:0x86] = machine.to_bytes(2, "little")
                 output.write_bytes(data)
 
