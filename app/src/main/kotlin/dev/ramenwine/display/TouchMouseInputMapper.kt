@@ -46,7 +46,7 @@ internal class TouchMouseInputMapper {
         ownerPointerId = pointerId
         return listOf(
             Command.PointerEnter(x, y, timestamp),
-            Command.PointerButton(BTN_LEFT, pressed = true, timestamp)
+            Command.PointerButton(BTN_LEFT, pressed = true, timestamp = timestamp)
         )
     }
 
@@ -71,7 +71,7 @@ internal class TouchMouseInputMapper {
         ownerPointerId = null
         return listOf(
             Command.PointerMotion(x, y, timestamp),
-            Command.PointerButton(BTN_LEFT, pressed = false, timestamp)
+            Command.PointerButton(BTN_LEFT, pressed = false, timestamp = timestamp)
         )
     }
 

@@ -1,6 +1,7 @@
 package dev.ramenwine.display
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -63,7 +64,7 @@ class WawonaSurfaceView @JvmOverloads constructor(
 
         // Release a touch held by the old session before replacing its lease.
         if (token !== inputLeaseToken) {
-            dispatchTouchCommands(touchInputMapper.cancel(SystemClockCompat.uptimeMillis()))
+            dispatchTouchCommands(touchInputMapper.cancel(SystemClock.uptimeMillis().toNativeTimestamp()))
         }
         inputLeaseToken = token
         inputEnabled = token != null
@@ -288,7 +289,3 @@ class WawonaSurfaceView @JvmOverloads constructor(
     }
 }
 
-/** Small adapter to avoid depending on Android clock APIs in input logic. */
-private object SystemClockCompat {
-    fun uptimeMillis(): Long = android.os.SystemClock.uptimeMillis()
-}
