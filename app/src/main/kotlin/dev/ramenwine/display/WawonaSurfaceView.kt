@@ -13,9 +13,9 @@ import com.aspauldingcode.wawona.WawonaNative
 /**
  * Android SurfaceView host for Wawona's compositor and basic game input.
  *
- * The owner starts WawonaDisplayBackend from onSurfaceChanged and enables
- * input only after the compositor session has been created. The view never
- * starts or shuts down the process-global compositor by itself.
+ * The owner starts WawonaDisplayBackend from onSurfaceChanged and calls
+ * bindSession only after the display session has been created. Every input
+ * JNI call is serialized against that exact session's shutdown lease.
  */
 class WawonaSurfaceView @JvmOverloads constructor(
     context: Context,
@@ -28,7 +28,13 @@ class WawonaSurfaceView @JvmOverloads constructor(
     }
 
     var callbacks: Callbacks? = null
+
+    @Volatile
     var inputEnabled: Boolean = false
+        private set
+
+    @Volatile
+    private var inputLeaseToken: Any? = null
 
     init {
         holder.addCallback(this)
@@ -37,23 +43,32 @@ class WawonaSurfaceView @JvmOverloads constructor(
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
+    /**
+     * Bind input to a Wawona session. Passing null disables input immediately.
+     * A session from another display backend is rejected instead of dispatching
+     * native events into an unrelated process-global compositor.
+     */
+    fun bindSession(session: GameDisplaySession?) {
+        val token = (session as? WawonaInputSessionLease)?.inputLeaseToken
+        require(session == null || token != null) {
+            "The display session is not owned by Wawona."
+        }
+        inputLeaseToken = token
+        inputEnabled = token != null
+    }
+
     override fun surfaceCreated(holder: SurfaceHolder) {
         // Dimensions are delivered by surfaceChanged; defer compositor startup.
     }
 
-    override fun surfaceChanged(
-        holder: SurfaceHolder,
-        format: Int,
-        width: Int,
-        height: Int
-    ) {
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         if (width > 0 && height > 0) {
             callbacks?.onSurfaceChanged(holder.surface, width, height)
         }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        inputEnabled = false
+        bindSession(null)
         callbacks?.onSurfaceDestroyed(holder.surface)
     }
 
@@ -64,52 +79,58 @@ class WawonaSurfaceView @JvmOverloads constructor(
         }
 
         val timestamp = event.eventTime.toNativeTimestamp()
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN,
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                val index = event.actionIndex
-                WawonaNative.nativeTouchDown(
-                    event.getPointerId(index),
-                    event.getX(index),
-                    event.getY(index),
-                    timestamp
-                )
-                WawonaNative.nativeTouchFrame()
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                for (index in 0 until event.pointerCount) {
-                    WawonaNative.nativeTouchMotion(
+        dispatchNative {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    val index = event.actionIndex
+                    WawonaNative.nativeTouchDown(
                         event.getPointerId(index),
                         event.getX(index),
                         event.getY(index),
                         timestamp
                     )
+                    WawonaNative.nativeTouchFrame()
                 }
-                WawonaNative.nativeTouchFrame()
-            }
 
-            MotionEvent.ACTION_UP,
-            MotionEvent.ACTION_POINTER_UP -> {
-                val index = event.actionIndex
-                WawonaNative.nativeTouchUp(event.getPointerId(index), timestamp)
-                WawonaNative.nativeTouchFrame()
-            }
+                MotionEvent.ACTION_MOVE -> {
+                    for (index in 0 until event.pointerCount) {
+                        WawonaNative.nativeTouchMotion(
+                            event.getPointerId(index),
+                            event.getX(index),
+                            event.getY(index),
+                            timestamp
+                        )
+                    }
+                    WawonaNative.nativeTouchFrame()
+                }
 
-            MotionEvent.ACTION_CANCEL -> WawonaNative.nativeTouchCancel()
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_POINTER_UP -> {
+                    val index = event.actionIndex
+                    WawonaNative.nativeTouchUp(event.getPointerId(index), timestamp)
+                    WawonaNative.nativeTouchFrame()
+                }
+
+                MotionEvent.ACTION_CANCEL -> WawonaNative.nativeTouchCancel()
+            }
         }
         return true
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (!inputEnabled) return super.onKeyDown(keyCode, event)
-        WawonaNative.nativeKeyEvent(keyCode, 1, event.eventTime.toNativeTimestamp())
+        dispatchNative {
+            WawonaNative.nativeKeyEvent(keyCode, 1, event.eventTime.toNativeTimestamp())
+        }
         return true
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (!inputEnabled) return super.onKeyUp(keyCode, event)
-        WawonaNative.nativeKeyEvent(keyCode, 0, event.eventTime.toNativeTimestamp())
+        dispatchNative {
+            WawonaNative.nativeKeyEvent(keyCode, 0, event.eventTime.toNativeTimestamp())
+        }
         return true
     }
 
@@ -121,34 +142,40 @@ class WawonaSurfaceView @JvmOverloads constructor(
         if (event.actionMasked == MotionEvent.ACTION_SCROLL && isPointer) {
             val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
             val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
-            if (vertical != 0f) WawonaNative.nativePointerAxis(0, vertical, timestamp)
-            if (horizontal != 0f) WawonaNative.nativePointerAxis(1, horizontal, timestamp)
+            dispatchNative {
+                if (vertical != 0f) WawonaNative.nativePointerAxis(0, vertical, timestamp)
+                if (horizontal != 0f) WawonaNative.nativePointerAxis(1, horizontal, timestamp)
+            }
             return true
         }
 
         if (event.source and InputDevice.SOURCE_MOUSE != 0) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER -> {
-                    WawonaNative.nativePointerEnter(
-                        event.x.toDouble(),
-                        event.y.toDouble(),
-                        timestamp
-                    )
+                    dispatchNative {
+                        WawonaNative.nativePointerEnter(
+                            event.x.toDouble(),
+                            event.y.toDouble(),
+                            timestamp
+                        )
+                    }
                     return true
                 }
 
                 MotionEvent.ACTION_HOVER_MOVE,
                 MotionEvent.ACTION_MOVE -> {
-                    WawonaNative.nativePointerMotion(
-                        event.x.toDouble(),
-                        event.y.toDouble(),
-                        timestamp
-                    )
+                    dispatchNative {
+                        WawonaNative.nativePointerMotion(
+                            event.x.toDouble(),
+                            event.y.toDouble(),
+                            timestamp
+                        )
+                    }
                     return true
                 }
 
                 MotionEvent.ACTION_HOVER_EXIT -> {
-                    WawonaNative.nativePointerLeave(timestamp)
+                    dispatchNative { WawonaNative.nativePointerLeave(timestamp) }
                     return true
                 }
 
@@ -161,11 +188,13 @@ class WawonaSurfaceView @JvmOverloads constructor(
                         else -> return super.onGenericMotionEvent(event)
                     }
                     val pressed = event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS
-                    WawonaNative.nativePointerButton(
-                        button,
-                        if (pressed) 1 else 0,
-                        timestamp
-                    )
+                    dispatchNative {
+                        WawonaNative.nativePointerButton(
+                            button,
+                            if (pressed) 1 else 0,
+                            timestamp
+                        )
+                    }
                     return true
                 }
             }
@@ -181,8 +210,14 @@ class WawonaSurfaceView @JvmOverloads constructor(
     ) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
         if (inputEnabled) {
-            WawonaNative.nativeKeyboardFocus(gainFocus)
+            dispatchNative { WawonaNative.nativeKeyboardFocus(gainFocus) }
         }
+    }
+
+    private fun dispatchNative(block: () -> Unit) {
+        val token = inputLeaseToken ?: return
+        if (!inputEnabled) return
+        WawonaProcessSessionGuard.runIfActive(token, block)
     }
 
     private fun Long.toNativeTimestamp(): Int = (this % Int.MAX_VALUE).toInt()
