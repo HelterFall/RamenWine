@@ -325,6 +325,10 @@ class RuntimePackagerTests(unittest.TestCase):
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "x86_64-windows" / "wineboot.exe",
         )
+        self._write_pe64(
+            rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+            / "x86_64-windows" / "reg.exe",
+        )
         self._write_elf64(
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "x86_64-unix" / "winewayland.so",
@@ -506,6 +510,30 @@ class RuntimePackagerTests(unittest.TestCase):
                 ValueError,
                 "unresolved ELF dependency.*libmissing-wayland-native.so.0",
             ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_missing_amd64_wine_registry_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            registry_command = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "x86_64-windows" / "reg.exe"
+            )
+            registry_command.unlink()
+
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_wine_registry_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            registry_command = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "x86_64-windows" / "reg.exe"
+            )
+            self._write_pe32(registry_command)
+
+            with self.assertRaisesRegex(ValueError, "not a valid AMD64 PE"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_missing_amd64_wayland_probe(self) -> None:
