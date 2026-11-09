@@ -315,6 +315,56 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                 )
             )
 
+    def test_builds_and_records_both_wayland_probe_architectures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rootfs = root / "rootfs"
+            rootfs.mkdir()
+            work = root / "work"
+            work.mkdir()
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], **kwargs: object) -> None:
+                commands.append(command)
+                output = Path(command[command.index("-o") + 1])
+                machine = (
+                    package_runtime.PE_MACHINE_AMD64
+                    if command[0] == "x86_64-w64-mingw32-gcc"
+                    else package_runtime.PE_MACHINE_I386
+                )
+                output.parent.mkdir(parents=True, exist_ok=True)
+                data = bytearray(0x86)
+                data[:2] = b"MZ"
+                data[0x3C:0x40] = (0x80).to_bytes(4, "little")
+                data[0x80:0x84] = b"PE\\x00\\x00"
+                data[0x84:0x86] = machine.to_bytes(2, "little")
+                output.write_bytes(data)
+
+            with patch.object(build_glibc_runtime, "run", side_effect=fake_run):
+                result = build_glibc_runtime.build_wayland_probe(rootfs, work)
+
+            self.assertEqual(
+                ["x86_64-w64-mingw32-gcc", "i686-w64-mingw32-gcc"],
+                [command[0] for command in commands],
+            )
+            self.assertTrue(all("-mwindows" in command for command in commands))
+            self.assertEqual(
+                ["x86_64", "i386"],
+                [str(item["architecture"]) for item in result["binaries"]],
+            )
+            self.assertTrue(
+                (rootfs / "usr/lib/ramenwine/probes/wayland-probe-x86_64.exe").is_file()
+            )
+            self.assertTrue(
+                (rootfs / "usr/lib/ramenwine/probes/wayland-probe-i386.exe").is_file()
+            )
+            self.assertEqual(
+                build_glibc_runtime.sha256_file(
+                    Path(__file__).resolve().parents[1] / "wayland_probe.c"
+                ),
+                result["sourceSha256"],
+            )
+
     def test_box64_bundle_script_cleanup_is_scoped_to_its_build_directory(self) -> None:
         source = (
             "rm -rf /tmp/box64-bundle.*\n"
