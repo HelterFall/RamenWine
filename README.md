@@ -231,7 +231,7 @@ The Android host scaffold currently includes:
 - runtime inventory for Bionic ARM64EC/FEX, Bionic + Box64 and glibc + PRoot + Box64;
 - offline runtime ZIP installation with SHA-256 payload verification, staged activation and rollback;
 - a Python runtime package builder and automated Python/JVM tests;
-- GitHub Actions for Android build, tests, lint and debug APK artifacts.
+- Focused GitHub Actions checks for Python runtime-packager tests and JVM unit tests; APK packaging, lint, NDK/CMake and artifact uploads are deferred.
 
 **Wine/Box64/FEX binaries are not bundled and imported games cannot be launched yet.** Runtime package file checks are not a proof of execution. No game EXE is run during scanning or import.
 
