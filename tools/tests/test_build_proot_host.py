@@ -27,6 +27,9 @@ def make_pinned_proot_source(root: Path) -> Path:
         "src/execve/enter.c": 'getenv("PROOT_LOADER");\\nPROOT_UNBUNDLE_LOADER\\n',
         "src/path/temp.c": 'getenv("PROOT_TMP_DIR");\\n',
         "packages/proot/build.sh": (
+            'TERMUX_PKG_VERSION="5.1.107.102"\n'
+            'TERMUX_PKG_SRCURL=https://github.com/termux/proot/archive/v${TERMUX_PKG_VERSION}.zip\n'
+            'TERMUX_PKG_SHA256=30d12a6e2cc4147123756ff58edea262d3083bbc238c12d0ab9b39e3d1c40852\n'
             'TERMUX_PKG_DEPENDS="libandroid-shmem, libtalloc"\n'
             'TERMUX_PKG_EXTRA_MAKE_ARGS="-C src PROOT_WITH_LIBANDROID_SHMEM=true"\n'
             'export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot\n'
@@ -77,7 +80,7 @@ class BuildProotHostTests(unittest.TestCase):
             source = make_pinned_proot_source(Path(temporary))
             recipe = source / "packages/proot/build.sh"
             recipe.write_text(
-                recipe.read_text(encoding="utf-8") + "\ncase SIGTERM:\n",
+                recipe.read_text(encoding="utf-8") + chr(10) + "case SIGTERM:" + chr(10),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "unmarked or partial"):
