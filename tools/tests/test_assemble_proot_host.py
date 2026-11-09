@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import assemble_proot_host
@@ -67,6 +68,38 @@ class ProotHostAssemblyTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_finds_only_exact_pinned_aarch64_package_versions(self) -> None:
+        packages_dir = self.root / "debs"
+        packages_dir.mkdir()
+        metadata: dict[str, tuple[str, str, str]] = {}
+        for name, version in assemble_proot_host.EXPECTED_PACKAGES.items():
+            package_file = packages_dir / f"{name}.deb"
+            package_file.write_bytes(f"fixture:{name}:{version}".encode("utf-8"))
+            metadata[package_file.name] = (name, version, "aarch64")
+
+        def fake_metadata(path: Path) -> tuple[str, str, str]:
+            return metadata[path.name]
+
+        with patch("assemble_proot_host.read_deb_metadata", side_effect=fake_metadata):
+            found = assemble_proot_host.find_required_debs(packages_dir)
+
+        self.assertEqual(set(assemble_proot_host.EXPECTED_PACKAGES), set(found))
+        for package in found.values():
+            self.assertEqual("aarch64", package.architecture)
+            self.assertEqual(64, len(package.sha256))
+
+    def test_rejects_wrong_pinned_package_version(self) -> None:
+        packages_dir = self.root / "debs"
+        packages_dir.mkdir()
+        package_file = packages_dir / "proot.deb"
+        package_file.write_bytes(b"fixture")
+        with patch(
+            "assemble_proot_host.read_deb_metadata",
+            return_value=("proot", "5.1.107.101", "aarch64"),
+        ):
+            with self.assertRaisesRegex(ValueError, "version mismatch"):
+                assemble_proot_host.find_required_debs(packages_dir)
+
     def test_stages_proot_loader_and_android_shared_libraries(self) -> None:
         host = assemble_proot_host.stage_host_payload(
             self.extracted, self.output, {"test": {"version": "fixture"}}
@@ -85,6 +118,12 @@ class ProotHostAssemblyTests(unittest.TestCase):
             assemble_proot_host.TERMUX_PACKAGES_COMMIT,
             metadata["termuxPackagesCommit"],
         )
+        self.assertEqual("30", metadata["androidNdkVersion"])
+        self.assertEqual(
+            "753611f410d002cfcd3f3dc2ef49aad532089d3180b436c060a90bf0fcb64df2",
+            metadata["androidNdkArchiveSha256"],
+        )
+        self.assertEqual("9123335", metadata["androidSdkCommandLineToolsRevision"])
 
     def test_rejects_missing_proot_loader(self) -> None:
         loader = (

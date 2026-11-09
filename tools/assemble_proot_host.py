@@ -28,7 +28,11 @@ EXPECTED_PACKAGES = {
     "libtalloc": "2.5.0",
     "libandroid-shmem": "0.7",
 }
-TERMUX_NDK_MAJOR = "30"
+TERMUX_NDK_VERSION = "30"
+TERMUX_SDK_COMMANDLINE_TOOLS_REVISION = "9123335"
+TERMUX_ANDROID_BUILD_TOOLS_VERSION = "37.0.0"
+TERMUX_SDK_COMMANDLINE_TOOLS_SHA256 = "0bebf59339eaa534f4217f8aa0972d14dc49e7207be225511073c661ae01da0a"
+TERMUX_NDK_ARCHIVE_SHA256 = "753611f410d002cfcd3f3dc2ef49aad532089d3180b436c060a90bf0fcb64df2"
 
 
 @dataclass(frozen=True)
@@ -218,7 +222,11 @@ def stage_host_payload(
         "formatVersion": 1,
         "target": "android-bionic-arm64",
         "termuxPackagesCommit": TERMUX_PACKAGES_COMMIT,
-        "androidNdkMajor": TERMUX_NDK_MAJOR,
+        "androidNdkVersion": TERMUX_NDK_VERSION,
+        "androidNdkArchiveSha256": TERMUX_NDK_ARCHIVE_SHA256,
+        "androidSdkCommandLineToolsRevision": TERMUX_SDK_COMMANDLINE_TOOLS_REVISION,
+        "androidSdkCommandLineToolsSha256": TERMUX_SDK_COMMANDLINE_TOOLS_SHA256,
+        "androidBuildToolsVersion": TERMUX_ANDROID_BUILD_TOOLS_VERSION,
         "packageSources": provenance,
         "files": {
             "proot": "host/bin/proot",
