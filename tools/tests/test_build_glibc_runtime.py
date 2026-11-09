@@ -127,11 +127,37 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
         self.assertIn("--without-x", build_glibc_runtime.WINE_CONFIGURE_FLAGS)
         self.assertIn("libwine:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("coreutils:arm64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("zlib1g:arm64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("zlib1g:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libwayland-client0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libwayland-cursor0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libxkbcommon0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("libxkbregistry0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("xkb-data", build_glibc_runtime.RUNTIME_PACKAGES)
+        for package in (
+            "libdbus-1-3:amd64",
+            "libgnutls30t64:amd64",
+            "libopenal1:amd64",
+            "libsdl2-2.0-0:amd64",
+            "libldap2:amd64",
+            "libmpg123-0t64:amd64",
+            "liblcms2-2:amd64",
+            "libgcrypt20:amd64",
+            "libgsm1:amd64",
+            "libjpeg-turbo8:amd64",
+            "libpng16-16t64:amd64",
+            "libtiff6:amd64",
+            "libwebp7:amd64",
+            "libxml2:amd64",
+            "libxslt1.1:amd64",
+            "libzstd1:amd64",
+            "libavcodec60:amd64",
+            "libavformat60:amd64",
+            "libavutil58:amd64",
+            "libswscale7:amd64",
+            "libswresample4:amd64",
+        ):
+            self.assertIn(package, build_glibc_runtime.RUNTIME_PACKAGES)
 
 
 if __name__ == "__main__":

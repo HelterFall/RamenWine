@@ -41,7 +41,7 @@ RamenWine normalizes the runtime package to these paths. The rootfs is **ARM64 g
 
 The command builder refuses to launch if either glibc loader or any of the three Wayland driver files is missing: the x86-64 Unix module, the x86-64 PE driver and the i386 PE driver. Wine 11's new WoW64 mode still needs the i386 PE driver for 32-bit Windows programs. The package build must include the ARM64 dependency closure for Box64, the x86-64 dependency closure for Wine and its Wayland Unix driver, and the Wayland client/protocol libraries selected by that Wine build. Wine's PE Wayland driver must be packaged as well.
 
-The runtime preflight checks the PRoot host, Box64/Wine ELF files and both Wayland drivers. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
+The runtime preflight checks the PRoot host, Box64/Wine ELF files and both Wayland drivers. Before the ZIP is produced, the packager also follows the `DT_NEEDED` entries of the ARM64 launch programs, the x86-64 Wine loader and its Unix Wayland modules, and the bundled x86-64 Box64 support libraries. It verifies that every transitive ELF dependency resolves inside the rootfs and has the expected machine architecture. It also checks the XKB rules, keycodes and US symbols data files. This is a static package check; it does not run the loader or prove that the final binary pair starts on an Android device. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
 
 ## Pinned upstream build inputs (not yet assembled or device-validated)
 
@@ -93,7 +93,7 @@ The launch environment uses:
 The environment is deliberately split into two layers:
 
 - Android/PRoot host environment: `LD_LIBRARY_PATH=<backend>/host/lib` for Bionic PRoot dependencies, `PROOT_LOADER=<backend>/host/libexec/proot/loader` for the separately-installed PRoot ELF helper, and `PROOT_TMP_DIR=<app-private host cache path>`. These are passed to the PRoot process by `ProcessBuilder`; none are passed into the guest Wine environment.
-- ARM64 Linux guest environment: set by the guest `/usr/bin/env` immediately before Box64. It includes `LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu`, `BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix`, `WINEDLLPATH` for the packaged Wine driver directories, `WINEPREFIX`, `HOME`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `WINEARCH=win64`, `LANG`, `LC_ALL`, `PATH` and `BOX64_NOBANNER=1`.
+- ARM64 Linux guest environment: set by the guest `/usr/bin/env` immediately before Box64. It includes `LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu`, `BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:/usr/lib/box64-x86_64-linux-gnu`, `WINEDLLPATH` for the packaged Wine driver directories, `WINEPREFIX`, `HOME`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `WINEARCH=wow64`, `LANG`, `LC_ALL`, `PATH` and `BOX64_NOBANNER=1`.
 
 The guest `env -i` invocation discards the entire inherited environment before applying only the explicit ARM64 glibc, Box64, Wine, Wayland and locale variables. This prevents Android/Bionic paths and unrelated host settings from leaking into Wine or the game process. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.
 
@@ -122,7 +122,8 @@ proot
   HOME=/home/ramen
   WINEPREFIX=/prefixes/<id>
   LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu
-  BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
+  BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:/usr/lib/box64-x86_64-linux-gnu
+  WINEARCH=wow64
   WINEDLLPATH=/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
   WAYLAND_DISPLAY=wayland-0
   XDG_RUNTIME_DIR=/run/user/<uid>

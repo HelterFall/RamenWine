@@ -58,6 +58,90 @@ class RuntimePackagerTests(unittest.TestCase):
         return path
 
     @staticmethod
+    def _write_elf64_dynamic(
+        path: Path,
+        machine: int,
+        needed: tuple[str, ...] = (),
+        rpath: str | None = None,
+        runpath: str | None = None,
+        executable: bool = False,
+    ) -> Path:
+        """Write a tiny ELF64 fixture with a real PT_DYNAMIC string table."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        strings = bytearray(b"\x00")
+
+        def add_string(value: str) -> int:
+            offset = len(strings)
+            strings.extend(value.encode("utf-8") + b"\x00")
+            return offset
+
+        dynamic_tags: list[tuple[int, int]] = [
+            (package_runtime.ELF_DT_STRTAB, 0),
+            (package_runtime.ELF_DT_STRSZ, 0),
+        ]
+        dynamic_tags.extend(
+            (package_runtime.ELF_DT_NEEDED, add_string(name))
+            for name in needed
+        )
+        if rpath is not None:
+            dynamic_tags.append(
+                (package_runtime.ELF_DT_RPATH, add_string(rpath))
+            )
+        if runpath is not None:
+            dynamic_tags.append(
+                (package_runtime.ELF_DT_RUNPATH, add_string(runpath))
+            )
+        dynamic_tags.append((package_runtime.ELF_DT_NULL, 0))
+
+        dynamic_offset = 64 + 2 * 56
+        string_table_offset = dynamic_offset + 16 * len(dynamic_tags)
+        dynamic_tags[0] = (
+            package_runtime.ELF_DT_STRTAB,
+            0x1000 + string_table_offset,
+        )
+        dynamic_tags[1] = (
+            package_runtime.ELF_DT_STRSZ,
+            len(strings),
+        )
+        dynamic_data = b"".join(
+            struct.pack("<qQ", tag, value) for tag, value in dynamic_tags
+        )
+        file_size = string_table_offset + len(strings)
+
+        ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
+        header = struct.pack(
+            "<16sHHIQQQIHHHHHH",
+            ident, 3, machine, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0,
+        )
+        load_segment = struct.pack(
+            "<IIQQQQQQ",
+            package_runtime.ELF_PT_LOAD,
+            6,
+            0,
+            0x1000,
+            0x1000,
+            file_size,
+            file_size,
+            0x1000,
+        )
+        dynamic_segment = struct.pack(
+            "<IIQQQQQQ",
+            package_runtime.ELF_PT_DYNAMIC,
+            4,
+            dynamic_offset,
+            0x1000 + dynamic_offset,
+            0x1000 + dynamic_offset,
+            len(dynamic_data),
+            len(dynamic_data),
+            8,
+        )
+        path.write_bytes(
+            header + load_segment + dynamic_segment + dynamic_data + strings
+        )
+        path.chmod(0o755 if executable else 0o644)
+        return path
+
+    @staticmethod
     def _write_pe64(path: Path, machine: int = package_runtime.PE_MACHINE_AMD64) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = bytearray(0x80 + 6)
@@ -160,12 +244,106 @@ class RuntimePackagerTests(unittest.TestCase):
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "i386-windows" / "winewayland.drv",
         )
+        for relative_path in (
+            "rules/evdev",
+            "keycodes/evdev",
+            "symbols/us",
+        ):
+            xkb_file = rootfs / "usr" / "share" / "X11" / "xkb" / relative_path
+            xkb_file.parent.mkdir(parents=True, exist_ok=True)
+            xkb_file.write_text("fixture", encoding="utf-8")
         return backend
 
     def test_validates_hybrid_arm64_glibc_and_x64_wine_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_resolves_transitive_elf_dependencies_and_origin_runpath(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            app = rootfs / "usr" / "bin" / "app"
+            first = rootfs / "opt" / "ramen" / "libfirst.so.1"
+            second = rootfs / "opt" / "ramen" / "libsecond.so.2"
+            self._write_elf64_dynamic(
+                app,
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libfirst.so.1",),
+                runpath="$ORIGIN/../../opt/ramen",
+                executable=True,
+            )
+            self._write_elf64_dynamic(
+                first,
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libsecond.so.2",),
+            )
+            self._write_elf64_dynamic(second, package_runtime.ELF_MACHINE_AARCH64)
+
+            inspected = package_runtime.validate_elf_dependency_closure(
+                rootfs,
+                ["/usr/bin/app"],
+                package_runtime.ELF_MACHINE_AARCH64,
+                ["/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu"],
+                "ARM64 fixture",
+            )
+
+            self.assertEqual(3, inspected)
+
+    def test_rejects_missing_transitive_elf_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            app = rootfs / "usr" / "bin" / "app"
+            self._write_elf64_dynamic(
+                app,
+                package_runtime.ELF_MACHINE_X86_64,
+                needed=("libnot-installed.so.1",),
+                executable=True,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "unresolved ELF dependency.*libnot-installed.so.1",
+            ):
+                package_runtime.validate_elf_dependency_closure(
+                    rootfs,
+                    ["/usr/bin/app"],
+                    package_runtime.ELF_MACHINE_X86_64,
+                    ["/lib/x86_64-linux-gnu"],
+                    "x86-64 fixture",
+                )
+
+    def test_rejects_wrong_architecture_in_elf_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            app = rootfs / "usr" / "bin" / "app"
+            wrong_library = rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "libwrong.so.1"
+            self._write_elf64_dynamic(
+                app,
+                package_runtime.ELF_MACHINE_X86_64,
+                needed=("libwrong.so.1",),
+                executable=True,
+            )
+            self._write_elf64_dynamic(
+                wrong_library,
+                package_runtime.ELF_MACHINE_AARCH64,
+            )
+
+            with self.assertRaisesRegex(ValueError, "wrong machine"):
+                package_runtime.validate_elf_dependency_closure(
+                    rootfs,
+                    ["/usr/bin/app"],
+                    package_runtime.ELF_MACHINE_X86_64,
+                    ["/usr/lib/x86_64-linux-gnu"],
+                    "x86-64 fixture",
+                )
+
+    def test_rejects_runtime_missing_required_xkb_keymap_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "rootfs" / "usr" / "share" / "X11" / "xkb"
+             / "rules" / "evdev").unlink()
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_box64_x64_emulation_library(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
