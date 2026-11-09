@@ -6,8 +6,11 @@ import android.view.Surface
 import dev.ramenwine.display.GameDisplayBackend
 import dev.ramenwine.display.GameDisplaySession
 import dev.ramenwine.library.ImportedGame
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -20,6 +23,9 @@ class GameLaunchCoordinator(
     private val processSupervisor: ProotWineProcessSupervisor = ProotWineProcessSupervisor()
 ) {
     private val appContext = context.applicationContext
+    // Wawona JNI shutdown may wait for detached clients and must never run on
+    // the Android main thread from the process-exit callback.
+    private val displayCleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val prefixInitializer = WinePrefixInitializer(
         filesDirectory = appContext.filesDir,
         processSupervisor = processSupervisor
@@ -64,15 +70,20 @@ class GameLaunchCoordinator(
                 command = command,
                 onOutput = onOutput,
                 onExit = { exitCode ->
-                    // Do not let compositor cleanup prevent the consumer from
-                    // receiving the process exit event.
-                    displayLease.close()
-                    onExit(exitCode)
+                    // Process callbacks default to Main.immediate. Move Wawona's
+                    // potentially blocking native teardown off that thread, then
+                    // preserve the public callback's main-thread delivery.
+                    displayCleanupScope.launch {
+                        displayLease.closeOnIo()
+                        withContext(Dispatchers.Main.immediate) {
+                            onExit(exitCode)
+                        }
+                    }
                 }
             )
             return GameLaunchSession(processSession, displayLease)
         } catch (error: Throwable) {
-            displayLease.close()
+            displayLease.closeOnIo()
             throw error
         }
     }
@@ -104,7 +115,7 @@ class GameLaunchSession internal constructor(
             // Always release the Android surface/compositor, even if the
             // process cannot be stopped or the caller is being cancelled.
             withContext(NonCancellable) {
-                displayLease.close()
+                displayLease.closeOnIo()
             }
         }
     }
@@ -128,6 +139,16 @@ internal class DisplaySessionLease(
     fun resize(widthPx: Int, heightPx: Int) {
         check(!closed) { "The game display session is already closed." }
         session.resize(widthPx, heightPx)
+    }
+
+    /**
+     * Native compositor teardown can block while it stops clients and releases
+     * Vulkan state. Keep that work off the caller's thread (especially Main).
+     */
+    suspend fun closeOnIo() {
+        withContext(Dispatchers.IO + NonCancellable) {
+            close()
+        }
     }
 
     @Synchronized
