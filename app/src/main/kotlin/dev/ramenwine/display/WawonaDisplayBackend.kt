@@ -259,6 +259,11 @@ internal object WawonaRuntimePaths {
     fun prepare(cacheDirectory: File): File {
         val runtimeDirectory = resolveRuntimeDirectory(cacheDirectory)
         ensurePrivateDirectory(runtimeDirectory)
+        // A killed Wawona process can leave Wayland and compositor instance
+        // lock files behind. Upstream documents that a stale instance.lock
+        // permits a socket to appear but rejects every client connection.
+        removeStaleOwnedRegularFile(File(runtimeDirectory, SOCKET_LOCK_NAME))
+        removeStaleOwnedRegularFile(File(runtimeDirectory, INSTANCE_LOCK_NAME))
         removeStaleSocket(File(runtimeDirectory, SOCKET_NAME))
         return runtimeDirectory
     }
@@ -314,6 +319,31 @@ internal object WawonaRuntimePaths {
             } catch (error: ErrnoException) {
                 throw IOException("Could not make Wawona runtime directory private.", error)
             }
+        }
+    }
+
+    private fun removeStaleOwnedRegularFile(file: File) {
+        val stat = try {
+            Os.lstat(file.absolutePath)
+        } catch (error: ErrnoException) {
+            if (error.errno == OsConstants.ENOENT) return
+            throw IOException("Could not inspect a previous Wawona lock file.", error)
+        }
+
+        if ((stat.st_mode and FILE_TYPE_MASK) != OsConstants.S_IFREG) {
+            throw IOException(
+                "Refusing to remove a non-regular Wawona lock path: " + file.name
+            )
+        }
+        if (stat.st_uid != Process.myUid()) {
+            throw IOException(
+                "Refusing to remove a Wawona lock file owned by another UID."
+            )
+        }
+        try {
+            Os.unlink(file.absolutePath)
+        } catch (error: ErrnoException) {
+            throw IOException("Could not remove a stale Wawona lock file.", error)
         }
     }
 
