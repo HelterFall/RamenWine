@@ -371,6 +371,10 @@ def bundle_box64_x64_libraries(
     checksum_file = bundle_work / "box64-bundle-x86-libs.sha256"
     if checksum_file.exists():
         checksum_file.unlink()
+    # The source archive has already been checksummed and only its x86-64
+    # directory was extracted. Avoid retaining the full multi-architecture
+    # archive (and its original package files) in the build workspace.
+    archive.unlink()
 
     return {
         "sourceCommit": BOX64_COMMIT,
