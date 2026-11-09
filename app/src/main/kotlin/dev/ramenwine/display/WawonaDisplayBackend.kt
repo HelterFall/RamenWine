@@ -183,6 +183,8 @@ private class WawonaGameDisplaySession(
     }
 
     private var closed = false
+    private var smokeClientLaunched = false
+    private var smokeStopRequested = false
 
     override fun resize(widthPx: Int, heightPx: Int) {
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
@@ -198,20 +200,30 @@ private class WawonaGameDisplaySession(
         WawonaProcessSessionGuard.withLease(inputLeaseToken) {
             check(!closed) { "The Wawona display session is already closed." }
             started = WawonaNative.nativeRunWestonSimpleSHM()
+            if (started) {
+                smokeClientLaunched = true
+                smokeStopRequested = false
+            }
         }
         return started
     }
 
     override fun stopWestonSimpleShm() {
         WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
-            if (!closed) WawonaNative.nativeStopWestonSimpleSHM()
+            if (!closed && smokeClientLaunched && !smokeStopRequested) {
+                WawonaNative.nativeStopWestonSimpleSHM()
+                smokeStopRequested = true
+            }
         }
     }
 
     override fun isWestonSimpleShmRunning(): Boolean {
         var running = false
         WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
-            running = !closed && WawonaNative.nativeIsWestonSimpleSHMRunning()
+            // Upstream clears its atomic counter immediately on a stop request;
+            // false therefore means either naturally exited or stop was requested.
+            running = !closed && smokeClientLaunched && !smokeStopRequested &&
+                WawonaNative.nativeIsWestonSimpleSHMRunning()
         }
         return running
     }
@@ -223,13 +235,20 @@ private class WawonaGameDisplaySession(
             try {
                 // Upstream's SHM client runs on a detached pthread. Its stop
                 // JNI method only sets the client's running flag and resets a
-                // counter; it does not join the thread. Request stop and allow
-                // one short scheduling window before tearing down the server.
-                WawonaNative.nativeStopWestonSimpleSHM()
-                try {
-                    Thread.sleep(SHM_CLIENT_STOP_GRACE_MS)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
+                // counter; it does not join the thread. For sessions which
+                // launched it, request stop once and allow a short scheduling
+                // window before tearing down the server.
+                if (smokeClientLaunched) {
+                    if (!smokeStopRequested) {
+                        WawonaNative.nativeStopWestonSimpleSHM()
+                        smokeStopRequested = true
+                    }
+                    try {
+                        Thread.sleep(SHM_CLIENT_STOP_GRACE_MS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                    smokeClientLaunched = false
                 }
                 // Upstream explicitly separates surface teardown from core
                 // shutdown. Destroy the Vulkan surface first, then stop Rust.
