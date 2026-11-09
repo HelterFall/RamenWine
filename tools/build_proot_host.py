@@ -19,6 +19,69 @@ ASSEMBLER = Path(__file__).with_name("assemble_proot_host.py")
 FUSE_DEVICE = Path("/dev/fuse")
 
 
+REQUIRED_PROOT_CLI_OPTIONS = (
+    "--rootfs",
+    "--bind",
+    "--pwd",
+    "--kill-on-exit",
+    "--link2symlink",
+    "--sysvipc",
+)
+
+
+def validate_pinned_proot_source_contract(source: Path) -> None:
+    """Keep the Android command builder aligned with the exact Termux PRoot pin."""
+    required_files = {
+        "src/cli/proot.h": source / "src/cli/proot.h",
+        "src/cli/proot.c": source / "src/cli/proot.c",
+        "src/execve/enter.c": source / "src/execve/enter.c",
+        "src/path/temp.c": source / "src/path/temp.c",
+        "packages/proot/build.sh": source / "packages/proot/build.sh",
+    }
+    contents: dict[str, str] = {}
+    for label, path in required_files.items():
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("Pinned Termux PRoot source file is missing or unsafe: " + label)
+        contents[label] = path.read_text(encoding="utf-8")
+
+    cli_header = contents["src/cli/proot.h"]
+    for option in REQUIRED_PROOT_CLI_OPTIONS:
+        if f'.name = "{option}"' not in cli_header:
+            raise ValueError(
+                "Pinned PRoot CLI does not define the required command option: " + option
+            )
+
+    cli_source = contents["src/cli/proot.c"]
+    if (
+        "static int handle_option_kill_on_exit" not in cli_header
+        or "tracee->killall_on_exit = true;" not in cli_source
+    ):
+        raise ValueError("Pinned PRoot --kill-on-exit option is not implemented.")
+
+    loader_source = contents["src/execve/enter.c"]
+    if (
+        'getenv("PROOT_LOADER")' not in loader_source
+        or "PROOT_UNBUNDLE_LOADER" not in loader_source
+    ):
+        raise ValueError("Pinned PRoot does not support the staged PROOT_LOADER override.")
+
+    temp_source = contents["src/path/temp.c"]
+    if 'getenv("PROOT_TMP_DIR")' not in temp_source:
+        raise ValueError("Pinned PRoot does not support the app-private PROOT_TMP_DIR.")
+
+    package_recipe = contents["packages/proot/build.sh"]
+    for required in (
+        'TERMUX_PKG_DEPENDS="libandroid-shmem, libtalloc"',
+        'TERMUX_PKG_EXTRA_MAKE_ARGS="-C src PROOT_WITH_LIBANDROID_SHMEM=true"',
+        "export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot",
+    ):
+        if required not in package_recipe:
+            raise ValueError(
+                "Pinned Termux PRoot package recipe is missing a required Android build setting: "
+                + required
+            )
+
+
 def run(
     command: list[str],
     cwd: Path | None = None,
@@ -107,6 +170,10 @@ def build(args: argparse.Namespace) -> Path:
         raise ValueError(
             "Termux checkout does not match the pinned source commit: " + revision
         )
+
+    # Confirm that the exact pinned PRoot source and package recipe still
+    # provide every CLI flag and host integration used by Android at runtime.
+    validate_pinned_proot_source_contract(source)
 
     container_name = "ramenwine-proot-host-" + uuid.uuid4().hex[:12]
     try:
