@@ -841,13 +841,27 @@ def validate_proot_shutdown_patch_provenance(host_root: Path) -> None:
         )
 
     recipe_hash = patch.get("recipeSha256")
+    binary_hash = patch.get("binarySha256")
     if (
         patch.get("file") != "packages/proot/build.sh"
         or not isinstance(recipe_hash, str)
         or len(recipe_hash) != 64
         or any(character not in "0123456789abcdef" for character in recipe_hash)
+        or not isinstance(binary_hash, str)
+        or len(binary_hash) != 64
+        or any(character not in "0123456789abcdef" for character in binary_hash)
     ):
         raise ValueError("PRoot SIGTERM cleanup patch provenance hash is malformed.")
+
+    proot_path = host_root / "bin" / "proot"
+    try:
+        proot_real = proot_path.resolve(strict=True)
+        proot_real.relative_to(host_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot executable is missing or escapes its host payload.") from error
+    actual_binary_hash = hashlib.sha256(proot_real.read_bytes()).hexdigest()
+    if actual_binary_hash != binary_hash:
+        raise ValueError("PRoot executable does not match its SIGTERM patch provenance hash.")
 
 
 def validate_glibc_proot_box64(root: Path) -> None:
