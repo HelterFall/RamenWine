@@ -237,4 +237,4 @@ The Android host scaffold currently includes:
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
 
-Wawona is the current MIT-licensed Wayland compositor reference, but its Android target is a full application with a process-global Rust/JNI compositor and Nix-staged native dependencies, not a reusable AAR. It has not been integrated. Piperella remains a separate GPL-3.0/API-36 research reference and is not a direct dependency.
+Wawona is used through a RamenWine-owned JNI adapter and a pinned Nix-built native dependency payload; it is not consumed as a Gradle library. Adapter source is present, but the generated native payload and physical ARM64 rendering still need validation. See [Wawona Integration](docs/WAWONA_INTEGRATION.md). Piperella remains a separate GPL-3.0/API-36 research reference and is not a direct dependency.
