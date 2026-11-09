@@ -232,7 +232,7 @@ object ProotWineCommandBuilder {
             "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
             "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
             "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
-            "WINEARCH" to "win64",
+            "WINEARCH" to "wow64",
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/usr/local/bin:/usr/bin:/bin",
