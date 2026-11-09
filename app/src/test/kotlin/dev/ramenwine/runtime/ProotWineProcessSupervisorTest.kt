@@ -117,7 +117,7 @@ class ProotWineProcessSupervisorTest {
     }
 
     private class FinalOutputProcess(
-        finalLine: String
+        private val finalLine: String
     ) : Process() {
         private val input = java.io.PipedInputStream()
         private val writer = java.io.PipedOutputStream(input)
@@ -129,15 +129,6 @@ class ProotWineProcessSupervisorTest {
         private var code: Int = 0
 
         val destroyCalls = AtomicInteger()
-
-        init {
-            // Connect before the process session starts its asynchronous reader.
-            // Keeping the pipe open until destroy() lets the test observe the
-            // exact final-output-before-EOF shutdown ordering.
-            finalOutput = finalLine
-        }
-
-        private var finalOutput: String
 
         override fun getOutputStream(): java.io.OutputStream = outputSink
 
@@ -175,7 +166,7 @@ class ProotWineProcessSupervisorTest {
             if (!terminated.compareAndSet(false, true)) return
             code = exitCode
             try {
-                writer.write((finalOutput + "\n").toByteArray(Charsets.UTF_8))
+                writer.write((finalLine + "\n").toByteArray(Charsets.UTF_8))
                 writer.flush()
             } finally {
                 writer.close()
