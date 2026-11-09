@@ -184,6 +184,28 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsWaylandRuntimeDirectorySymlinkEscapingAppCache() {
+        val fixture = Fixture()
+        val outside = Files.createTempDirectory("ramenwine-display-outside").toFile()
+        try {
+            fixture.displayDirectory.deleteRecursively()
+            Files.createSymbolicLink(
+                fixture.displayDirectory.toPath(),
+                outside.toPath()
+            )
+            File(outside, "wayland-0").writeText("socket placeholder")
+
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wayland runtime directory"))
+        } finally {
+            outside.deleteRecursively()
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun refusesRuntimeWithMissingProotExecutable() {
         val fixture = Fixture()
         try {

@@ -22,12 +22,13 @@ class WinePrefixInitializerTest {
         val fixture = Fixture(fixtureScript = "create-prefix")
         try {
             val output = CopyOnWriteArrayList<String>()
-            val initializer = fixture.initializer()
+            val firstInitializer = fixture.initializer()
+            val secondInitializer = fixture.initializer()
             val request = fixture.request()
 
             coroutineScope {
-                val first = async { initializer.ensureInitialized(request, output::add) }
-                val second = async { initializer.ensureInitialized(request, output::add) }
+                val first = async { firstInitializer.ensureInitialized(request, output::add) }
+                val second = async { secondInitializer.ensureInitialized(request, output::add) }
                 first.await()
                 second.await()
             }

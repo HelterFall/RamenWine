@@ -25,7 +25,7 @@ internal class WinePrefixInitializer(
     private val socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator,
     private val initializationTimeoutMillis: Long = DEFAULT_INITIALIZATION_TIMEOUT_MILLIS
 ) {
-    private val prefixMutex = Mutex()
+    private val prefixMutex = PROCESS_PREFIX_MUTEX
 
     init {
         require(initializationTimeoutMillis > 0L) {
@@ -124,6 +124,10 @@ internal class WinePrefixInitializer(
             File(prefixDirectory, USER_REGISTRY).isFile
 
     private companion object {
+        // A process-wide lock also covers multiple Activity/coordinator instances.
+        // Prefix setup is short-lived and rare; serializing all new prefix boots
+        // avoids competing wineboot processes mutating the same host directory.
+        private val PROCESS_PREFIX_MUTEX = Mutex()
         private const val DEFAULT_INITIALIZATION_TIMEOUT_MILLIS = 5 * 60 * 1000L
         private const val SYSTEM_REGISTRY = "system.reg"
         private const val USER_REGISTRY = "user.reg"

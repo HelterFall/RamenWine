@@ -122,6 +122,7 @@ object ProotWineCommandBuilder {
         )
 
         val displayDirectory = request.display.hostRuntimeDirectory.canonicalFile
+        requireContained(cacheRoot, displayDirectory, "Wayland runtime directory")
         requireDirectory(displayDirectory, "Wayland runtime directory")
 
         if (!SOCKET_NAME_PATTERN.matches(request.display.socketName)) {
