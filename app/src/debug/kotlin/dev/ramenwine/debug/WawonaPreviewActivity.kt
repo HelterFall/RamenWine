@@ -137,11 +137,44 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                         return@post
                     }
 
+                    val newerSurface = pendingSurface
+                    if (newerSurface != null && newerSurface !== surface && newerSurface.isValid) {
+                        closePending = true
+                        closeDisplaySession(created) { resumePendingSurface() }
+                        return@post
+                    }
+
+                    val latestWidth = if (pendingSurface === surface) pendingWidth else widthPx
+                    val latestHeight = if (pendingSurface === surface) pendingHeight else heightPx
+                    if (pendingSurface === surface) {
+                        pendingSurface = null
+                        pendingWidth = 0
+                        pendingHeight = 0
+                    }
+
                     displaySession = created
                     surfaceView.bindSession(created)
                     statusView.text =
                         "Compositor ready · Wayland socket: " + created.endpoint.socketName
-                    startSmokeClient()
+                    if (latestWidth != widthPx || latestHeight != heightPx) {
+                        statusView.text = "Применяю последний размер Surface…"
+                        nativeExecutor.execute {
+                            val resizeResult = runCatching {
+                                created.resize(latestWidth, latestHeight)
+                            }
+                            mainHandler.post {
+                                if (displaySession === created) {
+                                    resizeResult.onFailure {
+                                        statusView.text = "Ошибка изменения размера: " +
+                                            (it.message ?: it.javaClass.simpleName)
+                                    }
+                                    startSmokeClient()
+                                }
+                            }
+                        }
+                    } else {
+                        startSmokeClient()
+                    }
                 }
             }
         }.onFailure {
