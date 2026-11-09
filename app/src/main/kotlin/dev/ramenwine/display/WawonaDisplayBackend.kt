@@ -178,6 +178,10 @@ private class WawonaGameDisplaySession(
     override val endpoint: WaylandDisplayEndpoint,
     override val inputLeaseToken: Any
 ) : GameDisplaySession, WawonaInputSessionLease, WawonaSmokeTestSession {
+    private companion object {
+        const val SHM_CLIENT_STOP_GRACE_MS = 150L
+    }
+
     private var closed = false
 
     override fun resize(widthPx: Int, heightPx: Int) {
@@ -217,9 +221,16 @@ private class WawonaGameDisplaySession(
             if (closed) return@closeLease
             closed = true
             try {
-                // Stop the optional SHM diagnostic client before tearing down
-                // its host surface and process-global compositor.
+                // Upstream's SHM client runs on a detached pthread. Its stop
+                // JNI method only sets the client's running flag and resets a
+                // counter; it does not join the thread. Request stop and allow
+                // one short scheduling window before tearing down the server.
                 WawonaNative.nativeStopWestonSimpleSHM()
+                try {
+                    Thread.sleep(SHM_CLIENT_STOP_GRACE_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
                 // Upstream explicitly separates surface teardown from core
                 // shutdown. Destroy the Vulkan surface first, then stop Rust.
                 WawonaNative.nativeDestroySurface(surface)
