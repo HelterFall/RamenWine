@@ -215,6 +215,9 @@ internal class WawonaRuntimeAssets(context: Context) {
     }
 
 
+}
+
+
 /**
  * Verifies the exact files extracted from the pinned Wawona APK.
  *
@@ -294,6 +297,4 @@ internal object WawonaAssetIntegrity {
             append(HEX[value and 0x0f])
         }
     }
-}
-
 }
