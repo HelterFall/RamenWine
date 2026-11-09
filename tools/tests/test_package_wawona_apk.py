@@ -73,6 +73,25 @@ class WawonaApkPackagerTests(unittest.TestCase):
                 lambda filename, _data: dependencies[filename],
             )
 
+    def test_keeps_optional_swiftshader_icd_when_present(self) -> None:
+        libraries = {
+            "libwawona.so": b"wawona",
+            "libEGL_angle.so": b"angle-egl",
+            "libGLESv2_angle.so": b"angle-gles",
+            "libvk_swiftshader.so": b"swiftshader",
+        }
+        dependencies = {
+            "libwawona.so": ([], "libwawona.so"),
+            "libEGL_angle.so": ([], "libEGL_angle.so"),
+            "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
+            "libvk_swiftshader.so": (["libandroid.so"], "libvk_swiftshader.so"),
+        }
+        selected = package_wawona_apk.collect_native_closure(
+            libraries,
+            lambda filename, _data: dependencies[filename],
+        )
+        self.assertIn("libvk_swiftshader.so", selected)
+
     def test_accepts_android_system_dependencies_without_bundling_them(self) -> None:
         libraries = {
             "libwawona.so": b"wawona",
