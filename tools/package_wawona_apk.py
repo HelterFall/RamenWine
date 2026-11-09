@@ -205,6 +205,9 @@ class ApkNativeLibraries(Mapping[str, bytes]):
     def __getitem__(self, filename: str) -> bytes:
         return self._archive.read(self._entries[filename])
 
+    def __contains__(self, filename: object) -> bool:
+        return filename in self._entries
+
     def __iter__(self) -> Iterator[str]:
         return iter(self._entries)
 
