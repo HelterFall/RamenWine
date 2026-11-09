@@ -1,36 +1,30 @@
 # Android runtime backend decision
 
-**Status:** architecture decision for the first Android runtime prototypes  
+**Status:** first-launch backend selected; alternative backends deferred  
 **Scope:** execution environment selection on ARM64 Android
 
 ## Decision
 
-RamenWine must not hard-code one Android/Linux execution strategy. Keep a backend interface and validate two families:
-
-1. **Bionic-native Wine** — preferred performance experiment because it can run without a glibc rootfs and PRoot syscall interception.
-2. **glibc Linux rootfs + PRoot** — compatibility fallback based on the established Winlator-style Android architecture.
+Keep the backend interface, but do not build several runtimes in parallel. The first end-to-end launch target is **glibc Linux rootfs + PRoot + Box64 + Wine 11 WoW64 with the Wayland driver**. This matches the command builder already in the app and lets Wine connect to the Wawona Wayland socket. Bionic-native Wine remains a later experiment only after the first visual novel launches.
 
 The Bionic path is an experiment, not yet the default production runtime. Current public ARM64EC Proton/Wine packages for Android are explicitly marked as testing builds and may be unstable. The fallback must remain available until a device/game compatibility corpus shows which path is more reliable.
 
 ## Why two paths
 
-### Bionic-native path
+### First launch path: glibc rootfs + PRoot
 
-A Wine build targeting Android's Bionic libc can run in the Android app environment without a glibc rootfs and without PRoot. This avoids PRoot's ptrace syscall interception overhead and reduces the amount of Linux userspace that must be shipped.
+This path packages an x86-64 Linux root filesystem with Wine and its guest libraries, then enters it through an ARM64 Android/Bionic PRoot executable. Box64 runs the x86-64 Linux Wine loader under the Android host process. Wine must include both halves of its Wayland driver and connect to the Wawona socket bound into the guest.
 
-Two variants should be evaluated separately:
+For the first milestone, use one pinned Wine 11 WoW64 build and one pinned Box64 build. Do not add X11/Xwayland, DXVK, VKD3D, game launchers, Steam, or multiple Wine versions until an original Win32 GDI window is visible through Wayland.
 
-- **ARM64EC + FEX**: ARM64EC Wine build with FEX-based x86/x64 execution. This is a promising compatibility/performance experiment, but needs validation for the exact games, device ABI, Android linker, graphics driver and required support libraries.
-- **x86-64 Wine + Box64**: Wine and Box64 builds that are compatible with Bionic. Do not assume that a generic glibc Box64 binary can be used in this path.
+### Deferred experiment: Bionic-native Wine
+
+A Wine build targeting Android's Bionic libc can run in the Android app environment without a glibc rootfs and without PRoot. This may reduce package size and PRoot syscall overhead, but its ARM64EC/FEX and x86-64/Box64 variants require separate validation. Do not implement these paths in parallel with the first launch target.
 
 Reference implementation/release:
 - [GameNative/proton-wine releases](https://github.com/GameNative/proton-wine/releases)
 
-Its Android-specific ARM64EC releases document Bionic fixes and FEX integration, but mark the builds as testing/unstable. Treat these as research evidence, not as a production guarantee.
-
-### glibc rootfs + PRoot path
-
-This path packages a Linux root filesystem with Wine and Box64, then enters it through a host-side PRoot executable.
+Its Android-specific ARM64EC releases document Bionic fixes and FEX integration, but mark the builds as testing/unstable. Treat these as future research inputs, not as a runtime dependency for the first launch.
 
 Advantages:
 - Established Android deployment model.
@@ -91,15 +85,9 @@ executableFiles=bin/wine
 
 A future package installer must validate package SHA-256 digests before extraction and must extract into a staging directory before atomically activating a runtime version. The runtime package manifest is trusted only after its package digest has been verified.
 
-## Prototype and comparison plan
+## First-launch validation plan
 
-Do not select the production backend from theoretical performance alone. Build three small, independently testable prototypes:
-
-1. ARM64EC/FEX Bionic Wine launching an original x86-64 Windows GUI test program.
-2. Bionic-compatible x86-64 Wine + Box64 launching the same program.
-3. glibc rootfs + PRoot + Box64 launching the same program.
-
-For each path, record:
+Do not benchmark alternative backends yet. First prove one original Windows GUI process can start and render through Wawona. For this selected path, record:
 - install size and incremental size for optional components;
 - cold and warm launch time;
 - idle and peak RAM;
@@ -108,7 +96,7 @@ For each path, record:
 - audio startup and long-session stability;
 - behavior across Android pause/resume and process teardown.
 
-Then repeat using original or appropriately licensed visual-novel fixtures:
+Only after the first GUI test passes, repeat using original or appropriately licensed visual-novel fixtures:
 - 32-bit Win32 GUI + GDI;
 - x86-64 Win32 GUI;
 - DirectDraw / Direct3D 8-era renderer;
@@ -149,7 +137,7 @@ Not implemented yet:
 
 ## Rule
 
-Bionic-native is the performance-first experiment; glibc + PRoot is the compatibility fallback. Production default is chosen only from reproducible device and game test results.
+The current target is one glibc + PRoot + Box64 + Wine Wayland path. Bionic/FEX remains deferred. Reconsider the backend only if the selected path is blocked by a demonstrated technical limitation or a measured incompatibility with the chosen visual-novel fixture.
 
 
 ## Offline runtime package format
