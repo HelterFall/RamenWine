@@ -180,9 +180,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         currentWidth = 0
         currentHeight = 0
         generation += 1
-
-        launchJob?.cancel()
-        launchJob = null
+        cancelPendingLaunch()
 
         val active = launchSession
         launchSession = null
@@ -276,8 +274,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         if (closing) return
         closing = true
         generation += 1
-        launchJob?.cancel()
-        launchJob = null
+        cancelPendingLaunch()
         surfaceView.bindSession(null)
         showStatus("Закрываю новеллу…")
 
@@ -293,6 +290,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
      * The cleanup scope is cancelled only after Activity teardown has started and
      * every stop (plus any in-flight launch coroutine) has completed.
      */
+    private fun cancelPendingLaunch() {
+        val pending = launchJob
+        launchJob = null
+        pending?.cancel()
+        pending?.let(::trackShutdownJob)
+    }
+
     private fun scheduleSessionStop(
         session: GameLaunchSession?,
         onComplete: (() -> Unit)? = null
@@ -317,7 +321,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     }
 
     private fun trackShutdownJob(job: Job) {
-        shutdownJobs.add(job)
+        if (!shutdownJobs.add(job)) return
         job.invokeOnCompletion {
             mainHandler.post {
                 shutdownJobs.remove(job)
@@ -364,14 +368,11 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         if (::surfaceView.isInitialized) {
             surfaceView.bindSession(null)
         }
-        launchJob?.cancel()
-        launchJob = null
+        cleanupShutdownRequested = true
+        cancelPendingLaunch()
 
         val active = launchSession
         launchSession = null
-
-        cleanupShutdownRequested = true
-        launchJob?.let(::trackShutdownJob)
         scheduleSessionStop(active)
         cancelCleanupScopeWhenIdle()
 
