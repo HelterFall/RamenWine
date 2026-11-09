@@ -330,6 +330,14 @@ class RuntimePackagerTests(unittest.TestCase):
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "i386-windows" / "ntdll.dll",
         )
+        self._write_pe64(
+            rootfs / "usr" / "lib" / "ramenwine" / "probes"
+            / "wayland-probe-x86_64.exe",
+        )
+        self._write_pe32(
+            rootfs / "usr" / "lib" / "ramenwine" / "probes"
+            / "wayland-probe-i386.exe",
+        )
         for relative_path in (
             "rules/evdev",
             "keycodes/evdev",
@@ -440,6 +448,30 @@ class RuntimePackagerTests(unittest.TestCase):
                 ValueError,
                 "unresolved ELF dependency.*libmissing-wayland-native.so.0",
             ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_missing_amd64_wayland_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            probe = (
+                backend / "rootfs" / "usr" / "lib" / "ramenwine" / "probes"
+                / "wayland-probe-x86_64.exe"
+            )
+            probe.unlink()
+
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_i386_wayland_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            probe = (
+                backend / "rootfs" / "usr" / "lib" / "ramenwine" / "probes"
+                / "wayland-probe-i386.exe"
+            )
+            self._write_pe64(probe)
+
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_missing_wine_preloader(self) -> None:
