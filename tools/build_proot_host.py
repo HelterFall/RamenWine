@@ -170,7 +170,7 @@ def validate_pinned_proot_source_contract(source: Path) -> None:
     )
     for required in required_recipe_values:
         if required not in package_recipe:
-            raise ValueError("Pinned Termux PRoot package recipe is missing: " + required)
+            raise ValueError("Pinned Termux PRoot package recipe is missing a required Android build setting: " + required)
 
     required_patch_values = (
         PROOT_SIGTERM_PATCH_MARKER,
