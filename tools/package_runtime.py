@@ -57,6 +57,7 @@ ELF_MACHINE_AARCH64 = 183
 ELF_MACHINE_X86_64 = 62
 ELF_PT_INTERP = 3
 PE_MACHINE_AMD64 = 0x8664
+PE_MACHINE_I386 = 0x014C
 
 
 def resolve_guest_file(rootfs: Path, guest_path: str) -> Path:
@@ -204,7 +205,7 @@ def require_executable(path: Path, label: str) -> None:
         raise ValueError(f"{label} is missing or not executable: {path}")
 
 
-def require_pe_amd64(path: Path, label: str) -> None:
+def require_pe_machine(path: Path, label: str, expected_machine: int) -> None:
     try:
         file_size = path.stat().st_size
         with path.open("rb") as stream:
@@ -216,16 +217,24 @@ def require_pe_amd64(path: Path, label: str) -> None:
                 raise ValueError(f"{label} has an invalid PE header offset: {path}")
             stream.seek(pe_offset)
             pe_header = stream.read(6)
-            if len(pe_header) != 6 or pe_header[:4] != b"PE\x00\x00":
+            if len(pe_header) != 6 or pe_header[:4] != b"PE\\x00\\x00":
                 raise ValueError(f"{label} has no PE signature: {path}")
             machine = struct.unpack_from("<H", pe_header, 4)[0]
-            if machine != PE_MACHINE_AMD64:
+            if machine != expected_machine:
                 raise ValueError(
-                    f"{label} must target AMD64 (0x8664), got 0x{machine:04x}"
+                    f"{label} has the wrong PE machine: expected 0x{expected_machine:04x}, "
+                    f"got 0x{machine:04x}"
                 )
     except (OSError, struct.error) as error:
         raise ValueError(f"could not inspect PE file for {label}: {path}") from error
 
+
+def require_pe_amd64(path: Path, label: str) -> None:
+    require_pe_machine(path, label, PE_MACHINE_AMD64)
+
+
+def require_pe_i386(path: Path, label: str) -> None:
+    require_pe_machine(path, label, PE_MACHINE_I386)
 
 def validate_glibc_proot_box64(root: Path) -> None:
     """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
@@ -313,7 +322,13 @@ def validate_glibc_proot_box64(root: Path) -> None:
         rootfs,
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv",
     )
-    require_pe_amd64(wayland_pe, "Wine Wayland PE driver")
+    require_pe_amd64(wayland_pe, "Wine x86-64 Wayland PE driver")
+
+    wayland_i386_pe = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv",
+    )
+    require_pe_i386(wayland_i386_pe, "Wine 32-bit Wayland PE driver")
 
 
 def safe_relative_path(value: str) -> str:

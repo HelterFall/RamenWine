@@ -69,6 +69,18 @@ class RuntimePackagerTests(unittest.TestCase):
         path.chmod(0o644)
         return path
 
+    @staticmethod
+    def _write_pe32(path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = bytearray(0x80 + 6)
+        data[:2] = b"MZ"
+        struct.pack_into("<I", data, 0x3C, 0x80)
+        data[0x80:0x84] = b"PE\\x00\\x00"
+        struct.pack_into("<H", data, 0x84, package_runtime.PE_MACHINE_I386)
+        path.write_bytes(data)
+        path.chmod(0o644)
+        return path
+
     def _make_glibc_backend(self, root: Path) -> Path:
         backend = root / "backend"
         (backend / "host" / "lib").mkdir(parents=True)
@@ -124,12 +136,37 @@ class RuntimePackagerTests(unittest.TestCase):
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "x86_64-windows" / "winewayland.drv",
         )
+        self._write_pe32(
+            rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+            / "i386-windows" / "winewayland.drv",
+        )
         return backend
 
     def test_validates_hybrid_arm64_glibc_and_x64_wine_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_runtime_missing_i386_wine_wayland_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            driver = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "i386-windows" / "winewayland.drv"
+            )
+            driver.unlink()
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_i386_wine_wayland_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_pe64(
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "i386-windows" / "winewayland.drv",
+            )
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_proot_loader(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

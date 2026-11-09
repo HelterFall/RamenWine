@@ -31,13 +31,15 @@ rootfs/                    # ARM64 Linux distribution with glibc
     x86_64-unix/
       winewayland.so       # x86-64 Unix side of Wine's Wayland driver
     x86_64-windows/
-      winewayland.drv      # PE side of Wine's Wayland driver
+      winewayland.drv      # AMD64 PE side of Wine's Wayland driver
+    i386-windows/
+      winewayland.drv      # 32-bit PE side required by new WoW64
   ...
 ```
 
 RamenWine normalizes the runtime package to these paths. The rootfs is **ARM64 glibc**, not an x86-64-only image: native ARM64 Linux programs run directly under PRoot, Box64 is an ARM64/glibc guest executable, and Box64 loads the x86-64 Wine WoW64 files installed alongside the ARM64 userspace. The x86-64 loader and x86-64 libraries are an additional guest ABI inside that same rootfs.
 
-The command builder refuses to launch if either glibc loader or either Wayland driver half is missing. The package build must include the ARM64 dependency closure for Box64, the x86-64 dependency closure for Wine and its Wayland Unix driver, and the Wayland client/protocol libraries selected by that Wine build. Wine's PE Wayland driver must be packaged as well.
+The command builder refuses to launch if either glibc loader or any of the three Wayland driver files is missing: the x86-64 Unix module, the x86-64 PE driver and the i386 PE driver. Wine 11's new WoW64 mode still needs the i386 PE driver for 32-bit Windows programs. The package build must include the ARM64 dependency closure for Box64, the x86-64 dependency closure for Wine and its Wayland Unix driver, and the Wayland client/protocol libraries selected by that Wine build. Wine's PE Wayland driver must be packaged as well.
 
 The runtime preflight checks the PRoot host, Box64/Wine ELF files and both Wayland drivers. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
 

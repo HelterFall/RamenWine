@@ -103,7 +103,12 @@ object ProotWineCommandBuilder {
         runtimeFile(
             rootfs,
             WINE_WAYLAND_PE_DRIVER_PATH,
-            "Wine Wayland PE driver"
+            "Wine x86-64 Wayland PE driver"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_I386_PE_DRIVER_PATH,
+            "Wine 32-bit Wayland PE driver"
         )
 
         val proot = executableFile(backendRoot, "host/bin/proot")
@@ -376,6 +381,8 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
     private const val WINE_WAYLAND_PE_DRIVER_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+    private const val WINE_WAYLAND_I386_PE_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
     private const val WINEBOOT_PE_RELATIVE_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     private const val GUEST_ARM64_LIBRARY_PATH =

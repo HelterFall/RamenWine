@@ -167,6 +167,20 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsRuntimeMissingWineWaylandI386PeDriver() {
+        val fixture = Fixture()
+        try {
+            fixture.wineWaylandI386Pe.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine 32-bit Wayland PE driver"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsRuntimeMissingArm64GlibcLoader() {
         val fixture = Fixture()
         try {
@@ -352,6 +366,10 @@ class ProotWineCommandBuilderTest {
         val wineWaylandPe = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+        )
+        val wineWaylandI386Pe = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
         )
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
