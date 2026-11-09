@@ -1,14 +1,17 @@
 package dev.ramenwine.runtime
 
+import dev.ramenwine.display.AndroidWaylandSocketValidator
+import dev.ramenwine.display.WaylandDisplayEndpoint
+import dev.ramenwine.display.WaylandSocketValidator
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.inspection.SafeGamePath
 import java.io.File
 import java.io.IOException
 
-data class WaylandDisplayEndpoint(
-    val hostRuntimeDirectory: File,
-    val socketName: String = "wayland-0"
-)
+enum class ProotWineOperation {
+    RUN_GAME,
+    INITIALIZE_PREFIX
+}
 
 data class ProotWineLaunchRequest(
     val filesDirectory: File,
@@ -16,7 +19,8 @@ data class ProotWineLaunchRequest(
     val game: ImportedGame,
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
-    val locale: String = "C.UTF-8"
+    val locale: String = "C.UTF-8",
+    val operation: ProotWineOperation = ProotWineOperation.RUN_GAME
 )
 
 data class ProotWineCommand(
@@ -36,7 +40,10 @@ data class ProotWineCommand(
  * and prepares a PRoot -> Box64 -> Wine WoW64 command without invoking a shell.
  */
 object ProotWineCommandBuilder {
-    fun build(request: ProotWineLaunchRequest): ProotWineCommand {
+    fun build(
+        request: ProotWineLaunchRequest,
+        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator
+    ): ProotWineCommand {
         require(request.hostUid >= 0) { "Invalid Android UID." }
         require(ID_PATTERN.matches(request.game.id)) { "Invalid imported game ID." }
         require(request.game.relativeDirectory == "games/" + request.game.id) {
@@ -54,7 +61,9 @@ object ProotWineCommandBuilder {
 
         val filesRoot = request.filesDirectory.canonicalFile
         val runtimeRoot = File(filesRoot, "runtime/current").canonicalFile
+        requireContained(filesRoot, runtimeRoot, "Runtime root")
         val backendsRoot = File(runtimeRoot, "backends").canonicalFile
+        requireContained(runtimeRoot, backendsRoot, "Runtime backends")
         val backendRoot = File(backendsRoot, RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName)
             .canonicalFile
         requireContained(runtimeRoot, backendRoot, "Runtime backend")
@@ -69,6 +78,11 @@ object ProotWineCommandBuilder {
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
+        if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
+            // Wine packages expose wineboot as an executable/symlink beside
+            // the unified wine loader.
+            executableFile(rootfs, "usr/bin/wineboot")
+        }
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
         val gameDirectory = File(filesRoot, request.game.relativeDirectory).canonicalFile
@@ -81,24 +95,34 @@ object ProotWineCommandBuilder {
             throw IOException("The selected game EXE is missing or unreadable.")
         }
 
+        val cacheRoot = request.cacheDirectory.canonicalFile
         val prefixDirectory = ensurePrivateDirectory(
+            filesRoot,
             File(filesRoot, "prefixes"),
-            request.game.id
+            request.game.id,
+            "Wine prefix"
         )
         val homeDirectory = ensurePrivateDirectory(
+            filesRoot,
             File(filesRoot, "wine-home"),
-            request.game.id
+            request.game.id,
+            "Wine home"
         )
         val tempDirectory = ensurePrivateDirectory(
-            File(request.cacheDirectory, "wine-tmp"),
-            request.game.id
+            cacheRoot,
+            File(cacheRoot, "wine-tmp"),
+            request.game.id,
+            "Wine temporary"
         )
         val prootTempDirectory = ensurePrivateDirectory(
-            File(request.cacheDirectory, "proot-tmp"),
-            request.game.id
+            cacheRoot,
+            File(cacheRoot, "proot-tmp"),
+            request.game.id,
+            "PRoot temporary"
         )
 
         val displayDirectory = request.display.hostRuntimeDirectory.canonicalFile
+        requireContained(cacheRoot, displayDirectory, "Wayland runtime directory")
         requireDirectory(displayDirectory, "Wayland runtime directory")
 
         if (!SOCKET_NAME_PATTERN.matches(request.display.socketName)) {
@@ -109,6 +133,9 @@ object ProotWineCommandBuilder {
         if (!hostSocket.exists()) {
             throw IOException("The Wayland socket is not ready: " + hostSocket.absolutePath)
         }
+        if (!socketValidator.isUnixDomainSocket(hostSocket)) {
+            throw IOException("The Wayland endpoint is not a Unix-domain socket: " + hostSocket.absolutePath)
+        }
         if (hostSocket.absolutePath.toByteArray(Charsets.UTF_8).size >= MAX_UNIX_SOCKET_PATH_BYTES) {
             throw IOException("The Wayland socket path is too long for Android AF_UNIX.")
         }
@@ -118,7 +145,10 @@ object ProotWineCommandBuilder {
         val guestHomeDirectory = "/home/ramen"
         val guestTempDirectory = "/tmp"
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
-        val guestExecutable = guestGameDirectory + "/" + executableRelativePath
+        val guestExecutable = when (request.operation) {
+            ProotWineOperation.RUN_GAME -> guestGameDirectory + "/" + executableRelativePath
+            ProotWineOperation.INITIALIZE_PREFIX -> "/usr/bin/wineboot"
+        }
 
         // PRoot bind targets must exist in the guest filesystem. Create only
         // app-private directories inside this runtime's rootfs.
@@ -148,8 +178,16 @@ object ProotWineCommandBuilder {
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
             add("/usr/bin/box64")
-            add("/usr/bin/wine")
-            add(guestExecutable)
+            when (request.operation) {
+                ProotWineOperation.RUN_GAME -> {
+                    add("/usr/bin/wine")
+                    add(guestExecutable)
+                }
+                ProotWineOperation.INITIALIZE_PREFIX -> {
+                    add("/usr/bin/wineboot")
+                    add("--init")
+                }
+            }
         }
 
         val environment = linkedMapOf(
@@ -222,7 +260,12 @@ object ProotWineCommandBuilder {
         return file
     }
 
-    private fun ensurePrivateDirectory(parent: File, childName: String): File {
+    private fun ensurePrivateDirectory(
+        allowedRoot: File,
+        parent: File,
+        childName: String,
+        label: String
+    ): File {
         if (!ID_PATTERN.matches(childName)) {
             throw IOException("Unsafe private runtime directory name.")
         }
@@ -231,16 +274,19 @@ object ProotWineCommandBuilder {
             throw IOException("Could not create private directory: " + parent.absolutePath)
         }
 
+        val canonicalRoot = allowedRoot.canonicalFile
         val canonicalParent = parent.canonicalFile
-        val child = File(parent, childName)
+        requireContained(canonicalRoot, canonicalParent, label + " root")
+
+        val child = File(canonicalParent, childName)
         if (!child.exists() && !child.mkdirs()) {
-            throw IOException("Could not create per-game runtime directory.")
+            throw IOException("Could not create per-game " + label + " directory.")
         }
 
         val canonicalChild = child.canonicalFile
-        requireContained(canonicalParent, canonicalChild, "Per-game runtime directory")
+        requireContained(canonicalParent, canonicalChild, label)
         if (!canonicalChild.isDirectory) {
-            throw IOException("Per-game runtime path is not a directory.")
+            throw IOException("Per-game " + label + " path is not a directory.")
         }
         return canonicalChild
     }

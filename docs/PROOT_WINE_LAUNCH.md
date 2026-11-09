@@ -1,6 +1,6 @@
 # PRoot + Box64 + Wine launch contract
 
-**Status:** command builder and process supervisor implemented; actual runtime package and device launch remain unverified.
+**Status:** command builder, process supervisor and host-tested Wine-prefix initializer implemented; actual runtime package and device launch remain unverified.
 
 ## Purpose
 
@@ -17,7 +17,8 @@ host/
 rootfs/
   usr/bin/
     box64                  # ARM64 Linux/glibc Box64 executable
-    wine64                 # x86-64 Linux/glibc Wine loader
+    wine                   # Wine 11 unified WoW64 loader used by the launcher
+    wineboot               # Wine prefix initializer (usually a link to wine)
   ...
 ```
 
@@ -27,7 +28,7 @@ The Wine installation must also include the matching Wayland driver components f
 - `winewayland.so` for the relevant Unix architecture(s);
 - Wayland client libraries and protocols required by that Wine build.
 
-A runtime inventory that omits any required executable is not launch-ready. The command builder checks the three required paths directly before constructing a process command.
+A runtime inventory that omits any required executable is not launch-ready. The command builder checks the PRoot host executable, the host library directory, and the Box64/Wine executables directly before constructing a process command. Prefix initialization additionally requires an executable `/usr/bin/wineboot` entry; a relative symlink to the unified Wine loader is acceptable when included safely in the runtime package.
 
 ## Host/guest path mapping
 
@@ -39,7 +40,7 @@ For each imported game, the builder prepares private host directories and maps t
 | `filesDir/prefixes/<id>` | `/prefixes/<id>` | Persistent per-game Wine prefix |
 | `filesDir/wine-home/<id>` | `/home/ramen` | Per-game home/configuration |
 | `cacheDir/wine-tmp/<id>` | `/tmp` | Per-game temporary files |
-| Wawona/runtime host socket directory | `/run/user/<Android UID>` | Wayland socket |
+| Android-host display backend runtime directory | `/run/user/<Android UID>` | Wayland socket |
 
 The launch environment uses:
 
@@ -60,6 +61,9 @@ The first launch route is an argument vector, not a shell command:
 
 ```text
 proot
+  --kill-on-exit
+  --link2symlink
+  --sysvipc
   --rootfs=<app-private backend>/rootfs
   --bind=/dev:/dev
   --bind=/proc:/proc
@@ -70,36 +74,51 @@ proot
   --bind=<Wayland socket dir>:/run/user/<uid>
   --pwd=/games/<id>
   /usr/bin/box64
-  /usr/bin/wine64
+  /usr/bin/wine
   /games/<id>/<selected.exe>
 ```
 
 PRoot's documented CLI supports the rootfs, bind and initial-working-directory options used above. PRoot bind targets are prepared inside the guest rootfs before process launch. The implementation does not use `-0`: the Windows game remains in the Android app's ordinary UID/sandbox and does not receive fake root.
 
+## Wine prefix initialization
+
+Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither \`system.reg\` nor \`user.reg\` exists, it builds a separate PRoot command:
+
+\`\`\`text
+/usr/bin/box64 /usr/bin/wineboot --init
+\`\`\`
+
+The initializer serializes concurrent requests, tags output with \`[wineboot]\`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both \`system.reg\` and \`user.reg\` exist. If exactly one registry file exists, the prefix is treated as partial and fails closed rather than being overwritten automatically.
+
+The package must expose Wineboot at \`/usr/bin/wineboot\`; standard Wine package layouts provide that entry point, often as a symlink to the unified \`wine\` loader. The \`--init\` option creates the initial prefix. See the [Wineboot manual](https://manpages.debian.org/testing/wine-development/wineboot.1.en.html) and the [Arch Wine file list](https://archlinux.org/packages/extra/x86_64/wine/files/).
+
+The JVM tests use a controlled fake PRoot process that creates the expected registry files. This verifies orchestration, timeout/error gating and concurrency, but it is not proof that a real Wine build can initialize a prefix in the final rootfs.
+
 ## Display preconditions
 
-The command builder refuses to construct a launch if the Wayland socket is absent. This prevents a misleading process start when there is no compositor to display the game's window.
+The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. This prevents a regular file, stale placeholder or external directory from masquerading as a compositor endpoint.
 
-The intended display endpoint is an Android-host Unix socket supplied by a future RamenWine display backend. Wawona is the leading MIT-licensed research candidate. Its compositor has not yet been integrated into RamenWine, so this launcher is not connected to a user-facing Play button.
+The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The RamenWine adapter source is present, but its pinned Nix-built native payload still has to be generated/staged and its Vulkan surface must pass a physical-device smoke test. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. This launcher is still not connected to a user-facing Play button.
 
 Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
 
 ## Process lifecycle
 
 The process supervisor:
-- starts PRoot directly with `ProcessBuilder`;
+- starts PRoot directly with `ProcessBuilder`, without a shell;
 - merges stdout/stderr into diagnostic output;
-- delivers output and exit callbacks on the Android main dispatcher;
-- supports graceful process termination followed by forced termination as a fallback.
+- delivers output and exit callbacks on the configured callback dispatcher (Android main dispatcher by default);
+- waits for the output stream to reach EOF before delivering the exit callback, including the manual-stop path;
+- supports graceful termination followed by forced termination and reports an error if PRoot remains alive.
 
-The implementation has not yet been validated against Wine child-process trees on a physical Android device. A production session manager must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
+JVM regression tests exercise merged output, natural exit, deterministic final-output draining, concurrent stop calls, graceful-to-forced termination escalation, prefix initialization and fail-closed prefix checks. The process-wide prefix lock is shared between coordinator instances, while each display-session lease serializes resize and close. The GameLaunchCoordinator runs prefix initialization before starting the selected game and closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
 
 ## Validation gates before enabling Play
 
 1. Package PRoot for Android/Bionic ARM64 and run `proot --version` under the app UID.
 2. Package a minimal ARM64 glibc rootfs and run a Linux ARM64 smoke executable inside it.
 3. Run Box64 inside that rootfs and validate host library resolution.
-4. Build Wine x86-64 with the Wayland driver and validate the installed PE/Unix driver files.
+4. Build Wine x86-64 with the Wayland driver, verify `wineboot --init` on the target rootfs, and validate the installed PE/Unix driver files.
 5. Start the Wayland compositor on Android, bind its socket into the rootfs and run an original Win32 GDI test window.
 6. Verify the window appears on the Android SurfaceView and that touch, keyboard, close, pause/resume and process teardown work.
 7. Run x86-64 and WoW64 samples before attempting commercial visual-novel engines.

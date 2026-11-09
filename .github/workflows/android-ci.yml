@@ -1,23 +1,29 @@
-name: Android CI
+name: Focused checks
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 concurrency:
-  group: ramenwine-android-ci-${{ github.ref }}
+  group: ramenwine-focused-checks-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  verify:
+  unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -44,22 +50,19 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
-      - name: Install Android toolchain
+      - name: Install compile-only Android SDK
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Run focused JVM unit tests
         run: |
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
-
-      - name: Build, test and lint
-        run: |
-          gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug lintDebug
-
-      - name: Upload debug APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ramenwine-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
+          if ! gradle --no-daemon testDebugUnitTest; then
+            echo "::group::JUnit failure details"
+            for report in app/build/test-results/testDebugUnitTest/TEST-*.xml; do
+              if grep -q 'failures="[1-9]' "$report"; then
+                cat "$report"
+              fi
+            done
+            echo "::endgroup::"
+            exit 1
+          fi

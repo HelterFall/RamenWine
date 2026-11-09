@@ -1,6 +1,6 @@
 # Android game display backend research
 
-**Status:** candidate evaluated; direct dependency not approved  
+**Status:** Wawona adapter source integrated; native payload build and device validation outstanding  
 **Review date:** 2026-11-09
 
 ## Goal
@@ -124,3 +124,37 @@ A compositor candidate must pass:
 - Piperella documentation: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/DOCUMENTATION.md
 - Piperella third-party notices: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/THIRD_PARTY_NOTICES.md
 - Piperella Bionic Hangover release project: https://github.com/Piperella/Piperella-Hangover-Bionic
+
+
+## Wawona integration assessment
+
+The current upstream [Wawona compositor](https://github.com/Wawona/Wawona) is MIT-licensed and its Android application declares minSdk 24, so its license and Android floor are compatible with RamenWine's current minSdk 26. The upstream project has evolved: the Wayland compositor core is now Rust, with Kotlin/JNI Android host integration and a Vulkan renderer.
+
+It is **not** a drop-in Android library today:
+
+- The upstream Android Gradle project is an application module, not a published reusable AAR.
+- Its Android CMake target combines JNI/rendering sources with a Rust backend static library and generated protocol/shader sources. The Nix build stages many native dependencies, including libwayland, xkbcommon, pixman, expat, OpenSSL, zstd/lz4, Weston components, ANGLE and iland.
+- The Android API is application-shaped: WawonaNative is a singleton, nativeInit(cacheDir) creates one process-global core, and the native code starts the fixed socket name wayland-0 under its XDG_RUNTIME_DIR. It also sets WAYLAND_DISPLAY in the host process environment.
+- The native renderer keeps one global Vulkan surface/swapchain. nativeDestroySurface tears down the surface but deliberately preserves the Wayland core; nativeShutdown stops and frees the core. Those are different lifecycle operations and must not be conflated.
+- The Kotlin surface is coupled to Wawona's preferences, session activities and machine model. Copying only WawonaSurfaceView would not provide a working compositor.
+- Its fallback Studio native build uses stub render/backend sources, so it is not a runtime integration path.
+
+**Current decision:** keep Wawona as a pinned native build input and use the RamenWine-owned adapter. Do not add its full Android app as a Gradle dependency or copy its application UI into RamenWine. The adapter and APK dependency-closure extractor are implemented; the generated native payload still needs to be built and validated.
+
+The current WawonaDisplayBackend explicitly handles Wawona's process-global model: it enforces one active compositor/game session per app process, uses a canonical app-private runtime directory and live wayland-0 socket, attaches/detaches the Android Surface independently from stopping the core, and serializes shutdown. It does not support multiple independent compositor sessions.
+
+RamenWine now has a concrete WawonaDisplayBackend behind the GameDisplayBackend / GameDisplaySession boundary, plus a WawonaSurfaceView for basic touch, key and mouse input. The backend verifies the live socket and uses the upstream surface/core shutdown order. Its code is not yet a claim of successful pixel presentation: upstream nativeSetSurface returns void, and a real Vulkan/Wayland client smoke test on ARM64 hardware is still required.
+
+The PRoot command builder checks the socket node type with Android lstat(2). A same-named regular file is rejected; a backend cannot satisfy the launch precondition by merely creating a placeholder file.
+
+## Related upstream sources
+
+- [Wawona changelog](https://github.com/Wawona/Wawona/blob/master/CHANGELOG.md) — Rust-core migration and Android support
+- [Wawona Android Gradle project](https://github.com/Wawona/Wawona/tree/master/android/app) — application module and Kotlin host
+- [Wawona Android JNI implementation](https://github.com/Wawona/Wawona/blob/master/src/platform/android/android_jni.c) — process-global compositor and Vulkan surface lifecycle
+- [Wawona Android Nix build](https://github.com/Wawona/Wawona/blob/master/dependencies/wawona/android.nix) — staged native dependencies
+
+
+## RamenWine implementation update (2026-11-09)
+
+See [Wawona Integration](WAWONA_INTEGRATION.md) for the exact upstream revision, Nix/APK extraction command, asset and native dependency strategy, private socket-path rules, license obligations and physical-device validation gates. The app does not yet ship the generated Wawona native payload by default, and no real Wine game launch is claimed.

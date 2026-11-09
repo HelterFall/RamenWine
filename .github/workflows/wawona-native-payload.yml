@@ -1,0 +1,167 @@
+name: Build pinned Wawona Android payload
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/wawona-native-payload.yml"
+      - "app/build.gradle.kts"
+      - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
+      - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
+      - "tools/package_wawona_apk.py"
+      - "tools/tests/test_package_wawona_apk.py"
+      - "docs/WAWONA_INTEGRATION.md"
+
+concurrency:
+  group: ramenwine-wawona-payload-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  NIXPKGS_ALLOW_UNFREE: "1"
+  WAWONA_REVISION: d298ddd25726fec0977285aa5f57181110c966a6
+
+jobs:
+  build-wawona-payload:
+    name: Build Wawona native payload and RamenWine APK
+    # Wawona's own Android product build uses macos-26: several Android
+    # cross-build dependencies do not configure correctly on Linux runners.
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout RamenWine
+        uses: actions/checkout@v5
+
+      - name: Install Determinate Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          determinate: true
+          extra-conf: |
+            sandbox = relaxed
+            allow-import-from-derivation = true
+            max-jobs = auto
+            cores = 0
+
+      - name: Configure FlakeHub binary cache
+        uses: DeterminateSystems/flakehub-cache-action@v3
+
+      - name: Build pinned upstream Wawona Android APK
+        run: |
+          nix build "github:Wawona/Wawona/${WAWONA_REVISION}#wawona-android" \
+            --print-build-logs \
+            --out-link result-android
+          test -f result-android/bin/Wawona.apk
+          mkdir -p dist
+          cp -L result-android/bin/Wawona.apk dist/Wawona-upstream.apk
+          shasum -a 256 dist/Wawona-upstream.apk
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run native payload packager tests
+        run: python -m unittest discover -s tools/tests -v
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK, platform and CMake
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;30.0.16248370" \
+            "cmake;3.22.1"
+          NDK_ROOT="$ANDROID_HOME/ndk/30.0.16248370"
+          READELF="$(find "$NDK_ROOT/toolchains/llvm/prebuilt" -type f -name llvm-readelf -print -quit)"
+          test -n "$READELF"
+          echo "WAWONA_LLVM_READELF=$READELF" >> "$GITHUB_ENV"
+
+      - name: Extract the reviewed native dependency closure and assets
+        run: |
+          python tools/package_wawona_apk.py \
+            --apk dist/Wawona-upstream.apk \
+            --readelf "$WAWONA_LLVM_READELF" \
+            --revision "$WAWONA_REVISION" \
+            --output app/build/generated/wawona
+          test -s app/build/generated/wawona/assets/wawona/provenance.json
+          find app/build/generated/wawona/jniLibs/arm64-v8a -maxdepth 1 -type f -print | sort
+          cat app/build/generated/wawona/assets/wawona/provenance.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Assemble RamenWine with the generated Wawona payload
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify packaged compositor libraries and assets
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          apk = Path("app/build/outputs/apk/debug/app-debug.apk")
+          provenance_path = Path("app/build/generated/wawona/assets/wawona/provenance.json")
+          if not apk.is_file():
+              raise SystemExit(f"RamenWine APK missing: {apk}")
+
+          provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+          if provenance["revision"] != "d298ddd25726fec0977285aa5f57181110c966a6":
+              raise SystemExit("Unexpected Wawona revision in provenance.")
+
+          required = {
+              "lib/arm64-v8a/libwawona.so",
+              "lib/arm64-v8a/libEGL_angle.so",
+              "lib/arm64-v8a/libGLESv2_angle.so",
+              "assets/wawona/provenance.json",
+              "assets/wawona/xkb",
+              "assets/wawona/fonts",
+          }
+          with zipfile.ZipFile(apk) as archive:
+              names = set(archive.namelist())
+              missing = sorted(name for name in required if name not in names and not any(
+                  entry.startswith(name.rstrip("/") + "/") for entry in names
+              ))
+              if missing:
+                  raise SystemExit("APK is missing required Wawona payload entries: " + ", ".join(missing))
+
+              packaged_libraries = {
+                  Path(name).name
+                  for name in names
+                  if name.startswith("lib/arm64-v8a/") and name.endswith(".so")
+              }
+              expected_libraries = set(provenance["bundledLibraries"])
+              missing_libraries = sorted(expected_libraries - packaged_libraries)
+              if missing_libraries:
+                  raise SystemExit("APK omitted extracted native libraries: " + ", ".join(missing_libraries))
+
+          print(f"Verified {apk} ({apk.stat().st_size} bytes)")
+          print(f"Verified {len(provenance['bundledLibraries'])} Wawona native libraries.")
+          PY
+
+      - name: Upload RamenWine APK and Wawona provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: ramenwine-wawona-debug-${{ github.sha }}
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/generated/wawona/assets/wawona/provenance.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

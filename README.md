@@ -230,11 +230,11 @@ The Android host scaffold currently includes:
 - local JSON game library with atomic metadata persistence;
 - runtime inventory for Bionic ARM64EC/FEX, Bionic + Box64 and glibc + PRoot + Box64;
 - offline runtime ZIP installation with SHA-256 payload verification, staged activation and rollback;
-- a Python runtime package builder and automated Python/JVM tests;
-- GitHub Actions for Android build, tests, lint and debug APK artifacts.
+- a Python runtime package builder, automated Python/JVM tests, PRoot process supervision and host-tested per-game Wine-prefix initialization with cross-coordinator locking;
+- Focused GitHub Actions checks for Python runtime-packager tests and JVM unit tests; APK packaging, lint, NDK/CMake and artifact uploads are deferred.
 
 **Wine/Box64/FEX binaries are not bundled and imported games cannot be launched yet.** Runtime package file checks are not a proof of execution. No game EXE is run during scanning or import.
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
 
-Piperella Wayland Compositor is currently a research reference only. It is GPL-3.0 and requires Android API 36, so it has not been added as a direct dependency.
+Wawona is used through a RamenWine-owned JNI adapter and a pinned Nix-built native dependency payload; it is not consumed as a Gradle library. Adapter source is present, but the generated native payload and physical ARM64 rendering still need validation. See [Wawona Integration](docs/WAWONA_INTEGRATION.md). Piperella remains a separate GPL-3.0/API-36 research reference and is not a direct dependency.

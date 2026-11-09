@@ -1,5 +1,7 @@
 package dev.ramenwine.runtime
 
+import dev.ramenwine.display.WaylandDisplayEndpoint
+import dev.ramenwine.display.WaylandSocketValidator
 import dev.ramenwine.library.ImportedGame
 import java.io.File
 import java.nio.file.Files
@@ -13,7 +15,7 @@ class ProotWineCommandBuilderTest {
     fun buildsProotBox64WineCommandWithPrivateBindsAndWaylandSocket() {
         val fixture = Fixture()
         try {
-            val command = ProotWineCommandBuilder.build(fixture.request())
+            val command = fixture.build()
 
             assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
@@ -54,11 +56,73 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsWinebootPrefixInitializationCommand() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.INITIALIZE_PREFIX
+            )
+            val command = fixture.build(request)
+
+            assertEquals("/usr/bin/wineboot", command.guestExecutablePath)
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineboot", "--init"),
+                command.arguments.takeLast(3)
+            )
+            assertFalse(command.arguments.contains("/usr/bin/wine"))
+            assertEquals(
+                "/prefixes/" + fixture.gameId,
+                command.environment["WINEPREFIX"]
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWinebootExecutableForPrefixInitialization() {
+        val fixture = Fixture()
+        try {
+            fixture.wineboot.delete()
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.INITIALIZE_PREFIX
+            )
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wineboot"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsPrefixParentSymlinkEscapingPrivateFilesDirectory() {
+        val fixture = Fixture()
+        val outside = Files.createTempDirectory("ramenwine-prefix-outside").toFile()
+        try {
+            Files.createSymbolicLink(
+                File(fixture.filesDirectory, "prefixes").toPath(),
+                outside.toPath()
+            )
+
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine prefix root"))
+            assertFalse(File(outside, fixture.gameId).exists())
+        } finally {
+            outside.deleteRecursively()
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsUnsafeExecutablePath() {
         val fixture = Fixture(executableRelativePath = "../outside.exe")
         try {
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException || error is java.io.IOException)
@@ -76,7 +140,7 @@ class ProotWineCommandBuilderTest {
                 relativeDirectory = "games/../escape"
             )
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request().copy(game = invalidGame))
+                fixture.build(fixture.request().copy(game = invalidGame))
             }.exceptionOrNull()
 
             assertTrue(error is IllegalArgumentException)
@@ -91,7 +155,7 @@ class ProotWineCommandBuilderTest {
         val fixture = Fixture(createWaylandSocket = false)
         try {
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is java.io.IOException)
@@ -102,12 +166,52 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsRegularFileMasqueradingAsWaylandSocket() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request(),
+                    WaylandSocketValidator { false }
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Unix-domain socket"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsWaylandRuntimeDirectorySymlinkEscapingAppCache() {
+        val fixture = Fixture()
+        val outside = Files.createTempDirectory("ramenwine-display-outside").toFile()
+        try {
+            fixture.displayDirectory.deleteRecursively()
+            Files.createSymbolicLink(
+                fixture.displayDirectory.toPath(),
+                outside.toPath()
+            )
+            File(outside, "wayland-0").writeText("socket placeholder")
+
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wayland runtime directory"))
+        } finally {
+            outside.deleteRecursively()
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun refusesRuntimeWithMissingProotExecutable() {
         val fixture = Fixture()
         try {
             fixture.proot.delete()
             val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
+                fixture.build()
             }.exceptionOrNull()
 
             assertTrue(error is java.io.IOException)
@@ -135,6 +239,7 @@ class ProotWineCommandBuilderTest {
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val wineboot = executable(rootfs, "usr/bin/wineboot")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {
@@ -165,6 +270,12 @@ class ProotWineCommandBuilderTest {
             display = WaylandDisplayEndpoint(displayDirectory),
             hostUid = 10123
         )
+
+        fun build(gameRequest: ProotWineLaunchRequest = request()) =
+            ProotWineCommandBuilder.build(
+                gameRequest,
+                WaylandSocketValidator { it.isFile }
+            )
 
         fun cleanup() {
             root.deleteRecursively()

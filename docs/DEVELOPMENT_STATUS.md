@@ -1,7 +1,7 @@
 # RamenWine development status
 
 **Snapshot:** 2026-11-09  
-**Current milestone:** Android host, safe executable inspection, private game import, offline runtime package installation and backend inventory.
+**Current milestone:** Android host, safe executable inspection, private game import, offline runtime package installation and a pinned Wawona display-backend prototype.
 
 ## Implemented
 
@@ -25,7 +25,21 @@
 - Python runtime packager that creates ZIP files with a JSON manifest, SHA-256 values, executable flags and symlink metadata.
 - Python tests for archive output, traversal, case collisions, virtual mount symlinks and symlink escape.
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
-- GitHub Actions workflow for Python tests, Android build, unit tests, lint and debug APK artifact upload.
+- PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
+- Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback.
+- WinePrefixInitializer that runs Box64 → wineboot --init for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
+- GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
+- Serialized display-session resize/close operations and JVM regression tests for idempotent cleanup and concurrent PRoot stop calls.
+- JVM regression tests for command construction, process output/termination and rejection of placeholder Wayland socket files.
+- A compositor-facing GameDisplayBackend/GameDisplaySession contract that accepts an Android Surface and exports a per-session Wayland endpoint.
+- A minimal Wawona JNI compatibility class using the exact upstream package and native symbol names, with ANGLE libraries loaded in upstream order.
+- A WawonaDisplayBackend prototype with one-active-session process guarding, serialized JNI operations, safe surface/core teardown ordering, and app-private XDG_RUNTIME_DIR checks that reject the upstream /data/local/tmp fallback.
+- Session-bound Wawona input dispatch: touch/key/mouse/scroll JNI events are serialized through the active display lease; events from a released or stale session are dropped.
+- A Wawona runtime asset installer for XKB/fonts/optional Weston data and a SurfaceView host for basic multi-touch, keyboard and mouse input. Input binding is explicit via the owning Wawona GameDisplaySession; Surface destruction disables input before display teardown.
+- A pinned Wawona APK extractor that lazily stages only the JNI roots, recursive ELF dependency closure (including versioned SONAMEs), optional SwiftShader ICD library and selected assets; Python regression tests cover dependency closure, unresolved libraries, asset traversal and unrelated payload exclusion.
+- Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file; its runtime directory must also stay inside app-private cache storage.
+- A process-wide Wine-prefix initialization lock shared across GameLaunchCoordinator instances.
+- Focused GitHub Actions checks: Python runtime-packager tests and JVM unit tests only; APK packaging, artifact upload, lint and NDK/CMake setup are deferred.
 
 ## Current Android user flow
 
@@ -37,7 +51,7 @@
 6. Save the game title, relative path, EXE path, architecture and import size in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
 
-The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. Runtime installation checks package integrity and inventory; it does not execute Wine or test a Windows program.
+The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder, process supervisor, WinePrefixInitializer, GameLaunchCoordinator and WawonaDisplayBackend are implemented as a separate runtime layer, but they are not connected to a Play action: the pinned Wawona native payload still has to be built/staged and its renderer must pass a physical-device smoke test. Prefix initialization is tested with a controlled fake PRoot process; a real Wine package/rootfs and physical-device launch remain unverified.
 
 ## Runtime backend strategy
 
@@ -55,16 +69,18 @@ The offline ZIP format is documented in Android Runtime Backends. The package bu
 
 Piperella Wayland Compositor was reviewed as a possible Android SurfaceView/Wayland implementation. It is a substantial proof-of-concept, but is not included as a dependency because its project is GPL-3.0 and declares minSdk 36, while RamenWine currently targets minSdk 26. Its Steam example also has an unresolved documentation/code mismatch and GPU-dependent limitations.
 
-See Android Display Backend Research for the findings and integration gates. No Wayland compositor is currently integrated.
+See Android Display Backend Research and [Wawona Integration](WAWONA_INTEGRATION.md). Wawona adapter source and the real-socket precondition are now implemented; its generated native payload and device rendering are not yet validated.
 
 ## What is not implemented yet
 
 - No Wine, Proton, FEX, Box64, Box86 or PRoot runtime binaries are bundled.
 - No Linux rootfs is built or installed.
 - No signed runtime package metadata or pinned release signing key exists. SHA-256 verifies payload integrity but does not authenticate the publisher.
-- No process supervisor launches a Windows EXE.
-- No Wine prefix is created for each imported game.
-- No Android game surface is connected to a Wine display/window backend.
+- WawonaDisplayBackend source is present but its Nix-built native payload has not yet been generated/staged in the app; it is not registered to a user-facing Play action or validated on physical hardware.
+- GameLaunchCoordinator can manage a display/process session when a backend is supplied, including cleanup on cancellation/stop failure, but the coordinator is not yet wired to the Compose UI.
+- Process teardown has not been validated against Android PRoot/Wine child-process behavior on a device.
+- WinePrefixInitializer has host-side JVM coverage only; it has not been validated against a real Wine build, the final Linux rootfs or an Android device.
+- WawonaSurfaceView exists with basic input forwarding, but no Android game surface is yet wired to the Play/Compose lifecycle or to a validated Wine display session.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No audio bridge, input mapping, game pause/resume integration or save management exists.
 - No physical Android device has been tested by this bootstrap.
@@ -81,20 +97,20 @@ See Android Display Backend Research for the findings and integration gates. No 
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The last completed Android build/test/lint run passed on commit 500374b9311e938a7931b48e456daeeb5def3f88. New import-progress and display-research changes are undergoing their own CI run; do not treat them as validated until that run completes successfully.
+The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The latest focused branch run, #131 on PR tree `7e674b7` (source changes from `135ac7e`), passed the Python runtime-packager suite and Gradle `testDebugUnitTest`; this includes the Wawona APK extractor tests, Android/Kotlin compilation and Wawona lease/path regression tests. The focused workflow does not build an APK, run lint, set up NDK/CMake or build the pinned Wawona native payload. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 
-1. Complete CI verification for import progress and the display-research documentation commit.
-2. Decide the RamenWine distribution license before considering any GPL-3.0 compositor integration.
-3. Choose a display backend strategy: test an independent Wayland compositor or prototype a different Android display bridge.
-4. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
-5. Build a glibc rootfs + PRoot + Box64 fallback package.
-6. Run the same original Windows GUI test executable through each backend.
-7. Add a process supervisor, Wine prefix creation and first real Windows EXE launch.
-8. Connect Wine's Wayland/X11 display path to the Android game surface.
-9. Add 32-bit Windows execution after a confirmed 64-bit path.
-10. Add graphics and audio backend probing only after the first Wine window renders.
+1. Build the pinned Wawona APK with Nix and stage the reviewed JNI dependency closure/assets using tools/package_wawona_apk.py.
+2. Run the Python/JVM checks and assemble an APK with the generated Wawona payload; inspect native dependency closure and 16 KB page compatibility.
+3. Validate the Wayland socket, a native wl_shm client, Vulkan surface presentation, resize and input on a physical ARM64 device.
+4. Complete the third-party license inventory for the exact staged native dependency closure before any distributable release.
+5. Connect WawonaSurfaceView and WawonaDisplayBackend to the Compose Surface lifecycle and GameLaunchCoordinator; retain one active session per app process.
+6. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
+7. Build a glibc rootfs + PRoot + Box64 fallback package.
+8. Validate wineboot, prefix state, Wine Wayland driver selection and process teardown on a real ARM64 device.
+9. Run an original Win32 GDI/GUI executable, then broaden to x86-64 and WoW64.
+10. Add graphics/audio backend probing only after the first Wine window renders.
 11. Build a reproducible visual-novel compatibility matrix on physical ARM64 devices.
 
 ## Engineering rules
@@ -106,3 +122,6 @@ The last completed Android build/test/lint run passed on commit 500374b9311e938a
 - Do not remove system APIs solely to shrink the package.
 - Prefer local/offline runtime packages; the first launch must not depend on downloading binaries.
 - Keep a fallback backend and per-game compatibility profiles.
+
+
+The current Wawona build and validation procedure is documented in [Wawona Integration](WAWONA_INTEGRATION.md). The CI workflow still does not build the Wawona native payload or an APK.

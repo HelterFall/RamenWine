@@ -1,24 +1,30 @@
 package dev.ramenwine.runtime
 
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Starts a previously validated PRoot command without a shell.
  *
- * Output is merged (stdout + stderr) and delivered on the main dispatcher.
+ * Output is merged (stdout + stderr) and delivered on the callback dispatcher.
  * This is a process boundary only; an Android display backend must already be
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
-class ProotWineProcessSupervisor {
+class ProotWineProcessSupervisor(
+    private val callbackDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+) {
     suspend fun start(
         command: ProotWineCommand,
         onOutput: (String) -> Unit,
@@ -48,7 +54,8 @@ class ProotWineProcessSupervisor {
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,
-            onExit = onExit
+            onExit = onExit,
+            callbackDispatcher = callbackDispatcher
         )
     }
 }
@@ -56,12 +63,14 @@ class ProotWineProcessSupervisor {
 class ProotWineProcessSession internal constructor(
     private val process: Process,
     private val onOutput: (String) -> Unit,
-    private val onExit: (Int) -> Unit
+    private val onExit: (Int) -> Unit,
+    private val callbackDispatcher: CoroutineDispatcher
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val finished = AtomicBoolean(false)
-
+    private val processExit = CompletableDeferred<Int>()
+    private val callbackCompleted = CompletableDeferred<Unit>()
+    private val stopMutex = Mutex()
     private val outputJob: Job
 
     init {
@@ -70,8 +79,13 @@ class ProotWineProcessSession internal constructor(
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
-                        withContext(Dispatchers.Main.immediate) {
-                            onOutput(line)
+                        try {
+                            withContext(callbackDispatcher) {
+                                onOutput(line)
+                            }
+                        } catch (_: Exception) {
+                            // A UI/log consumer failure must not stop draining
+                            // the child pipe and potentially block the process.
                         }
                     }
                 }
@@ -80,6 +94,8 @@ class ProotWineProcessSession internal constructor(
             }
         }
 
+        // Keep exactly one waiter for Process.waitFor(). stop() awaits this
+        // result instead of racing a second waitFor(timeout) against the watcher.
         scope.launch {
             val exitCode = try {
                 process.waitFor()
@@ -87,9 +103,8 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
-            // Drain the final stdout/stderr lines before reporting the exit.
-            runCatching { outputJob.join() }
-            notifyExit(exitCode)
+            processExit.complete(exitCode)
+            completeAfterOutputDrain(exitCode)
         }
     }
 
@@ -99,27 +114,49 @@ class ProotWineProcessSession internal constructor(
         withContext(Dispatchers.IO) {
             require(gracePeriodMillis >= 0L) { "Grace period cannot be negative." }
 
-            if (process.isAlive) {
-                process.destroy()
-                if (!process.waitFor(gracePeriodMillis, TimeUnit.MILLISECONDS)) {
-                    process.destroyForcibly()
-                    process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+            // Signal termination only once, even when the Activity and UI both
+            // request shutdown at the same time.
+            stopMutex.withLock {
+                if (process.isAlive) {
+                    process.destroy()
                 }
-            }
 
-            val exitCode = runCatching { process.exitValue() }
-                .getOrDefault(UNKNOWN_EXIT_CODE)
-            notifyExit(exitCode)
-            scope.cancel()
-            exitCode
+                val gracefulExit = withTimeoutOrNull(gracePeriodMillis) {
+                    processExit.await()
+                }
+                val exitCode = gracefulExit ?: run {
+                    process.destroyForcibly()
+                    withTimeoutOrNull(FORCE_STOP_WAIT_MILLIS) {
+                        processExit.await()
+                    } ?: throw IOException("PRoot did not exit after forced termination.")
+                }
+
+                completeAfterOutputDrain(exitCode)
+                exitCode
+            }
         }
+
+    private suspend fun completeAfterOutputDrain(exitCode: Int) {
+        // Natural exit and stop both wait for EOF before the single callback.
+        outputJob.join()
+        notifyExit(exitCode)
+    }
 
     private suspend fun notifyExit(exitCode: Int) {
-        if (!finished.compareAndSet(false, true)) return
-        withContext(Dispatchers.Main.immediate) {
-            onExit(exitCode)
+        if (finished.compareAndSet(false, true)) {
+            try {
+                withContext(callbackDispatcher) {
+                    onExit(exitCode)
+                }
+            } finally {
+                callbackCompleted.complete(Unit)
+                scope.cancel()
+            }
+        } else {
+            // stop() and the process watcher both wait until the one callback
+            // has actually returned, not merely until one path wins the CAS.
+            callbackCompleted.await()
         }
-        scope.cancel()
     }
 
     companion object {
