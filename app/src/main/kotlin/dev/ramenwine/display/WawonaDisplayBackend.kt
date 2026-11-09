@@ -1,0 +1,305 @@
+package dev.ramenwine.display
+
+import android.content.Context
+import android.os.Process
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
+import android.view.Surface
+import com.aspauldingcode.wawona.WawonaNative
+import java.io.File
+import java.io.IOException
+
+/**
+ * RamenWine adapter for the pinned Wawona Android compositor build.
+ *
+ * Upstream's Android JNI owns one process-global Rust core and Vulkan renderer.
+ * Consequently this backend deliberately permits one active display session
+ * per RamenWine app process. It does not create independent compositor cores.
+ */
+class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
+    private val appContext = context.applicationContext
+    private val assets = WawonaRuntimeAssets(appContext)
+
+    override val id: String = "wawona-android-vulkan"
+
+    override fun start(
+        surface: Surface,
+        widthPx: Int,
+        heightPx: Int
+    ): GameDisplaySession {
+        require(surface.isValid) { "The Android game surface is not ready." }
+        require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
+
+        val leaseToken = WawonaProcessSessionGuard.acquire()
+        val runtimeDirectory: File
+        var nativeInitializationAttempted = false
+        var surfaceAttachmentAttempted = false
+
+        try {
+            runtimeDirectory = WawonaRuntimePaths.prepare(appContext.cacheDir)
+
+            WawonaProcessSessionGuard.withLease(leaseToken) {
+                assets.ensureInstalled()
+
+                // Upstream JNI sets WAWONA_FILES_DIR, XDG_RUNTIME_DIR and
+                // related process environment variables in its native code.
+                WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
+
+                nativeInitializationAttempted = true
+                WawonaNative.nativeInit(appContext.cacheDir.absolutePath)
+                if (!WawonaNative.nativeIsCompositorReady()) {
+                    throw IOException("Wawona Wayland compositor did not start.")
+                }
+
+                val socket = File(runtimeDirectory, WAYLAND_SOCKET_NAME)
+                WawonaRuntimePaths.verifyLiveSocket(socket)
+
+                WawonaNative.nativeSetDisplayDensity(
+                    appContext.resources.displayMetrics.density
+                )
+                WawonaNative.nativeSetHostSeatMode(0) // Multi-touch seat mode.
+                applyHostKeymap()
+
+                surfaceAttachmentAttempted = true
+                WawonaNative.nativeSetSurface(surface)
+                if (!surface.isValid) {
+                    throw IOException("Android game surface became invalid during attach.")
+                }
+            }
+
+            return WawonaGameDisplaySession(
+                surface = surface,
+                endpoint = WaylandDisplayEndpoint(runtimeDirectory, WAYLAND_SOCKET_NAME),
+                leaseToken = leaseToken
+            )
+        } catch (error: Throwable) {
+            runCatching {
+                WawonaProcessSessionGuard.withLease(leaseToken) {
+                    if (surfaceAttachmentAttempted) {
+                        WawonaNative.nativeDestroySurface(surface)
+                    }
+                    if (nativeInitializationAttempted) {
+                        WawonaNative.nativeShutdown()
+                    }
+                }
+            }
+            WawonaProcessSessionGuard.release(leaseToken)
+            throw error
+        }
+    }
+
+    private fun applyHostKeymap() {
+        val keymap = try {
+            KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
+        } catch (_: Throwable) {
+            KeyCharacterMap.load(KeyCharacterMap.BUILT_IN_KEYBOARD)
+        }
+
+        val ids = ArrayList<Int>(80)
+        val levels = ArrayList<Int>(80 * 4)
+        for (keyCode in 0..84) {
+            val none = decodeKeymapValue(keymap.get(keyCode, 0))
+            val shift = decodeKeymapValue(keymap.get(keyCode, KeyEvent.META_SHIFT_ON))
+            val alt = decodeKeymapValue(keymap.get(keyCode, KeyEvent.META_ALT_ON))
+            val shiftAlt = decodeKeymapValue(
+                keymap.get(keyCode, KeyEvent.META_SHIFT_ON or KeyEvent.META_ALT_ON)
+            )
+            if (none == 0 && shift == 0) continue
+
+            ids += keyCode
+            levels += none
+            levels += shift
+            levels += alt
+            levels += shiftAlt
+        }
+
+        if (ids.isNotEmpty()) {
+            WawonaNative.nativeApplyHostKeyLevels(ids.toIntArray(), levels.toIntArray())
+            WawonaNative.nativeReloadHostKeymap()
+        }
+    }
+
+    private fun decodeKeymapValue(raw: Int): Int {
+        if (raw == 0) return 0
+        return if ((raw and KeyCharacterMap.COMBINING_ACCENT) != 0) {
+            raw and KeyCharacterMap.COMBINING_ACCENT_MASK
+        } else {
+            raw
+        }
+    }
+
+    private companion object {
+        const val WAYLAND_SOCKET_NAME = "wayland-0"
+    }
+}
+
+private class WawonaGameDisplaySession(
+    private val surface: Surface,
+    override val endpoint: WaylandDisplayEndpoint,
+    private val leaseToken: Any
+) : GameDisplaySession {
+    private var closed = false
+
+    override fun resize(widthPx: Int, heightPx: Int) {
+        require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
+        WawonaProcessSessionGuard.withLease(leaseToken) {
+            check(!closed) { "The Wawona display session is already closed." }
+            WawonaNative.nativeResizeSurface(widthPx, heightPx)
+            WawonaNative.nativeSyncOutputSize(widthPx, heightPx)
+        }
+    }
+
+    override fun close() {
+        WawonaProcessSessionGuard.withLease(leaseToken) {
+            if (closed) return
+            closed = true
+            try {
+                // Upstream explicitly separates surface teardown from core
+                // shutdown. Destroy the Vulkan surface first, then stop Rust.
+                WawonaNative.nativeDestroySurface(surface)
+            } finally {
+                try {
+                    WawonaNative.nativeShutdown()
+                } finally {
+                    WawonaProcessSessionGuard.release(leaseToken)
+                }
+            }
+        }
+    }
+}
+
+/** Serializes all Wawona JNI work and guards its app-process-global state. */
+internal object WawonaProcessSessionGuard {
+    private var activeLease: Any? = null
+
+    @Synchronized
+    fun acquire(): Any {
+        check(activeLease == null) {
+            "Wawona supports one active compositor/game session per app process."
+        }
+        return Any().also { activeLease = it }
+    }
+
+    @Synchronized
+    fun <T> withLease(token: Any, block: () -> T): T {
+        check(activeLease === token) { "The Wawona compositor lease is no longer active." }
+        return block()
+    }
+
+    @Synchronized
+    fun release(token: Any) {
+        if (activeLease === token) {
+            activeLease = null
+        }
+    }
+}
+
+internal object WawonaRuntimePaths {
+    private const val RUNTIME_DIRECTORY_NAME = "wawona-runtime"
+    private const val SOCKET_NAME = "wayland-0"
+    private const val ANDROID_SUN_PATH_BYTES = 108
+    // Upstream JNI reserves 32 bytes for the longest socket suffix.
+    private const val UPSTREAM_SOCKET_SUFFIX_RESERVE = 32
+    private const val DIRECTORY_MODE = 0x1C0 // 0700
+    private const val FILE_TYPE_MASK = 0xF000
+
+    fun prepare(cacheDirectory: File): File {
+        val cacheRoot = cacheDirectory.canonicalFile
+        val runtimeDirectory = File(cacheRoot, RUNTIME_DIRECTORY_NAME).canonicalFile
+        if (runtimeDirectory.parentFile != cacheRoot) {
+            throw IOException("Wawona runtime directory escapes app-private cache storage.")
+        }
+
+        val pathBytes = runtimeDirectory.absolutePath.toByteArray(Charsets.UTF_8).size
+        if (pathBytes + UPSTREAM_SOCKET_SUFFIX_RESERVE > ANDROID_SUN_PATH_BYTES) {
+            throw IOException(
+                "Wawona runtime path is too long for Android AF_UNIX; refusing its " +
+                    "unsafe /data/local/tmp fallback."
+            )
+        }
+
+        ensurePrivateDirectory(runtimeDirectory)
+        removeStaleSocket(File(runtimeDirectory, SOCKET_NAME))
+        return runtimeDirectory
+    }
+
+    fun verifyLiveSocket(socket: File) {
+        if (!AndroidWaylandSocketValidator.isUnixDomainSocket(socket)) {
+            throw IOException(
+                "Wawona did not publish a real Wayland Unix-domain socket: " +
+                    socket.absolutePath
+            )
+        }
+
+        val stat = try {
+            Os.lstat(socket.absolutePath)
+        } catch (error: ErrnoException) {
+            throw IOException("Could not inspect Wawona Wayland socket.", error)
+        }
+        if (stat.st_uid != Process.myUid()) {
+            throw IOException("Wawona Wayland socket is not owned by the app UID.")
+        }
+        if (socket.absolutePath.toByteArray(Charsets.UTF_8).size >= ANDROID_SUN_PATH_BYTES) {
+            throw IOException("Wawona Wayland socket path exceeds Android AF_UNIX limits.")
+        }
+    }
+
+    private fun ensurePrivateDirectory(directory: File) {
+        if (!directory.exists()) {
+            try {
+                Os.mkdir(directory.absolutePath, DIRECTORY_MODE)
+            } catch (error: ErrnoException) {
+                if (error.errno != OsConstants.EEXIST) {
+                    throw IOException("Could not create Wawona runtime directory.", error)
+                }
+            }
+        }
+
+        val stat = try {
+            Os.lstat(directory.absolutePath)
+        } catch (error: ErrnoException) {
+            throw IOException("Could not inspect Wawona runtime directory.", error)
+        }
+        if ((stat.st_mode and FILE_TYPE_MASK) != OsConstants.S_IFDIR) {
+            throw IOException("Wawona runtime path is not a real directory.")
+        }
+        if (stat.st_uid != Process.myUid()) {
+            throw IOException("Wawona runtime directory is not owned by the app UID.")
+        }
+
+        val permissions = stat.st_mode and 0x1FF
+        if (permissions != DIRECTORY_MODE) {
+            try {
+                Os.chmod(directory.absolutePath, DIRECTORY_MODE)
+            } catch (error: ErrnoException) {
+                throw IOException("Could not make Wawona runtime directory private.", error)
+            }
+        }
+    }
+
+    private fun removeStaleSocket(socket: File) {
+        val stat = try {
+            Os.lstat(socket.absolutePath)
+        } catch (error: ErrnoException) {
+            if (error.errno == OsConstants.ENOENT) return
+            throw IOException("Could not inspect a previous Wawona socket.", error)
+        }
+
+        if ((stat.st_mode and FILE_TYPE_MASK) != OsConstants.S_IFSOCK) {
+            throw IOException(
+                "Refusing to replace a non-socket file at the Wawona Wayland endpoint."
+            )
+        }
+        if (stat.st_uid != Process.myUid()) {
+            throw IOException("Refusing to unlink a Wayland socket owned by another UID.")
+        }
+        try {
+            Os.unlink(socket.absolutePath)
+        } catch (error: ErrnoException) {
+            throw IOException("Could not remove a stale Wawona Wayland socket.", error)
+        }
+    }
+}
