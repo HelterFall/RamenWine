@@ -64,6 +64,8 @@ MAX_SINGLE_ASSET_BYTES = 32 * 1024 * 1024
 MAX_SINGLE_LIBRARY_BYTES = 128 * 1024 * 1024
 NEEDED_RE = re.compile(r"\(NEEDED\).*Shared library: \[([^\]]+)\]")
 SONAME_RE = re.compile(r"\(SONAME\).*Library soname: \[([^\]]+)\]")
+ELF_CLASS_RE = re.compile(r"Class:\s*ELF64")
+ELF_MACHINE_RE = re.compile(r"Machine:\s*AArch64", re.IGNORECASE)
 
 
 def safe_archive_path(name: str) -> str:
@@ -81,6 +83,21 @@ def safe_archive_path(name: str) -> str:
     if any(part in ("", ".", "..") or len(part) > 240 for part in path.parts):
         raise ValueError(f"unsafe APK entry path: {name!r}")
     return path.as_posix()
+
+
+def validate_arm64_elf_header(readelf_output: str, filename: str) -> None:
+    if not ELF_CLASS_RE.search(readelf_output):
+        raise ValueError(f"{filename} is not an ELF64 shared library.")
+    if not ELF_MACHINE_RE.search(readelf_output):
+        raise ValueError(f"{filename} is not an AArch64 ELF binary.")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | None]:
@@ -160,7 +177,7 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
             temp.write(data)
             temp.flush()
             result = subprocess.run(
-                [readelf, "--dynamic", temp.name],
+                [readelf, "--file-header", "--dynamic", temp.name],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -169,6 +186,7 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
             raise ValueError(
                 f"llvm-readelf failed for {filename}: {result.stderr.strip()}"
             )
+        validate_arm64_elf_header(result.stdout, filename)
         return parse_dynamic_dependencies(result.stdout)
 
     return read_dependencies
@@ -293,7 +311,7 @@ def package_apk(
         provenance = {
             "upstream": "https://github.com/Wawona/Wawona",
             "revision": revision,
-            "apkSha256": sha256_bytes(apk_path.read_bytes()),
+            "apkSha256": sha256_file(apk_path),
             "abi": "arm64-v8a",
             "rootLibraries": list(ROOT_LIBRARIES),
             "optionalRootLibraries": [
