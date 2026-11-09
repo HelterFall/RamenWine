@@ -171,6 +171,97 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsAmd64WaylandProbeCommandWithoutLookingForAnImportedExe() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(
+                    executableRelativePath = "probe-not-in-game-folder.exe",
+                    architecture = "x86-64"
+                ),
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
+            )
+            val command = fixture.build(request)
+
+            assertEquals(
+                "/usr/lib/ramenwine/probes/wayland-probe-x86_64.exe",
+                command.guestExecutablePath
+            )
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
+                ),
+                command.arguments.takeLast(3)
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsI386WaylandProbeWithTheSameWow64WineLoader() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(
+                    executableRelativePath = "probe-not-in-game-folder.exe",
+                    architecture = "x86"
+                ),
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
+            )
+            val command = fixture.build(request)
+
+            assertEquals(
+                "/usr/lib/ramenwine/probes/wayland-probe-i386.exe",
+                command.guestExecutablePath
+            )
+            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+            assertTrue(command.arguments.contains("WINEARCH=wow64"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsSeparateWinebootCommandForTheWaylandProbePrefix() {
+        val fixture = Fixture()
+        try {
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.INITIALIZE_PROBE_PREFIX
+                )
+            )
+
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                command.guestExecutablePath
+            )
+            assertEquals("--init", command.arguments.last())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWaylandProbeExecutable() {
+        val fixture = Fixture()
+        try {
+            fixture.waylandProbeAmd64.delete()
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
+            )
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Windows Wayland probe"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun rejectsMissingWinebootExecutableForPrefixInitialization() {
         val fixture = Fixture()
         try {
@@ -475,6 +566,14 @@ class ProotWineCommandBuilderTest {
         val wineboot = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+        )
+        val waylandProbeAmd64 = regular(
+            rootfs,
+            "usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
+        )
+        val waylandProbeI386 = regular(
+            rootfs,
+            "usr/lib/ramenwine/probes/wayland-probe-i386.exe"
         )
         val arm64GlibcLoader = regular(rootfs, "lib/ld-linux-aarch64.so.1")
         val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
