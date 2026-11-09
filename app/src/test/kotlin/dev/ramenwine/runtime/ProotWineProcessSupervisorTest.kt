@@ -20,6 +20,44 @@ import org.junit.Test
 
 class ProotWineProcessSupervisorTest {
     @Test
+    fun cancellingWhileProcessCreationIsInFlightStopsTheCreatedProcess() = runBlocking {
+        val fixture = ScriptFixture("import time\ntime.sleep(30)")
+        val enteredLauncher = CountDownLatch(1)
+        val releaseLauncher = CountDownLatch(1)
+        val fakeProcess = FinalOutputProcess("cancelled-start")
+        val supervisor = ProotWineProcessSupervisor(Dispatchers.Unconfined) {
+            enteredLauncher.countDown()
+            check(releaseLauncher.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            fakeProcess
+        }
+
+        try {
+            val start = async(Dispatchers.Default) {
+                supervisor.start(
+                    command = fixture.command(),
+                    onOutput = {},
+                    onExit = {}
+                )
+            }
+
+            assertTrue(enteredLauncher.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            start.cancel()
+            releaseLauncher.countDown()
+            start.join()
+
+            assertTrue(
+                "The process created after cancellation must receive a stop request.",
+                fakeProcess.destroyObserved.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            )
+            assertEquals(1, fakeProcess.destroyCalls.get())
+            assertFalse(fakeProcess.isAlive)
+        } finally {
+            releaseLauncher.countDown()
+            fixture.close()
+        }
+    }
+
+    @Test
     fun drainsMergedOutputBeforeNaturalExitCallback() = runBlocking {
         val fixture = ScriptFixture(
             """
@@ -162,6 +200,7 @@ class ProotWineProcessSupervisorTest {
 
         val destroyCalls = AtomicInteger()
         val forceKillCalls = AtomicInteger()
+        val destroyObserved = CountDownLatch(1)
 
         override fun getOutputStream(): java.io.OutputStream = outputSink
 
@@ -187,6 +226,7 @@ class ProotWineProcessSupervisorTest {
 
         override fun destroy() {
             destroyCalls.incrementAndGet()
+            destroyObserved.countDown()
             if (!ignoreGracefulDestroy) finish(0)
         }
 
