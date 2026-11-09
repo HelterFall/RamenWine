@@ -226,8 +226,8 @@ class ProotWineProcessSupervisorTest {
 
         override fun destroy() {
             destroyCalls.incrementAndGet()
-            destroyObserved.countDown()
             if (!ignoreGracefulDestroy) finish(0)
+            destroyObserved.countDown()
         }
 
         override fun destroyForcibly(): Process {
