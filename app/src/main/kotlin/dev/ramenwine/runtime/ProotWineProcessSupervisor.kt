@@ -12,6 +12,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Starts a previously validated PRoot command without a shell.
@@ -68,6 +70,7 @@ class ProotWineProcessSession internal constructor(
     private val finished = AtomicBoolean(false)
     private val processExit = CompletableDeferred<Int>()
     private val callbackCompleted = CompletableDeferred<Unit>()
+    private val stopMutex = Mutex()
     private val outputJob: Job
 
     init {
@@ -111,22 +114,26 @@ class ProotWineProcessSession internal constructor(
         withContext(Dispatchers.IO) {
             require(gracePeriodMillis >= 0L) { "Grace period cannot be negative." }
 
-            if (process.isAlive) {
-                process.destroy()
-            }
+            // Signal termination only once, even when the Activity and UI both
+            // request shutdown at the same time.
+            stopMutex.withLock {
+                if (process.isAlive) {
+                    process.destroy()
+                }
 
-            val gracefulExit = withTimeoutOrNull(gracePeriodMillis) {
-                processExit.await()
-            }
-            val exitCode = gracefulExit ?: run {
-                process.destroyForcibly()
-                withTimeoutOrNull(FORCE_STOP_WAIT_MILLIS) {
+                val gracefulExit = withTimeoutOrNull(gracePeriodMillis) {
                     processExit.await()
-                } ?: throw IOException("PRoot did not exit after forced termination.")
-            }
+                }
+                val exitCode = gracefulExit ?: run {
+                    process.destroyForcibly()
+                    withTimeoutOrNull(FORCE_STOP_WAIT_MILLIS) {
+                        processExit.await()
+                    } ?: throw IOException("PRoot did not exit after forced termination.")
+                }
 
-            completeAfterOutputDrain(exitCode)
-            exitCode
+                completeAfterOutputDrain(exitCode)
+                exitCode
+            }
         }
 
     private suspend fun completeAfterOutputDrain(exitCode: Int) {

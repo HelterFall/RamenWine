@@ -49,4 +49,14 @@ jobs:
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
 
       - name: Run focused JVM unit tests
-        run: gradle --no-daemon testDebugUnitTest
+        run: |
+          if ! gradle --no-daemon testDebugUnitTest; then
+            echo "::group::JUnit failure details"
+            for report in app/build/test-results/testDebugUnitTest/TEST-*.xml; do
+              if grep -q 'failures="[1-9]' "$report"; then
+                cat "$report"
+              fi
+            done
+            echo "::endgroup::"
+            exit 1
+          fi

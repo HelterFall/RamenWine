@@ -62,19 +62,14 @@ class ProotWineProcessSupervisorTest {
             """
             import os
             import signal
-            import time
-
-            stop_requested = False
 
             def handle_sigterm(_signal, _frame):
-                global stop_requested
                 os.write(1, b"terminated\n")
-                stop_requested = True
+                os._exit(0)
 
             signal.signal(signal.SIGTERM, handle_sigterm)
             os.write(1, b"ready\n")
-            while not stop_requested:
-                time.sleep(0.01)
+            signal.pause()
             """.trimIndent()
         )
         try {
@@ -124,19 +119,14 @@ class ProotWineProcessSupervisorTest {
             """
             import os
             import signal
-            import time
-
-            stopping = False
 
             def handle_sigterm(_signal, _frame):
-                global stopping
                 os.write(1, b"stopping\n")
-                stopping = True
+                os._exit(0)
 
             signal.signal(signal.SIGTERM, handle_sigterm)
             os.write(1, b"ready\n")
-            while not stopping:
-                time.sleep(0.01)
+            signal.pause()
             """.trimIndent()
         )
         try {
