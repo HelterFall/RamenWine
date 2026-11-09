@@ -10,6 +10,8 @@ from unittest.mock import patch
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
 
+import package_runtime
+
 spec = importlib.util.spec_from_file_location(
     "build_glibc_runtime",
     TOOLS_DIR / "build_glibc_runtime.py",
