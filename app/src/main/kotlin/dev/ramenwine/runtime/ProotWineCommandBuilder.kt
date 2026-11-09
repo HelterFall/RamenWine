@@ -101,6 +101,7 @@ object ProotWineCommandBuilder {
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
+        executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
@@ -189,6 +190,26 @@ object ProotWineCommandBuilder {
             ensureGuestDirectory(rootfs, guestPath)
         }
 
+        // PRoot itself is an Android/Bionic host process. Pass its host-only
+        // LD_LIBRARY_PATH through ProcessBuilder, then set a fresh guest
+        // environment with /usr/bin/env so Bionic paths cannot leak into glibc.
+        val guestEnvironment = linkedMapOf(
+            "HOME" to guestHomeDirectory,
+            "WINEPREFIX" to guestPrefixDirectory,
+            "WINEDEBUG" to "err+all",
+            "WAYLAND_DISPLAY" to request.display.socketName,
+            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
+            "TMPDIR" to guestTempDirectory,
+            "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
+            "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
+            "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
+            "WINEARCH" to "win64",
+            "LANG" to request.locale,
+            "LC_ALL" to request.locale,
+            "PATH" to "/usr/local/bin:/usr/bin:/bin",
+            "BOX64_NOBANNER" to "1"
+        )
+
         val arguments = buildList {
             add("--kill-on-exit")
             add("--link2symlink")
@@ -202,6 +223,8 @@ object ProotWineCommandBuilder {
             add("--bind=" + tempDirectory.absolutePath + ":" + guestTempDirectory)
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
+            add("/usr/bin/env")
+            guestEnvironment.forEach { (name, value) -> add("$name=$value") }
             add("/usr/bin/box64")
             when (request.operation) {
                 ProotWineOperation.RUN_GAME -> {
@@ -216,24 +239,9 @@ object ProotWineCommandBuilder {
         }
 
         val environment = linkedMapOf(
-            "HOME" to guestHomeDirectory,
-            "WINEPREFIX" to guestPrefixDirectory,
-            "WINEDEBUG" to "err+all",
-            "WAYLAND_DISPLAY" to request.display.socketName,
-            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
-            "TMPDIR" to guestTempDirectory,
-            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
-            // LD_LIBRARY_PATH resolves Bionic dependencies for PRoot only; host/lib is not bound into the guest rootfs.
+            // These variables apply to the Android/Bionic PRoot host only.
             "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
-            // BOX64_LD_LIBRARY_PATH is separate: it searches x86-64 ELF libraries
-            // inside the guest rootfs (glibc, Wayland and Wine Unix libraries).
-            "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
-            "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
-            "WINEARCH" to "win64",
-            "LANG" to request.locale,
-            "LC_ALL" to request.locale,
-            "PATH" to "/usr/local/bin:/usr/bin:/bin",
-            "BOX64_NOBANNER" to "1"
+            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
         )
 
         return ProotWineCommand(
@@ -355,6 +363,8 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
     private const val WINE_WAYLAND_PE_DRIVER_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+    private const val GUEST_ARM64_LIBRARY_PATH =
+        "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =
         "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
             "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"

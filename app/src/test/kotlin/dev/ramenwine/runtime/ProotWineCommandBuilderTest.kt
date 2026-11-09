@@ -25,18 +25,34 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertEquals(fixture.prootTempDirectory.absolutePath, command.environment["PROOT_TMP_DIR"])
+            assertFalse(command.environment.containsKey("BOX64_LD_LIBRARY_PATH"))
+            assertFalse(command.environment.containsKey("WINEDLLPATH"))
+            assertFalse(command.environment.containsKey("WINEARCH"))
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(envIndex >= 0)
+            val guestEnvironment = command.arguments.drop(envIndex + 1)
+                .takeWhile { it.contains("=") }
+                .associate { it.substringBefore("=") to it.substringAfter("=") }
+            assertEquals(
+                "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu",
+                guestEnvironment["LD_LIBRARY_PATH"]
+            )
             assertEquals(
                 "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
                     "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
-                command.environment["BOX64_LD_LIBRARY_PATH"]
+                guestEnvironment["BOX64_LD_LIBRARY_PATH"]
             )
             assertEquals(
                 "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
                     "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
-                command.environment["WINEDLLPATH"]
+                guestEnvironment["WINEDLLPATH"]
             )
-            assertEquals("win64", command.environment["WINEARCH"])
-            assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
+            assertEquals("win64", guestEnvironment["WINEARCH"])
+            assertEquals("/run/user/10123", guestEnvironment["XDG_RUNTIME_DIR"])
+            assertEquals("wayland-0", guestEnvironment["WAYLAND_DISPLAY"])
+            assertEquals("/prefixes/" + fixture.gameId, guestEnvironment["WINEPREFIX"])
+            assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
@@ -51,8 +67,6 @@ class ProotWineCommandBuilderTest {
                     "--bind=" + fixture.displayDirectory.absolutePath + ":/run/user/10123"
                 )
             )
-            assertEquals("/run/user/10123", command.environment["XDG_RUNTIME_DIR"])
-            assertEquals("wayland-0", command.environment["WAYLAND_DISPLAY"])
             assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "home/ramen").isDirectory)
@@ -81,9 +95,11 @@ class ProotWineCommandBuilderTest {
                 command.arguments.takeLast(3)
             )
             assertFalse(command.arguments.contains("/usr/bin/wine"))
-            assertEquals(
-                "/prefixes/" + fixture.gameId,
-                command.environment["WINEPREFIX"]
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(envIndex >= 0)
+            assertTrue(
+                command.arguments.drop(envIndex + 1)
+                    .contains("WINEPREFIX=/prefixes/" + fixture.gameId)
             )
         } finally {
             fixture.cleanup()
@@ -290,6 +306,7 @@ class ProotWineCommandBuilderTest {
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        val guestEnv = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineboot = executable(rootfs, "usr/bin/wineboot")
@@ -310,6 +327,7 @@ class ProotWineCommandBuilderTest {
             writeBytes(byteArrayOf(0x4D, 0x5A))
         }
 
+        val prootTempDirectory = File(cacheDirectory, "proot-tmp/" + gameId).apply { mkdirs() }
         val displayDirectory = File(cacheDirectory, "wawona-runtime").apply { mkdirs() }
 
         init {

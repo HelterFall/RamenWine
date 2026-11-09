@@ -89,6 +89,12 @@ class RuntimePackagerTests(unittest.TestCase):
             package_runtime.ELF_MACHINE_X86_64,
         )
         self._write_elf64(
+            rootfs / "usr" / "bin" / "env",
+            package_runtime.ELF_MACHINE_AARCH64,
+            "/lib/ld-linux-aarch64.so.1",
+            executable=True,
+        )
+        self._write_elf64(
             rootfs / "usr" / "bin" / "box64",
             package_runtime.ELF_MACHINE_AARCH64,
             "/lib/ld-linux-aarch64.so.1",

@@ -261,6 +261,15 @@ def validate_glibc_proot_box64(root: Path) -> None:
     x64_loader = resolve_guest_file(rootfs, "/lib64/ld-linux-x86-64.so.2")
     require_elf64(x64_loader, "x86-64 glibc loader", ELF_MACHINE_X86_64)
 
+    guest_env = resolve_guest_file(rootfs, "/usr/bin/env")
+    require_executable(guest_env, "guest env executable")
+    require_elf64(
+        guest_env,
+        "guest env executable",
+        ELF_MACHINE_AARCH64,
+        "/lib/ld-linux-aarch64.so.1",
+    )
+
     box64 = resolve_guest_file(rootfs, "/usr/bin/box64")
     require_executable(box64, "Box64 guest executable")
     require_elf64(
