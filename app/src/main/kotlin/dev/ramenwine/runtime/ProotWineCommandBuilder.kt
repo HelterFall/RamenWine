@@ -110,6 +110,15 @@ object ProotWineCommandBuilder {
             WINE_WAYLAND_I386_PE_DRIVER_PATH,
             "Wine 32-bit Wayland PE driver"
         )
+        listOf(
+            WINE_WAYLAND_CLIENT_LIBRARY_PATH to "Wayland client library",
+            WINE_WAYLAND_CURSOR_LIBRARY_PATH to "Wayland cursor library",
+            WINE_WAYLAND_EGL_LIBRARY_PATH to "Wayland EGL library",
+            WINE_XKB_COMMON_LIBRARY_PATH to "XKB common library",
+            WINE_XKB_REGISTRY_LIBRARY_PATH to "XKB registry library"
+        ).forEach { (relativePath, label) ->
+            runtimeFile(rootfs, relativePath, label)
+        }
 
         val proot = executableFile(backendRoot, "host/bin/proot")
         val prootLoader = executableFile(backendRoot, "host/libexec/proot/loader")
@@ -399,6 +408,16 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
     private const val WINE_WAYLAND_I386_PE_DRIVER_PATH =
         "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
+    private const val WINE_WAYLAND_CLIENT_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-client.so.0"
+    private const val WINE_WAYLAND_CURSOR_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0"
+    private const val WINE_WAYLAND_EGL_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1"
+    private const val WINE_XKB_COMMON_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
+    private const val WINE_XKB_REGISTRY_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
     private const val WINEBOOT_PE_RELATIVE_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     private const val GUEST_ARM64_LIBRARY_PATH =
