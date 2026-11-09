@@ -116,8 +116,40 @@ class ProotWineProcessSupervisorTest {
         assertFalse(session.isAlive())
     }
 
+    @Test
+    fun escalatesToForcedTerminationAfterGracePeriod() = runBlocking {
+        val fakeProcess = FinalOutputProcess(
+            finalLine = "force-stopped",
+            ignoreGracefulDestroy = true
+        )
+        val output = CopyOnWriteArrayList<String>()
+        val exitCount = AtomicInteger()
+        val exit = CompletableDeferred<Int>()
+        val session = ProotWineProcessSession(
+            process = fakeProcess,
+            onOutput = output::add,
+            onExit = { code ->
+                exitCount.incrementAndGet()
+                exit.complete(code)
+            },
+            callbackDispatcher = Dispatchers.Unconfined
+        )
+
+        val exitCode = session.stop(gracePeriodMillis = 25L)
+        val callbackExitCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
+
+        assertEquals(137, exitCode)
+        assertEquals(137, callbackExitCode)
+        assertEquals(listOf("force-stopped"), output.toList())
+        assertEquals(1, fakeProcess.destroyCalls.get())
+        assertEquals(1, fakeProcess.forceKillCalls.get())
+        assertEquals(1, exitCount.get())
+        assertFalse(session.isAlive())
+    }
+
     private class FinalOutputProcess(
-        private val finalLine: String
+        private val finalLine: String,
+        private val ignoreGracefulDestroy: Boolean = false
     ) : Process() {
         private val input = java.io.PipedInputStream()
         private val writer = java.io.PipedOutputStream(input)
@@ -129,6 +161,7 @@ class ProotWineProcessSupervisorTest {
         private var code: Int = 0
 
         val destroyCalls = AtomicInteger()
+        val forceKillCalls = AtomicInteger()
 
         override fun getOutputStream(): java.io.OutputStream = outputSink
 
@@ -154,10 +187,11 @@ class ProotWineProcessSupervisorTest {
 
         override fun destroy() {
             destroyCalls.incrementAndGet()
-            finish(0)
+            if (!ignoreGracefulDestroy) finish(0)
         }
 
         override fun destroyForcibly(): Process {
+            forceKillCalls.incrementAndGet()
             finish(137)
             return this
         }
