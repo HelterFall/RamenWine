@@ -146,10 +146,10 @@ def prepare_host_apt(apt_root: Path, keyring: Path | None = None) -> list[str]:
         raise ValueError("Ubuntu archive signing keyring is missing from the build host.")
     sources = apt_root / "sources.list"
     entries = [
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse",
     ]
     sources.write_text("\n".join(entries) + "\n", encoding="utf-8")
     return [
@@ -228,14 +228,14 @@ def prepare_apt_root(apt_root: Path, keyring: Path | None = None) -> tuple[Path,
         raise ValueError("Ubuntu archive signing keyring is missing from the build host.")
     sources = apt_root / "sources.list"
     entries = [
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse",
-        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse",
-        "deb [arch=arm64 signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse",
-        "deb [arch=arm64 signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse",
-        "deb [arch=arm64 signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse",
-        "deb [arch=arm64 signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse",
+        "deb [arch=amd64 snapshot=enable signed-by=" + str(keyring) + "] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse",
+        "deb [arch=arm64 snapshot=enable signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse",
+        "deb [arch=arm64 snapshot=enable signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse",
+        "deb [arch=arm64 snapshot=enable signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse",
+        "deb [arch=arm64 snapshot=enable signed-by=" + str(keyring) + "] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse",
     ]
     sources.write_text("\n".join(entries) + "\n", encoding="utf-8")
     options = [

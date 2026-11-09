@@ -56,6 +56,11 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
 
             self.assertIn("archive.ubuntu.com/ubuntu noble", sources)
             self.assertIn("security.ubuntu.com/ubuntu noble-security", sources)
+            self.assertTrue(all(
+                "snapshot=enable" in line
+                for line in sources.splitlines()
+                if line.startswith("deb ")
+            ))
             self.assertNotIn("ports.ubuntu.com", sources)
             self.assertNotIn("ppa.launchpad", sources)
             self.assertIn("APT::Architecture=amd64", options)
@@ -81,6 +86,11 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
 
             self.assertIn("arch=amd64", sources)
             self.assertIn("arch=arm64", sources)
+            self.assertTrue(all(
+                "snapshot=enable" in line
+                for line in sources.splitlines()
+                if line.startswith("deb ")
+            ))
             self.assertIn("archive.ubuntu.com/ubuntu", sources)
             self.assertIn("ports.ubuntu.com/ubuntu-ports", sources)
             self.assertTrue((archives / "partial").is_dir())
