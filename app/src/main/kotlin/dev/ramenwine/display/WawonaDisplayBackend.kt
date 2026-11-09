@@ -40,7 +40,7 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
         try {
             runtimeDirectory = WawonaRuntimePaths.prepare(appContext.cacheDir)
 
-            WawonaProcessSessionGuard.withLease(inputLeaseToken) {
+            WawonaProcessSessionGuard.withLease(leaseToken) {
                 assets.ensureInstalled()
 
                 // Upstream JNI sets WAWONA_FILES_DIR, XDG_RUNTIME_DIR and
@@ -96,11 +96,11 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
             return WawonaGameDisplaySession(
                 surface = surface,
                 endpoint = WaylandDisplayEndpoint(runtimeDirectory, WAYLAND_SOCKET_NAME),
-                leaseToken = leaseToken
+                inputLeaseToken = leaseToken
             )
         } catch (error: Throwable) {
             runCatching {
-                WawonaProcessSessionGuard.withLease(inputLeaseToken) {
+                WawonaProcessSessionGuard.withLease(leaseToken) {
                     if (nativeInitializationAttempted) {
                         try {
                             // nativeInit creates the Vulkan instance before the
