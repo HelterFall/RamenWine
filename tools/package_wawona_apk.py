@@ -388,6 +388,22 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def hash_extracted_assets(asset_root: Path, asset_paths: list[str]) -> dict[str, str]:
+    """Build the install-time integrity map for the extracted Wawona assets."""
+    hashes: dict[str, str] = {}
+    for relative_path in asset_paths:
+        safe_path = safe_archive_path(relative_path)
+        if safe_path != relative_path or not relative_path.startswith("wawona/"):
+            raise ValueError("invalid extracted Wawona asset path: " + relative_path)
+        if relative_path in hashes:
+            raise ValueError("duplicate extracted Wawona asset path: " + relative_path)
+        path = asset_root / PurePosixPath(relative_path)
+        if not path.is_file():
+            raise ValueError("extracted Wawona asset is missing: " + relative_path)
+        hashes[relative_path] = sha256_file(path)
+    return dict(sorted(hashes.items(), key=lambda item: item[0].casefold()))
+
+
 def package_apk(
     apk_path: Path,
     output_dir: Path,
@@ -430,6 +446,7 @@ def package_apk(
                 filename: sha256_bytes(data) for filename, data in selected.items()
             },
             "assets": assets,
+            "assetSha256": hash_extracted_assets(staging / "assets", assets),
             "note": (
                 "Only libwawona.so, its DT_NEEDED closure, ANGLE entry libraries, "
                 "and selected compositor assets are included. This is not a complete "
