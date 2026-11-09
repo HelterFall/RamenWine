@@ -533,7 +533,7 @@ class RuntimePackagerTests(unittest.TestCase):
             )
             self._write_pe32(registry_command)
 
-            with self.assertRaisesRegex(ValueError, "not a valid AMD64 PE"):
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_missing_amd64_wayland_probe(self) -> None:
