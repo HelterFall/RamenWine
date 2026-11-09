@@ -57,7 +57,7 @@ app/build/generated/wawona/
     provenance.json
 ```
 
-Only the three required JNI/renderer roots, their recursive ELF `DT_NEEDED` closure, and the optional `libvk_swiftshader.so` are staged. Unrelated executable payloads that upstream stores under `jniLibs` with a `.so` suffix (for example SSH helper executables) are not copied unless they are actually part of the linked native dependency closure. Android system libraries are left to the OS linker. An unresolved non-system dependency is a hard packaging error.
+The three required JNI/renderer roots and their recursive ELF `DT_NEEDED` closure are staged. Two explicit dlopen-only helpers are added when present: `libweston_simple_shm.so` (the debug SHM smoke client) and `libvk_swiftshader.so` (the optional offscreen ICD). The SHM helper is not a `DT_NEEDED` edge from `libwawona.so`; the JNI stub calls `dlopen("libweston_simple_shm.so")`, so the packager treats it as an additional runtime root. Unrelated executable payloads that upstream stores under `jniLibs` with a `.so` suffix (for example SSH helper executables) are not copied unless they are actually part of the linked native dependency closure. Android system libraries are left to the OS linker. An unresolved non-system dependency is a hard packaging error.
 
 The generated directory is ignored by Git and included through the Android `main` source set. A clean checkout can still run JVM/Python tests without the optional generated native payload. The runtime adapter fails clearly when its Wawona assets or libraries are not present.
 
@@ -73,10 +73,11 @@ python -m unittest discover -s tools/tests -v
 
 The adapter is split across:
 
-- `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`.
+- `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`; the debug smoke screen also exposes upstream's `nativeRunWestonSimpleSHM` / stop / running methods.
 `WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
 - `WawonaDisplayBackend.kt`: starts the compositor, verifies its live socket, attaches an Android `Surface`, and returns a `GameDisplaySession`.
 - `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events only after `bindSession()` receives a Wawona-owned session. Every event is serialized through that session's process-wide lease; stale Surface events are ignored after the lease is released.
+- `WawonaPreviewActivity.kt` (debug source set only): a separate compositor diagnostic screen. It starts Wawona on a Surface, launches the pinned upstream `weston-simple-shm` client, reports its native running state, and stops the client before releasing the Surface/core. It never starts Wine or imported EXE files.
 - `GameLaunchCoordinator`: remains the owner that joins a supplied display session with the PRoot process lifecycle.
 
 ### Process-global restriction
@@ -124,7 +125,7 @@ The existing PRoot command builder independently verifies that the socket exists
 
 The adapter source establishes a concrete startup/shutdown path and a live Wayland endpoint contract. The upstream `nativeIsCompositorReady()` reports the Rust core state. The upstream `nativeSetSurface()` returns `void`; it does not expose an explicit success result for Vulkan surface/swapchain creation. A ready socket and core therefore do **not** prove that pixels are successfully presented to the Android surface. Vulkan failures must still be checked in logcat and verified with a real client on hardware.
 
-The basic input view forwards multi-touch, Android key-down/up, mouse motion/buttons and scroll. It is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
+The basic input view forwards multi-touch, Android key-down/up, mouse motion/buttons and scroll. The debug-only SHM preview can now exercise a real in-process Wayland client against the host compositor. It is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
 
 The adapter is not yet connected to a user-facing Play action. RamenWine still has no bundled PRoot/Box64/Wine Linux rootfs and no real Wine package. The presence of `GameLaunchCoordinator` plus a display backend is not a claim that imported Windows games can launch.
 
@@ -155,7 +156,8 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 - [ ] Install the APK on Android 8+ (RamenWine minSdk 26).
 - [ ] Start Wawona from an actual Android SurfaceView and confirm the compositor socket stays under app cache storage.
-- [ ] Run an original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
+- [ ] Open the debug-only “Wawona / Wayland” preview and confirm the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
+- [ ] Run an independent original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
 - [ ] Exercise resize, touch, keyboard and mouse input.
 - [ ] Confirm that surface destruction precedes compositor shutdown and that a second session can start after close.
 - [ ] Bind the Wayland socket into the PRoot rootfs and run an original Win32 GDI/Wine GUI smoke test.
