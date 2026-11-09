@@ -12,7 +12,8 @@ enum class ProotWineOperation {
     RUN_GAME,
     RUN_WAYLAND_PROBE,
     INITIALIZE_PREFIX,
-    INITIALIZE_PROBE_PREFIX
+    INITIALIZE_PROBE_PREFIX,
+    CONFIGURE_WAYLAND_PREFIX
 }
 
 data class ProotWineLaunchRequest(
@@ -170,6 +171,9 @@ object ProotWineCommandBuilder {
             }
             runtimeFile(rootfs, probePath, "Windows Wayland probe")
         }
+        if (request.operation == ProotWineOperation.CONFIGURE_WAYLAND_PREFIX) {
+            runtimeFile(rootfs, WINE_REG_PE_RELATIVE_PATH, "Wine registry command")
+        }
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
         val gameDirectory = File(filesRoot, request.game.relativeDirectory).canonicalFile
@@ -256,6 +260,7 @@ object ProotWineCommandBuilder {
             }
             ProotWineOperation.INITIALIZE_PREFIX,
             ProotWineOperation.INITIALIZE_PROBE_PREFIX -> "/" + WINEBOOT_PE_RELATIVE_PATH
+            ProotWineOperation.CONFIGURE_WAYLAND_PREFIX -> "/" + WINE_REG_PE_RELATIVE_PATH
         }
 
         // PRoot bind targets must exist in the guest filesystem. Create only
@@ -328,6 +333,19 @@ object ProotWineCommandBuilder {
                     add("/usr/bin/wine")
                     add(guestExecutable)
                     add("--init")
+                }
+                ProotWineOperation.CONFIGURE_WAYLAND_PREFIX -> {
+                    add("/usr/bin/wine")
+                    add(guestExecutable)
+                    add("add")
+                    add("HKCU\\Software\\Wine\\Drivers")
+                    add("/v")
+                    add("Graphics")
+                    add("/t")
+                    add("REG_SZ")
+                    add("/d")
+                    add("wayland")
+                    add("/f")
                 }
             }
         }
@@ -496,6 +514,8 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
     private const val WINEBOOT_PE_RELATIVE_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+    private const val WINE_REG_PE_RELATIVE_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
     private const val WINE_WAYLAND_PROBE_AMD64_PATH =
         "usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
     private const val WINE_WAYLAND_PROBE_I386_PATH =
