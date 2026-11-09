@@ -955,13 +955,29 @@ def validate_glibc_proot_box64(root: Path) -> None:
             ELF_MACHINE_X86_64,
         )
 
+    # The pinned Box64 build has native wrappers for these Wayland/XKB APIs.
+    # Their ARM64 implementations must be present and ABI-correct so the
+    # wrappers do not silently fall back to emulating those system libraries.
+    arm64_wrapped_wayland_libraries = (
+        ("libwayland-client.so.0", "Box64 ARM64 Wayland client wrapper target"),
+        ("libwayland-cursor.so.0", "Box64 ARM64 Wayland cursor wrapper target"),
+        ("libwayland-egl.so.1", "Box64 ARM64 Wayland EGL wrapper target"),
+        ("libxkbcommon.so.0", "Box64 ARM64 XKB common wrapper target"),
+        ("libxkbregistry.so.0", "Box64 ARM64 XKB registry wrapper target"),
+    )
+    arm64_wrapper_entry_points: list[str] = []
+    for library_name, label in arm64_wrapped_wayland_libraries:
+        guest_path = "/usr/lib/aarch64-linux-gnu/" + library_name
+        library = resolve_guest_file(rootfs, guest_path)
+        require_elf64(library, label, ELF_MACHINE_AARCH64)
+        arm64_wrapper_entry_points.append(guest_path)
 
     # Verify the actual dynamic-linker dependency closure, not just a handful
     # of library filenames. The extracted rootfs has no post-install ld cache,
     # so these paths must cover every library required by the launch chain.
     validate_elf_dependency_closure(
         rootfs,
-        ["/usr/bin/env", "/usr/bin/box64"],
+        ["/usr/bin/env", "/usr/bin/box64", *arm64_wrapper_entry_points],
         ELF_MACHINE_AARCH64,
         ["/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/lib", "/usr/lib"],
         "ARM64 Box64 runtime",
