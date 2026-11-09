@@ -44,6 +44,44 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                 "20261109T000000Z", "runtime-1", 33
             )
 
+    def test_invalid_proot_host_is_rejected_before_guest_build_setup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            host = root / "proot-host"
+            (host / "bin").mkdir(parents=True)
+            (host / "libexec" / "proot").mkdir(parents=True)
+            (host / "lib").mkdir()
+            (host / "bin" / "proot").write_bytes(b"fixture")
+            (host / "libexec" / "proot" / "loader").write_bytes(b"fixture")
+            work = root / "work"
+            work.mkdir()
+            args = type("Args", (), {
+                "snapshot": "20261109T000000Z",
+                "version": "runtime-1",
+                "jobs": 2,
+                "work_dir": work,
+                "proot_host": host,
+                "skip_host_dependencies": False,
+                "no_arm_dynarec": False,
+                "output": root / "runtime.zip",
+            })()
+
+            with (
+                patch.object(build_glibc_runtime, "require_build_host"),
+                patch.object(
+                    build_glibc_runtime.package_runtime,
+                    "validate_android_proot_host_payload",
+                    side_effect=ValueError("unresolved Android PRoot host dependency"),
+                ) as validate_host,
+                patch.object(build_glibc_runtime, "install_host_packages") as install_host,
+            ):
+                with self.assertRaisesRegex(ValueError, "unresolved Android PRoot host dependency"):
+                    build_glibc_runtime.build(args)
+
+            validate_host.assert_called_once_with(host.resolve())
+            install_host.assert_not_called()
+            self.assertFalse((work / "backend").exists())
+
     def test_host_build_uses_only_official_noble_amd64_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

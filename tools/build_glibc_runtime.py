@@ -506,11 +506,9 @@ def build(args: argparse.Namespace) -> None:
         raise ValueError("work-dir must be empty; choose a new directory to protect existing files.")
 
     host = args.proot_host.resolve(strict=True)
-    for relative in ("bin/proot", "libexec/proot/loader"):
-        if not (host / relative).is_file():
-            raise ValueError("PRoot host payload is missing " + relative)
-    if not (host / "lib").is_dir():
-        raise ValueError("PRoot host payload has no lib directory.")
+    # Fail before downloading/building the large ARM64 + Wine guest. The exact
+    # same validator runs again against backend/host before the final ZIP.
+    package_runtime.validate_android_proot_host_payload(host)
 
     if not args.skip_host_dependencies:
         install_host_packages(args.snapshot, work / "apt-host")

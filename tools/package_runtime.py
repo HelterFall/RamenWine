@@ -545,9 +545,12 @@ def validate_wine_pe_directory(
     return inspected
 
 
-def validate_android_proot_host_dependency_closure(backend_root: Path) -> int:
-    """Resolve PRoot's complete Bionic ELF dependency closure before packaging."""
-    host_root = (backend_root / "host").resolve(strict=True)
+def validate_android_proot_host_dependency_closure(host_root: Path) -> int:
+    """Resolve PRoot's complete Bionic ELF dependency closure."""
+    host_root = host_root.resolve(strict=True)
+    if not host_root.is_dir():
+        raise ValueError("PRoot host payload is not a directory.")
+
     library_directory = (host_root / "lib").resolve(strict=True)
     try:
         library_directory.relative_to(host_root)
@@ -618,79 +621,79 @@ def validate_android_proot_host_dependency_closure(backend_root: Path) -> int:
     return len(visited)
 
 
+def validate_android_proot_host_payload(host_root: Path) -> int:
+    """Validate the complete app-private PRoot host before a long guest build."""
+    host_root = host_root.resolve(strict=True)
+    if not host_root.is_dir():
+        raise ValueError("PRoot host payload is not a directory.")
+
+    library_directory = host_root / "lib"
+    if not library_directory.is_dir():
+        raise ValueError("PRoot host library directory is missing.")
+
+    libraries = [
+        path for path in sorted(library_directory.iterdir(), key=lambda item: item.name)
+        if path.name.startswith("lib") and ".so" in path.name
+    ]
+    if not libraries:
+        raise ValueError("PRoot host shared-library payload is empty.")
+
+    library_root = library_directory.resolve(strict=True)
+    for library in libraries:
+        try:
+            real_library = library.resolve(strict=True)
+            real_library.relative_to(library_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"PRoot host shared library is missing or escapes host/lib: {library.name}"
+            ) from error
+        require_elf64(
+            real_library,
+            "PRoot host shared library " + library.name,
+            ELF_MACHINE_AARCH64,
+        )
+
+    for required_library in ("libtalloc.so.2", "libandroid-shmem.so"):
+        required_path = library_directory / required_library
+        try:
+            required_real = required_path.resolve(strict=True)
+            required_real.relative_to(library_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"required PRoot host library is missing or escapes host/lib: {required_library}"
+            ) from error
+
+    proot_path = host_root / "bin" / "proot"
+    loader_path = host_root / "libexec" / "proot" / "loader"
+    for path, label in (
+        (proot_path, "PRoot host executable"),
+        (loader_path, "PRoot ELF loader"),
+    ):
+        try:
+            real_path = path.resolve(strict=True)
+            real_path.relative_to(host_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(f"{label} is missing or escapes the host payload.") from error
+        require_executable(real_path, label)
+        require_elf64(
+            real_path,
+            label,
+            ELF_MACHINE_AARCH64,
+            "/system/bin/linker64" if label == "PRoot host executable" else None,
+        )
+
+    return validate_android_proot_host_dependency_closure(host_root)
+
+
 def validate_glibc_proot_box64(root: Path) -> None:
     """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
     backend_root = root.resolve(strict=True)
     if not backend_root.is_dir():
         raise ValueError("runtime backend root must be a directory")
 
-    host_library_directory = backend_root / "host" / "lib"
-    if not host_library_directory.is_dir():
-        raise ValueError("PRoot host library directory is missing.")
-
-    try:
-        host_library_root = host_library_directory.resolve(strict=True)
-        host_library_root.relative_to(backend_root)
-    except (OSError, ValueError) as error:
-        raise ValueError("PRoot host library directory is missing or escapes the backend.") from error
-
-    host_shared_libraries = [
-        path for path in sorted(host_library_directory.iterdir(), key=lambda item: item.name)
-        if path.name.startswith("lib") and ".so" in path.name
-    ]
-    if not host_shared_libraries:
-        raise ValueError("PRoot host shared-library payload is empty.")
-
-    for library_path in host_shared_libraries:
-        try:
-            library_real = library_path.resolve(strict=True)
-            library_real.relative_to(host_library_root)
-        except (OSError, ValueError) as error:
-            raise ValueError(
-                f"PRoot host shared library is missing or escapes host/lib: {library_path.name}"
-            ) from error
-        require_elf64(
-            library_real,
-            "PRoot host shared library " + library_path.name,
-            ELF_MACHINE_AARCH64,
-        )
-
-    for required_library in ("libtalloc.so.2", "libandroid-shmem.so"):
-        try:
-            resolve_host_library = (host_library_directory / required_library).resolve(strict=True)
-            resolve_host_library.relative_to(host_library_root)
-        except (OSError, ValueError) as error:
-            raise ValueError(
-                f"required PRoot host library is missing or escapes host/lib: {required_library}"
-            ) from error
-
-    proot_path = backend_root / "host" / "bin" / "proot"
-    try:
-        proot_real = proot_path.resolve(strict=True)
-        proot_real.relative_to(backend_root)
-    except (OSError, ValueError) as error:
-        raise ValueError("PRoot host executable is missing or escapes the backend.") from error
-    require_executable(proot_real, "PRoot host executable")
-    require_elf64(
-        proot_real,
-        "PRoot host executable",
-        ELF_MACHINE_AARCH64,
-        "/system/bin/linker64",
-    )
-
-    proot_loader_path = backend_root / "host" / "libexec" / "proot" / "loader"
-    try:
-        proot_loader_real = proot_loader_path.resolve(strict=True)
-        proot_loader_real.relative_to(backend_root)
-    except (OSError, ValueError) as error:
-        raise ValueError("PRoot ELF loader is missing or escapes the backend.") from error
-    require_executable(proot_loader_real, "PRoot ELF loader")
-    require_elf64(proot_loader_real, "PRoot ELF loader", ELF_MACHINE_AARCH64)
-
-    # PRoot runs under Android's linker, not inside the guest rootfs. Check
-    # that its complete Bionic dependency graph is either bundled or public
-    # Android NDK API; guest glibc validation cannot cover this host process.
-    validate_android_proot_host_dependency_closure(backend_root)
+    # Reuse the same strict PRoot host checks in the builder's early preflight
+    # and in the final runtime ZIP validation.
+    validate_android_proot_host_payload(backend_root / "host")
 
     rootfs = backend_root / "rootfs"
     try:

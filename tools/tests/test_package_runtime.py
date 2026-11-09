@@ -417,6 +417,20 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "required guest path is missing"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
+    def test_rejects_proot_host_library_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backend = self._make_glibc_backend(root)
+            host_lib = backend / "host" / "lib"
+            outside = root / "outside.so"
+            self._write_elf64(outside, package_runtime.ELF_MACHINE_AARCH64)
+            library = host_lib / "libandroid-shmem.so"
+            library.unlink()
+            library.symlink_to(outside)
+
+            with self.assertRaisesRegex(ValueError, "escapes host/lib"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
     def test_rejects_runtime_missing_proot_host_library(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
