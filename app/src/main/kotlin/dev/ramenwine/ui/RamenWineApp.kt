@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.ramenwine.BuildConfig
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
@@ -209,6 +210,22 @@ fun RamenWineApp() {
                         )
                     }
                 )
+
+                if (BuildConfig.DEBUG) {
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent().setClassName(
+                                    context.packageName,
+                                    "dev.ramenwine.debug.WawonaPreviewActivity"
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Тестировать Wawona / Wayland")
+                    }
+                }
 
                 if (installingRuntime) {
                     Text(
