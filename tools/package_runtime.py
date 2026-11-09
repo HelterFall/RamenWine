@@ -470,7 +470,7 @@ def validate_elf_dependency_closure(
 def validate_box64_x64_library_bundle(
     rootfs: Path,
     relative_directory: str,
-) -> int:
+) -> list[str]:
     """Validate every shipped Box64 x86-64 shared library and its symlink target.
 
     Box64's bundle contains libraries loaded on demand as guest applications
@@ -541,7 +541,14 @@ def validate_box64_x64_library_bundle(
 
     if not inspected:
         raise ValueError("Box64 x86-64 library bundle contains no shared libraries.")
-    return len(inspected)
+
+    # Return canonical guest paths for every distinct library so the caller can
+    # validate DT_NEEDED recursively, including libraries Box64 may dlopen only
+    # when a game requests a particular wrapped API.
+    return sorted(
+        "/" + path.relative_to(root_real).as_posix()
+        for path in inspected
+    )
 
 
 def require_elf64(
@@ -853,7 +860,10 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
 
     box64_library_directory = "/usr/lib/box64-x86_64-linux-gnu"
-    validate_box64_x64_library_bundle(rootfs, box64_library_directory)
+    box64_x64_library_entry_points = validate_box64_x64_library_bundle(
+        rootfs,
+        box64_library_directory,
+    )
 
     wine = resolve_guest_file(rootfs, "/usr/bin/wine")
     require_executable(wine, "Wine unified loader")
@@ -961,14 +971,7 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/usr/bin/wineserver",
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader",
         "/" + wayland_unix.relative_to(rootfs.resolve()).as_posix(),
-        *[
-            box64_library_directory + "/" + library_name
-            for library_name in (
-                "libstdc++.so.6",
-                "libgcc_s.so.1",
-                "libunwind.so.8",
-            )
-        ],
+        *box64_x64_library_entry_points,
     ]
     unix_driver_directory = wayland_unix.parent
     for directory, child_directories, filenames in os.walk(unix_driver_directory):
