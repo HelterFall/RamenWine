@@ -251,8 +251,17 @@ def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | No
 
 
 def validate_wawona_jni_exports(readelf_output: str, filename: str) -> None:
-    """Require every JNI method declared by RamenWine's WawonaNative adapter."""
-    exported = set(WAWONA_JNI_EXPORT_RE.findall(readelf_output))
+    """Require defined JNI methods from the .dynsym table, not just UND imports."""
+    exported: set[str] = set()
+    for line in readelf_output.splitlines():
+        fields = line.split()
+        # llvm-readelf --dyn-syms --wide columns:
+        # Num: Value Size Type Bind Vis Ndx Name
+        if len(fields) < 8 or not fields[0].endswith(":") or fields[6] == "UND":
+            continue
+        match = WAWONA_JNI_EXPORT_RE.fullmatch(fields[7])
+        if match:
+            exported.add(match.group(1))
     missing = sorted(set(REQUIRED_WAWONA_JNI_METHODS) - exported)
     if missing:
         raise ValueError(
