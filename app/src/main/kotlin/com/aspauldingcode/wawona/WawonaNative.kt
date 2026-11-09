@@ -40,6 +40,8 @@ object WawonaNative {
     external fun nativeKeyEvent(keycode: Int, state: Int, timestampMs: Int)
     external fun nativePointerMotion(x: Double, y: Double, timestampMs: Int)
     external fun nativePointerButton(buttonCode: Int, state: Int, timestampMs: Int)
+    external fun nativePointerEnter(x: Double, y: Double, timestampMs: Int)
+    external fun nativePointerLeave(timestampMs: Int)
     external fun nativePointerAxis(axis: Int, value: Float, timestampMs: Int)
     external fun nativeKeyboardFocus(hasFocus: Boolean)
 }
