@@ -133,12 +133,16 @@ def record_proot_patch_provenance(host_payload: Path, recipe_path: Path) -> None
     if not isinstance(metadata, dict) or metadata.get("target") != "android-bionic-arm64":
         raise ValueError("PRoot host provenance manifest has an unexpected target.")
 
+    proot_binary = host_payload / "bin" / "proot"
+    if not proot_binary.is_file() or proot_binary.is_symlink():
+        raise ValueError("PRoot host payload is missing its regular proot executable.")
     package_root = recipe_path.parents[2]
     metadata["downstreamPatches"] = {
         "prootTermination": {
             "id": PROOT_SIGTERM_PATCH_ID,
             "file": recipe_path.relative_to(package_root).as_posix(),
             "recipeSha256": hashlib.sha256(recipe_path.read_bytes()).hexdigest(),
+            "binarySha256": hashlib.sha256(proot_binary.read_bytes()).hexdigest(),
             "behavior": (
                 "Treat SIGTERM from Android Process.destroy() as a graceful PRoot "
                 "shutdown request: kill all tracees and let the event loop reap them."
