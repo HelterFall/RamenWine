@@ -55,11 +55,13 @@ class Elf64Info:
     needed: tuple[str, ...] = ()
     rpath: tuple[str, ...] = ()
     runpath: tuple[str, ...] = ()
+    load_alignment_segments: tuple[tuple[int, int, int], ...] = ()
 
 
 ELF_MACHINE_AARCH64 = 183
 ELF_MACHINE_X86_64 = 62
 ELF_PT_LOAD = 1
+ANDROID_MIN_ELF_PAGE_SIZE = 16 * 1024
 ELF_PT_DYNAMIC = 2
 ELF_PT_INTERP = 3
 ELF_DT_NULL = 0
@@ -176,6 +178,7 @@ def read_elf64(path: Path, label: str) -> Elf64Info:
 
             interpreter: str | None = None
             load_segments: list[tuple[int, int, int]] = []
+            load_alignment_segments: list[tuple[int, int, int]] = []
             dynamic_segment: tuple[int, int] | None = None
             for index in range(program_header_count):
                 offset = program_header_offset + index * program_header_size
@@ -215,6 +218,7 @@ def read_elf64(path: Path, label: str) -> Elf64Info:
                     if segment_offset + segment_file_size > file_size:
                         raise ValueError(f"{label} has a truncated ELF load segment.")
                     load_segments.append((segment_offset, virtual_address, segment_file_size))
+                    load_alignment_segments.append((segment_offset, virtual_address, values[7]))
                 elif segment_type == ELF_PT_DYNAMIC:
                     if dynamic_segment is not None:
                         raise ValueError(f"{label} has multiple PT_DYNAMIC segments.")
@@ -316,9 +320,34 @@ def read_elf64(path: Path, label: str) -> Elf64Info:
                 needed=tuple(needed),
                 rpath=tuple(rpath),
                 runpath=tuple(runpath),
+                load_alignment_segments=tuple(load_alignment_segments),
             )
     except (OSError, struct.error, UnicodeDecodeError) as error:
         raise ValueError(f"could not inspect ELF file for {label}: {path}") from error
+
+
+def require_android_16kb_elf_alignment(path: Path, label: str) -> None:
+    """Require Android-host ELF load segments to be compatible with 16 KiB pages."""
+    info = read_elf64(path, label)
+    if not info.load_alignment_segments:
+        raise ValueError(f"{label} has no ELF PT_LOAD segment.")
+
+    page_size = ANDROID_MIN_ELF_PAGE_SIZE
+    for file_offset, virtual_address, alignment in info.load_alignment_segments:
+        if (
+            alignment < page_size
+            or alignment % page_size != 0
+            or alignment & (alignment - 1) != 0
+        ):
+            raise ValueError(
+                f"{label} is not 16 KB page-size compatible: "
+                f"PT_LOAD p_align is 0x{alignment:x}, expected at least 0x{page_size:x}."
+            )
+        if file_offset % alignment != virtual_address % alignment:
+            raise ValueError(
+                f"{label} has an invalid ELF PT_LOAD alignment: "
+                "file offset and virtual address are not congruent."
+            )
 
 
 def _expand_elf_search_paths(
@@ -656,6 +685,10 @@ def validate_android_proot_host_payload(host_root: Path) -> int:
             "PRoot host shared library " + library.name,
             ELF_MACHINE_AARCH64,
         )
+        require_android_16kb_elf_alignment(
+            real_library,
+            "PRoot host shared library " + library.name,
+        )
 
     for required_library in ("libtalloc.so.2", "libandroid-shmem.so"):
         required_path = library_directory / required_library
@@ -685,6 +718,7 @@ def validate_android_proot_host_payload(host_root: Path) -> int:
             ELF_MACHINE_AARCH64,
             "/system/bin/linker64" if label == "PRoot host executable" else None,
         )
+        require_android_16kb_elf_alignment(real_path, label)
 
     return validate_android_proot_host_dependency_closure(host_root)
 

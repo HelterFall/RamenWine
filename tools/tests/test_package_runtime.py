@@ -22,26 +22,42 @@ class RuntimePackagerTests(unittest.TestCase):
         machine: int,
         interpreter: str | None = None,
         executable: bool = False,
+        load_alignment: int | None = None,
     ) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if load_alignment is None:
+            load_alignment = (
+                0x4000
+                if machine == package_runtime.ELF_MACHINE_AARCH64
+                else 0x1000
+            )
         ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
-        if interpreter is None:
-            phoff = 0
-            phnum = 0
-            data = struct.pack(
-                "<16sHHIQQQIHHHHHH",
-                ident, 2, machine, 1, 0, phoff, 0, 0, 64, 56, phnum, 0, 0, 0,
-            )
-        else:
-            interpreter_bytes = interpreter.encode("ascii") + b"\x00"
-            phoff = 64
-            phnum = 1
-            interpreter_offset = phoff + 56
-            header = struct.pack(
-                "<16sHHIQQQIHHHHHH",
-                ident, 2, machine, 1, 0, phoff, 0, 0, 64, 56, phnum, 0, 0, 0,
-            )
-            program_header = struct.pack(
+        interpreter_bytes = (
+            interpreter.encode("ascii") + b"\x00"
+            if interpreter is not None else b""
+        )
+        phoff = 64
+        phnum = 1 + (1 if interpreter is not None else 0)
+        interpreter_offset = phoff + phnum * 56
+        file_size = interpreter_offset + len(interpreter_bytes)
+        header = struct.pack(
+            "<16sHHIQQQIHHHHHH",
+            ident, 2, machine, 1, 0, phoff, 0, 0, 64, 56, phnum, 0, 0, 0,
+        )
+        load_segment = struct.pack(
+            "<IIQQQQQQ",
+            package_runtime.ELF_PT_LOAD,
+            5,
+            0,
+            load_alignment,
+            load_alignment,
+            file_size,
+            file_size,
+            load_alignment,
+        )
+        data = header + load_segment
+        if interpreter is not None:
+            interpreter_segment = struct.pack(
                 "<IIQQQQQQ",
                 package_runtime.ELF_PT_INTERP,
                 4,
@@ -52,7 +68,7 @@ class RuntimePackagerTests(unittest.TestCase):
                 len(interpreter_bytes),
                 1,
             )
-            data = header + program_header + interpreter_bytes
+            data += interpreter_segment + interpreter_bytes
         path.write_bytes(data)
         path.chmod(0o755 if executable else 0o644)
         return path
@@ -66,9 +82,17 @@ class RuntimePackagerTests(unittest.TestCase):
         runpath: str | None = None,
         interpreter: str | None = None,
         executable: bool = False,
+        load_alignment: int | None = None,
     ) -> Path:
         """Write a tiny ELF64 fixture with PT_DYNAMIC and an optional PT_INTERP."""
         path.parent.mkdir(parents=True, exist_ok=True)
+        if load_alignment is None:
+            load_alignment = (
+                0x4000
+                if machine == package_runtime.ELF_MACHINE_AARCH64
+                else 0x1000
+            )
+        load_virtual_address = load_alignment
         strings = bytearray(b"\x00")
 
         def add_string(value: str) -> int:
@@ -98,7 +122,7 @@ class RuntimePackagerTests(unittest.TestCase):
         string_table_offset = dynamic_offset + len(dynamic_data)
         dynamic_tags[0] = (
             package_runtime.ELF_DT_STRTAB,
-            0x1000 + string_table_offset,
+            load_virtual_address + string_table_offset,
         )
         dynamic_tags[1] = (
             package_runtime.ELF_DT_STRSZ,
@@ -126,19 +150,19 @@ class RuntimePackagerTests(unittest.TestCase):
             package_runtime.ELF_PT_LOAD,
             6,
             0,
-            0x1000,
-            0x1000,
+            load_virtual_address,
+            load_virtual_address,
             file_size,
             file_size,
-            0x1000,
+            load_alignment,
         )
         dynamic_segment = struct.pack(
             "<IIQQQQQQ",
             package_runtime.ELF_PT_DYNAMIC,
             4,
             dynamic_offset,
-            0x1000 + dynamic_offset,
-            0x1000 + dynamic_offset,
+            load_virtual_address + dynamic_offset,
+            load_virtual_address + dynamic_offset,
             len(dynamic_data),
             len(dynamic_data),
             8,
@@ -464,6 +488,40 @@ class RuntimePackagerTests(unittest.TestCase):
                 "required PRoot host library is missing",
             ):
                 package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_4k_aligned_android_proot_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_elf64(
+                backend / "host" / "bin" / "proot",
+                package_runtime.ELF_MACHINE_AARCH64,
+                "/system/bin/linker64",
+                executable=True,
+                load_alignment=0x1000,
+            )
+
+            with self.assertRaisesRegex(ValueError, "not 16 KB page-size compatible"):
+                package_runtime.validate_android_proot_host_payload(backend / "host")
+
+    def test_accepts_16k_aligned_android_proot_host(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self.assertGreater(
+                package_runtime.validate_android_proot_host_payload(backend / "host"),
+                0,
+            )
+
+    def test_rejects_4k_aligned_android_proot_shared_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_elf64(
+                backend / "host" / "lib" / "libandroid-shmem.so",
+                package_runtime.ELF_MACHINE_AARCH64,
+                load_alignment=0x1000,
+            )
+
+            with self.assertRaisesRegex(ValueError, "not 16 KB page-size compatible"):
+                package_runtime.validate_android_proot_host_payload(backend / "host")
 
     def test_rejects_wrong_architecture_for_proot_host_library(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
