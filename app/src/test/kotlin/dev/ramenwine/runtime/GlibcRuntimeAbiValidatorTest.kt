@@ -5,10 +5,17 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
-import org.junit.Assert.assertEquals
+import org.junit.After
 import org.junit.Test
 
 class GlibcRuntimeAbiValidatorTest {
+    private val temporaryDirectory = Files.createTempDirectory("ramenwine-abi-test").toFile()
+
+    @After
+    fun removeTemporaryFiles() {
+        temporaryDirectory.deleteRecursively()
+    }
+
     @Test
     fun acceptsAarch64ElfWithAndroidInterpreter() {
         val file = temporaryFile("proot")
@@ -72,11 +79,7 @@ class GlibcRuntimeAbiValidatorTest {
         )
     }
 
-    private fun temporaryFile(name: String): File {
-        val directory = Files.createTempDirectory("ramenwine-abi-test").toFile()
-        temporaryDirectories += directory
-        return File(directory, name)
-    }
+    private fun temporaryFile(name: String): File = File(temporaryDirectory, name)
 
     private fun writeElf(file: File, machine: Int, interpreter: String?) {
         val interpreterBytes = interpreter?.toByteArray(Charsets.US_ASCII)
@@ -84,22 +87,22 @@ class GlibcRuntimeAbiValidatorTest {
         val programHeaderCount = if (interpreterBytes == null) 0 else 1
         val programHeaderOffset = 64
         val interpreterOffset = programHeaderOffset + 56
-        val size = interpreterOffset + (interpreterBytes?.size ?: 0)
+        val size = if (interpreterBytes == null) 64 else interpreterOffset + interpreterBytes.size
         val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
         buffer.put(0, 0x7f.toByte())
         buffer.put(1, 'E'.code.toByte())
         buffer.put(2, 'L'.code.toByte())
         buffer.put(3, 'F'.code.toByte())
-        buffer.put(4, 2)
-        buffer.put(5, 1)
-        buffer.put(6, 1)
-        buffer.putShort(16, 2)
+        buffer.put(4, 2.toByte())
+        buffer.put(5, 1.toByte())
+        buffer.put(6, 1.toByte())
+        buffer.putShort(16, 2.toShort())
         buffer.putShort(18, machine.toShort())
         buffer.putInt(20, 1)
         buffer.putLong(32, programHeaderOffset.toLong())
-        buffer.putShort(52, 64)
-        buffer.putShort(54, 56)
+        buffer.putShort(52, 64.toShort())
+        buffer.putShort(54, 56.toShort())
         buffer.putShort(56, programHeaderCount.toShort())
 
         if (interpreterBytes != null) {
@@ -112,7 +115,6 @@ class GlibcRuntimeAbiValidatorTest {
             buffer.put(interpreterBytes)
         }
 
-        file.writeBytes(buffer.array().toString(Charsets.ISO_8859_1))
         Files.write(file.toPath(), buffer.array())
     }
 
@@ -126,9 +128,5 @@ class GlibcRuntimeAbiValidatorTest {
         bytes[65] = 'E'.code.toByte()
         buffer.putShort(68, machine.toShort())
         Files.write(file.toPath(), bytes)
-    }
-
-    private companion object {
-        val temporaryDirectories = mutableListOf<File>()
     }
 }
