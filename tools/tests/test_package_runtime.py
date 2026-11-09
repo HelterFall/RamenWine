@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -80,11 +81,26 @@ class RuntimePackagerTests(unittest.TestCase):
     def test_rejects_case_colliding_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "A.dll").write_text("one", encoding="utf-8")
-            (root / "a.dll").write_text("two", encoding="utf-8")
+            backing_file = root / "A.dll"
+            backing_file.write_text("one", encoding="utf-8")
 
-            with self.assertRaises(ValueError):
-                package_runtime.scan_runtime(root, 1024 * 1024)
+            class FakeDirEntry:
+                def __init__(self, name: str, path: Path) -> None:
+                    self.name = name
+                    self.path = str(path)
+
+                def stat(self, follow_symlinks: bool = False):
+                    # Reuse one real file so this test works on both
+                    # case-sensitive and case-insensitive filesystems.
+                    return backing_file.stat(follow_symlinks=follow_symlinks)
+
+            entries = [
+                FakeDirEntry("A.dll", root / "A.dll"),
+                FakeDirEntry("a.dll", root / "a.dll"),
+            ]
+            with patch("package_runtime.os.scandir", return_value=entries):
+                with self.assertRaises(ValueError):
+                    package_runtime.scan_runtime(root, 1024 * 1024)
 
     def test_rejects_path_traversal(self) -> None:
         with self.assertRaises(ValueError):
