@@ -255,6 +255,11 @@ object ProotWineCommandBuilder {
             "TMPDIR" to guestTempDirectory,
             "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
             "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
+            // The pinned Box64 build otherwise prefers an x86-64 library
+            // when the guest loader passes an absolute path. Prefer its
+            // native ARM64 Wayland/XKB wrappers first, then let Box64 fall
+            // back to emulation for libraries without a wrapper.
+            "BOX64_PREFER_WRAPPED" to "1",
             "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
             // Wine 11 reads WINEARCH=wow64 to force its 64-bit WoW64 path.
             // The resulting prefix is still a 64-bit prefix (#arch=win64).
