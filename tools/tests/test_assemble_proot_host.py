@@ -20,22 +20,26 @@ def write_elf64(
 ) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
-    if interpreter is None:
-        data = struct.pack(
-            "<16sHHIQQQIHHHHHH",
-            ident, 2, machine, 1, 0, 0, 0, 0, 64, 56, 0, 0, 0, 0,
-        )
-    else:
-        raw = interpreter.encode("ascii") + b"\x00"
-        header = struct.pack(
-            "<16sHHIQQQIHHHHHH",
-            ident, 2, machine, 1, 0, 64, 0, 0, 64, 56, 1, 0, 0, 0,
-        )
-        segment = struct.pack(
+    raw = interpreter.encode("ascii") + b"\x00" if interpreter is not None else b""
+    phoff = 64
+    phnum = 1 + (1 if interpreter is not None else 0)
+    interpreter_offset = phoff + phnum * 56
+    file_size = interpreter_offset + len(raw)
+    header = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        ident, 2, machine, 1, 0, phoff, 0, 0, 64, 56, phnum, 0, 0, 0,
+    )
+    load_segment = struct.pack(
+        "<IIQQQQQQ",
+        1, 5, 0, 0x4000, 0x4000, file_size, file_size, 0x4000,
+    )
+    data = header + load_segment
+    if interpreter is not None:
+        interpreter_segment = struct.pack(
             "<IIQQQQQQ",
-            3, 4, 120, 0, 0, len(raw), len(raw), 1,
+            3, 4, interpreter_offset, 0, 0, len(raw), len(raw), 1,
         )
-        data = header + segment + raw
+        data += interpreter_segment + raw
     path.write_bytes(data)
     path.chmod(0o755 if executable else 0o644)
     return path
