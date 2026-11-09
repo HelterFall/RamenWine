@@ -22,6 +22,14 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 PINNED_WAWONA_REVISION = "d298ddd25726fec0977285aa5f57181110c966a6"
+PINNED_WAWONA_ARTIFACT_SHA256 = (
+    "04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953"
+)
+PINNED_WAWONA_APK_SHA256 = (
+    "60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37"
+)
+PINNED_WAWONA_ARTIFACT_ID = 13377766663
+PINNED_WAWONA_WORKFLOW_RUN = 41941778312
 APK_LIBRARY_ROOT = "lib/arm64-v8a/"
 APK_ASSET_ROOTS = (
     "xkb",
@@ -101,6 +109,62 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def extract_verified_pinned_artifact(artifact_zip: Path, destination: Path) -> Path:
+    """Extract only the reviewed APK from the known upstream Actions artifact."""
+    if not artifact_zip.is_file():
+        raise ValueError(f"Wawona product artifact ZIP does not exist: {artifact_zip}")
+    actual_artifact_sha = sha256_file(artifact_zip)
+    if actual_artifact_sha != PINNED_WAWONA_ARTIFACT_SHA256:
+        raise ValueError(
+            "Wawona product artifact SHA-256 does not match the reviewed upstream artifact."
+        )
+
+    destination.mkdir(parents=True, exist_ok=True)
+    apk_path = destination / "Wawona.apk"
+    with zipfile.ZipFile(artifact_zip) as archive:
+        entries: dict[str, zipfile.ZipInfo] = {}
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = safe_archive_path(info.filename)
+            if name not in ("Wawona.apk", "product-manifest.json"):
+                raise ValueError(f"unexpected file in pinned Wawona artifact: {name}")
+            if name in entries:
+                raise ValueError(f"duplicate file in pinned Wawona artifact: {name}")
+            entries[name] = info
+
+        if set(entries) != {"Wawona.apk", "product-manifest.json"}:
+            raise ValueError("pinned Wawona artifact is missing its APK or product manifest.")
+
+        manifest_info = entries["product-manifest.json"]
+        if manifest_info.file_size > 64 * 1024:
+            raise ValueError("Wawona product manifest is unexpectedly large.")
+        try:
+            manifest = json.loads(archive.read(manifest_info).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("Wawona product manifest is invalid JSON.") from error
+
+        expected_manifest = {
+            "attr": "wawona-android",
+            "sha": PINNED_WAWONA_REVISION,
+            "artifact": "product-android-apk",
+        }
+        for key, expected in expected_manifest.items():
+            if manifest.get(key) != expected:
+                raise ValueError(f"Wawona product manifest mismatch for {key}.")
+
+        apk_info = entries["Wawona.apk"]
+        if apk_info.file_size <= 0 or apk_info.file_size > 256 * 1024 * 1024:
+            raise ValueError("Wawona APK size is outside the accepted range.")
+        with archive.open(apk_info) as source, apk_path.open("wb") as output:
+            shutil.copyfileobj(source, output, length=1024 * 1024)
+
+    if sha256_file(apk_path) != PINNED_WAWONA_APK_SHA256:
+        apk_path.unlink(missing_ok=True)
+        raise ValueError("Wawona APK SHA-256 does not match the reviewed pinned build.")
+    return apk_path
 
 
 def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | None]:
@@ -346,7 +410,17 @@ def package_apk(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apk", required=True, type=Path, help="APK from the pinned Wawona Nix build")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--apk",
+        type=Path,
+        help="APK built from the pinned Wawona revision",
+    )
+    source.add_argument(
+        "--artifact-zip",
+        type=Path,
+        help="reviewed upstream product-android-apk ZIP (its ZIP, manifest and APK hashes are pinned)",
+    )
     parser.add_argument("--readelf", required=True, help="NDK llvm-readelf executable")
     parser.add_argument(
         "--revision",
@@ -365,7 +439,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        package_apk(args.apk, args.output, args.revision, args.readelf)
+        if args.artifact_zip is not None:
+            with tempfile.TemporaryDirectory(prefix="wawona-artifact-") as temporary:
+                apk_path = extract_verified_pinned_artifact(
+                    args.artifact_zip,
+                    Path(temporary),
+                )
+                package_apk(apk_path, args.output, args.revision, args.readelf)
+        else:
+            package_apk(args.apk, args.output, args.revision, args.readelf)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         print(f"Wawona packaging failed: {error}", file=os.sys.stderr)
         return 1

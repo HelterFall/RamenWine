@@ -16,7 +16,31 @@ The upstream Android JNI is also coupled to Wawona's application package name th
 
 ## Pinned artifact build
 
-Do not use the old prebuilt Wawona APK release. It predates the reviewed source revision and does not provide the provenance used by this integration.
+A reviewed Android APK already exists for the exact Wawona revision used here.
+The upstream Actions artifact is ID `13377766663` from run `41941778312`.
+Its artifact ZIP SHA-256 is `04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953`;
+the contained APK SHA-256 is `60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37`.
+The checked-in packager can consume this archive directly and verifies the outer
+ZIP digest, product manifest revision, and inner APK digest before extracting
+any native files. This avoids rebuilding the pinned Wawona compositor with Nix
+when the reviewed artifact is available.
+
+Download the upstream `product-android-apk` artifact ZIP, then run:
+
+```bash
+WAWONA_REVISION=d298ddd25726fec0977285aa5f57181110c966a6
+READELF="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name llvm-readelf -print -quit)"
+
+python tools/package_wawona_apk.py \\
+  --artifact-zip /path/to/wawona-product-android-apk.zip \\
+  --readelf "$READELF" \\
+  --revision "$WAWONA_REVISION" \\
+  --output app/build/generated/wawona
+```
+
+The Nix build below remains available to rebuild the same pinned source and
+produce a fresh APK for review. Do not use the old prebuilt Wawona APK release:
+it predates the reviewed source revision.
 
 Build the exact upstream revision with Nix (flakes enabled):
 

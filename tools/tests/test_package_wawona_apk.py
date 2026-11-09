@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -176,6 +178,89 @@ ELF Header:
             lambda filename, _data: dependencies[filename],
         )
         self.assertEqual(set(libraries), set(selected))
+
+    def _write_pinned_product_artifact(self, path: Path, revision: str | None = None) -> None:
+        manifest = {
+            "attr": "wawona-android",
+            "sha": revision or package_wawona_apk.PINNED_WAWONA_REVISION,
+            "outPath": "/nix/store/pinned-wawona-android",
+            "artifact": "product-android-apk",
+        }
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Wawona.apk", b"pinned-apk-fixture")
+            archive.writestr(
+                "product-manifest.json",
+                json.dumps(manifest),
+            )
+
+    def test_extracts_only_the_exact_pinned_product_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            destination = root / "extracted"
+            self._write_pinned_product_artifact(artifact)
+
+            def fixture_sha(path: Path) -> str:
+                return (
+                    package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256
+                    if path == artifact
+                    else package_wawona_apk.PINNED_WAWONA_APK_SHA256
+                )
+
+            with patch.object(package_wawona_apk, "sha256_file", side_effect=fixture_sha):
+                apk = package_wawona_apk.extract_verified_pinned_artifact(
+                    artifact,
+                    destination,
+                )
+
+            self.assertEqual(b"pinned-apk-fixture", apk.read_bytes())
+            self.assertEqual({"Wawona.apk"}, {path.name for path in destination.iterdir()})
+
+    def test_rejects_changed_upstream_product_artifact_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact)
+            with patch.object(package_wawona_apk, "sha256_file", return_value="0" * 64):
+                with self.assertRaisesRegex(ValueError, "artifact SHA-256"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
+
+    def test_rejects_product_manifest_from_another_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact, revision="0" * 40)
+            with patch.object(
+                package_wawona_apk,
+                "sha256_file",
+                return_value=package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256,
+            ):
+                with self.assertRaisesRegex(ValueError, "manifest mismatch for sha"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
+
+    def test_rejects_changed_apk_inside_pinned_product_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact)
+
+            def fixture_sha(path: Path) -> str:
+                if path == artifact:
+                    return package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256
+                return "0" * 64
+
+            with patch.object(package_wawona_apk, "sha256_file", side_effect=fixture_sha):
+                with self.assertRaisesRegex(ValueError, "APK SHA-256"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
 
     def test_rejects_unpinned_upstream_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
