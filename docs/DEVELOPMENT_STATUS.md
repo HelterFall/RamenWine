@@ -26,6 +26,7 @@
 - Python tests for archive output, traversal, case collisions, virtual mount symlinks and symlink escape.
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
+- PRoot launch preflight now rejects a missing x86-64 glibc loader or either half of Wine's Wayland driver; it separates Android/Bionic `LD_LIBRARY_PATH` from the guest x86-64 `BOX64_LD_LIBRARY_PATH` and sets the packaged Wine driver paths.
 - Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback.
 - WinePrefixInitializer that runs Box64 → wineboot --init for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
 - GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
@@ -103,7 +104,7 @@ The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900
 
 1. Freeze the first target backend to glibc-proot-box64; keep Bionic/FEX as later experiments.
 2. Produce a reproducible runtime package containing an ARM64 Android PRoot host, Box64, an x86-64 glibc rootfs, Wine 11 WoW64, wineboot, and the Wine Wayland driver plus its exact shared-library/protocol dependencies.
-3. Add a package inventory gate that rejects a runtime without the Box64/Wine/Wineboot binaries, glibc loader, and both Wine Wayland driver halves. FILES_PRESENT must mean the package is structurally launch-ready, not merely that an arbitrary manifest file list exists.
+3. Keep runtime inventory separate from launch readiness: the current PRoot command builder rejects a missing glibc loader or either Wine Wayland driver half before starting. Tighten the UI state later so a generic `FILES_PRESENT` manifest is never presented as proof that Wine is launch-ready.
 4. Validate the package independently of the APK: verify hashes/ELF architectures, run PRoot and Box64 smoke commands in the rootfs, then prove wineboot --init creates both registry files. Do not start another APK build for these checks.
 5. Make Wine connect to Wawona over the bound Wayland socket and validate a small original Win32 GUI/GDI executable. Diagnose runtime logs and process teardown before opening game-specific work.
 6. Add the first Play/session flow only after the runtime contract and compositor endpoint are proven; wire it to the existing imported-game record and GameLaunchCoordinator.
