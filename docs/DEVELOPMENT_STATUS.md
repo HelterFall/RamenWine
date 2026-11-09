@@ -103,7 +103,7 @@ The latest full Android CI run on main (run #66, commit 439aa47ad63720c089926900
 ## Next engineering steps — runtime first, APK last
 
 1. Freeze the first target backend to glibc-proot-box64; keep Bionic/FEX as later experiments.
-2. Produce a reproducible runtime package containing an ARM64 Android/Bionic PRoot host, an ARM64 glibc rootfs, ARM64 Linux Box64, and x86-64 Wine 11 WoW64 with wineboot, the Wine Wayland driver and both ABI dependency closures.
+2. Produce a reproducible runtime package containing an ARM64 Android/Bionic PRoot host, an Ubuntu Base 24.04.5 ARM64 glibc guest (seed SHA-256 pinned in `PROOT_WINE_LAUNCH.md`), ARM64 Linux Box64, and x86-64 Wine 11 WoW64 with wineboot, the Wine Wayland driver and both ABI dependency closures. Next pin the Ubuntu snapshot and all downloaded/build package inputs before assembling the runtime.
 3. Keep runtime inventory separate from launch readiness: the PRoot command builder rejects a missing ARM64 or x86-64 glibc loader, or either Wine Wayland driver half, before starting. Tighten the UI state later so a generic `FILES_PRESENT` manifest is never presented as proof that Wine is launch-ready.
 4. Validate the package independently of the APK: verify hashes/ELF architectures, run PRoot and Box64 smoke commands in the rootfs, then prove wineboot --init creates both registry files. Do not start another APK build for these checks.
 5. Make Wine connect to Wawona over the bound Wayland socket and validate a small original Win32 GUI/GDI executable. Diagnose runtime logs and process teardown before opening game-specific work.

@@ -23,7 +23,7 @@ Advantages:
 
 Costs and limitations:
 - PRoot uses ptrace to intercept guest syscalls and rewrite paths; this adds overhead.
-- The ARM64 glibc rootfs needs a second x86-64 glibc loader/library closure for Wine; both ABI trees must be pinned and validated.
+- The Ubuntu Base 24.04.5 ARM64 seed is pinned by SHA-256, but its apt snapshot and all ARM64/x86-64 runtime package versions still need pinning; the guest also needs a second x86-64 glibc loader/library closure for Wine.
 - Box64 must be built for ARM64 Linux/glibc inside an ARM64 PRoot/chroot environment. Its native Termux/Bionic build is explicitly marked experimental by upstream and documented as not running Linux binaries.
 - Android GPU/audio integration still needs host-side bridges and compatible libraries.
 - A rootfs is larger than a Bionic-native Wine package.
