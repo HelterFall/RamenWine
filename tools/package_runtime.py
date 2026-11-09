@@ -297,8 +297,11 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/lib64/ld-linux-x86-64.so.2",
     )
 
-    wineboot = resolve_guest_file(rootfs, "/usr/bin/wineboot")
-    require_executable(wineboot, "Wineboot entry point")
+    wineboot = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+    )
+    require_pe_amd64(wineboot, "wineboot PE program")
 
     wayland_unix = resolve_guest_file(
         rootfs,

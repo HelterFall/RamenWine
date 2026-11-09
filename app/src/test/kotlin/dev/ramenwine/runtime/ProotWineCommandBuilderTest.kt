@@ -91,12 +91,20 @@ class ProotWineCommandBuilderTest {
             )
             val command = fixture.build(request)
 
-            assertEquals("/usr/bin/wineboot", command.guestExecutablePath)
             assertEquals(
-                listOf("/usr/bin/box64", "/usr/bin/wineboot", "--init"),
-                command.arguments.takeLast(3)
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                command.guestExecutablePath
             )
-            assertFalse(command.arguments.contains("/usr/bin/wine"))
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                    "--init"
+                ),
+                command.arguments.takeLast(4)
+            )
+            assertTrue(command.arguments.contains("/usr/bin/wine"))
             val envIndex = command.arguments.indexOf("/usr/bin/env")
             assertTrue(envIndex >= 0)
             assertEquals("-i", command.arguments[envIndex + 1])
@@ -313,7 +321,10 @@ class ProotWineCommandBuilderTest {
         val guestEnv = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
-        val wineboot = executable(rootfs, "usr/bin/wineboot")
+        val wineboot = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+        )
         val arm64GlibcLoader = regular(rootfs, "lib/ld-linux-aarch64.so.1")
         val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
         val wineWaylandUnix = regular(

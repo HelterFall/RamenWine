@@ -106,9 +106,7 @@ object ProotWineCommandBuilder {
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
-            // Wine packages expose wineboot as an executable/symlink beside
-            // the unified Wine loader.
-            executableFile(rootfs, "usr/bin/wineboot")
+            runtimeFile(rootfs, WINEBOOT_PE_RELATIVE_PATH, "wineboot PE program")
         }
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
@@ -174,7 +172,7 @@ object ProotWineCommandBuilder {
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
         val guestExecutable = when (request.operation) {
             ProotWineOperation.RUN_GAME -> guestGameDirectory + "/" + executableRelativePath
-            ProotWineOperation.INITIALIZE_PREFIX -> "/usr/bin/wineboot"
+            ProotWineOperation.INITIALIZE_PREFIX -> "/" + WINEBOOT_PE_RELATIVE_PATH
         }
 
         // PRoot bind targets must exist in the guest filesystem. Create only
@@ -234,7 +232,8 @@ object ProotWineCommandBuilder {
                     add(guestExecutable)
                 }
                 ProotWineOperation.INITIALIZE_PREFIX -> {
-                    add("/usr/bin/wineboot")
+                    add("/usr/bin/wine")
+                    add(guestExecutable)
                     add("--init")
                 }
             }
@@ -366,6 +365,8 @@ object ProotWineCommandBuilder {
         "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
     private const val WINE_WAYLAND_PE_DRIVER_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+    private const val WINEBOOT_PE_RELATIVE_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     private const val GUEST_ARM64_LIBRARY_PATH =
         "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =

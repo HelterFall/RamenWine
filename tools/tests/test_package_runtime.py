@@ -111,7 +111,10 @@ class RuntimePackagerTests(unittest.TestCase):
             "/lib64/ld-linux-x86-64.so.2",
             executable=True,
         )
-        (rootfs / "usr" / "bin" / "wineboot").symlink_to("wine")
+        self._write_pe64(
+            rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+            / "x86_64-windows" / "wineboot.exe",
+        )
         self._write_elf64(
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "x86_64-unix" / "winewayland.so",
@@ -171,6 +174,17 @@ class RuntimePackagerTests(unittest.TestCase):
             )
             loader_link.symlink_to("/lib/x86_64-linux-gnu/ld-2.38.so")
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_non_amd64_wineboot_pe_program(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_pe64(
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "x86_64-windows" / "wineboot.exe",
+                machine=0x014C,
+            )
+            with self.assertRaisesRegex(ValueError, "wineboot PE program must target AMD64"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_non_amd64_wine_wayland_pe_driver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
