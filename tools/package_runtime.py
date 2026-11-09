@@ -964,6 +964,12 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
     require_pe_amd64(wineboot, "wineboot PE program")
 
+    wine_reg = resolve_guest_file(
+        rootfs,
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe",
+    )
+    require_pe_amd64(wine_reg, "Wine registry command PE program")
+
     wayland_unix = resolve_guest_file(
         rootfs,
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so",
