@@ -14,19 +14,23 @@ The runtime package must include at least:
 host/
   bin/
     proot                  # ARM64 Android/Bionic executable
+  lib/                     # Android/Bionic dependencies of PRoot/Box64
 rootfs/
+  lib64/
+    ld-linux-x86-64.so.2   # x86-64 glibc ELF interpreter
   usr/bin/
-    box64                  # ARM64 Linux/glibc Box64 executable
-    wine                   # Wine 11 unified WoW64 loader used by the launcher
-    wineboot               # Wine prefix initializer (usually a link to wine)
+    box64                  # ARM64 Android/Bionic Box64 executable
+    wine                   # x86-64 Wine 11 unified WoW64 loader
+    wineboot               # Wine prefix initializer (link to the same loader)
+  usr/lib/x86_64-linux-gnu/wine/
+    x86_64-unix/
+      winewayland.so       # x86-64 Unix side of Wine's Wayland driver
+    x86_64-windows/
+      winewayland.drv      # PE side of Wine's Wayland driver
   ...
 ```
 
-The Wine installation must also include the matching Wayland driver components for the selected Wine build. Their exact paths vary by distribution/build, so the runtime build recipe must verify their presence and test that Wine loads the driver:
-
-- `winewayland.drv` for the relevant Windows PE architecture(s);
-- `winewayland.so` for the relevant Unix architecture(s);
-- Wayland client libraries and protocols required by that Wine build.
+RamenWine normalizes the runtime package to these paths. The command builder refuses to launch if the x86-64 glibc loader or either Wayland driver half is missing. The package build must also include the recursive x86-64 ELF dependency closure for Wine, the Wayland driver and Box64's guest libraries (including the Wayland client/protocol libraries selected by that Wine build).
 
 A runtime inventory that omits any required executable is not launch-ready. The command builder checks the PRoot host executable, the host library directory, and the Box64/Wine executables directly before constructing a process command. Prefix initialization additionally requires an executable `/usr/bin/wineboot` entry; a relative symlink to the unified Wine loader is acceptable when included safely in the runtime package.
 
@@ -50,6 +54,10 @@ The launch environment uses:
 - `WAYLAND_DISPLAY=wayland-0`
 - `TMPDIR=/tmp`
 - `PROOT_TMP_DIR=<app-private host cache path>`
+- `LD_LIBRARY_PATH=<backend>/host/lib` for the ARM64 Android/Bionic PRoot + Box64 host binaries
+- `BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix` for x86-64 guest libraries
+- `WINEDLLPATH` points at the packaged x86-64 Windows and Unix Wine driver directories
+- `WINEARCH=win64` for the 64-bit WoW64 prefix
 - `LANG=C.UTF-8` by default (a per-game locale can be added later)
 - `DISPLAY` is explicitly removed so Wine does not choose an inherited X11 display over Wayland.
 
@@ -96,7 +104,7 @@ The JVM tests use a controlled fake PRoot process that creates the expected regi
 
 ## Display preconditions
 
-The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. This prevents a regular file, stale placeholder or external directory from masquerading as a compositor endpoint.
+The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. It also requires the guest glibc loader and both Wine Wayland driver files before preparing PRoot. This prevents a regular file, stale placeholder or external directory from masquerading as a compositor endpoint and catches a runtime that cannot display a Wine window before starting a process.
 
 The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The RamenWine adapter source is present, but its pinned Nix-built native payload still has to be generated/staged and its Vulkan surface must pass a physical-device smoke test. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. This launcher is still not connected to a user-facing Play button.
 
