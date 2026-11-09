@@ -78,7 +78,7 @@ REQUIRED_WAWONA_JNI_METHODS = (
     "nativeKeyboardFocus",
 )
 WAWONA_JNI_EXPORT_RE = re.compile(
-    r"\\b" + re.escape(WAWONA_JNI_CLASS_PREFIX) + r"(native[A-Za-z0-9_]+)\\b"
+    r"\b" + re.escape(WAWONA_JNI_CLASS_PREFIX) + r"(native[A-Za-z0-9_]+)\b"
 )
 OPTIONAL_ROOT_LIBRARIES = (
     # Wawona's JNI SHM demo wrapper calls dlopen() on this library by name;
