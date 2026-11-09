@@ -32,6 +32,7 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
     private var generation = 0
     private var closing = false
     private var closePending = false
+    private var startPending = false
     private var pendingSurface: Surface? = null
     private var pendingWidth = 0
     private var pendingHeight = 0
@@ -89,7 +90,7 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
 
     override fun onSurfaceChanged(surface: Surface, widthPx: Int, heightPx: Int) {
         if (closing || isFinishing || isDestroyed || !surface.isValid) return
-        if (closePending) {
+        if (closePending || startPending) {
             pendingSurface = surface
             pendingWidth = widthPx
             pendingHeight = heightPx
@@ -106,6 +107,7 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         }
 
         val requestedGeneration = ++generation
+        startPending = true
         statusView.text = "Запуск compositor на " + widthPx + "×" + heightPx + "…"
         runCatching {
             nativeExecutor.execute {
@@ -114,19 +116,24 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                 }
                 mainHandler.post {
                     val created = result.getOrNull()
+                    startPending = false
+                    if (created == null) {
+                        result.exceptionOrNull()?.let {
+                            statusView.text = "Не удалось запустить Wawona: " +
+                                (it.message ?: it.javaClass.simpleName)
+                        }
+                        resumePendingSurface()
+                        return@post
+                    }
                     if (
-                        created == null ||
                         requestedGeneration != generation ||
                         closing ||
                         isFinishing ||
                         isDestroyed ||
                         !surface.isValid
                     ) {
-                        created?.let { closeDisplaySession(it) {} }
-                        result.exceptionOrNull()?.let {
-                            statusView.text = "Не удалось запустить Wawona: " +
-                                (it.message ?: it.javaClass.simpleName)
-                        }
+                        closePending = true
+                        closeDisplaySession(created) { resumePendingSurface() }
                         return@post
                     }
 
@@ -138,8 +145,10 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                 }
             }
         }.onFailure {
+            startPending = false
             statusView.text = "Не удалось поставить запуск в очередь: " +
                 (it.message ?: it.javaClass.simpleName)
+            resumePendingSurface()
         }
     }
 
@@ -220,22 +229,28 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         pollRunnable?.let(mainHandler::removeCallbacks)
         pollRunnable = null
         surfaceView.bindSession(null)
-        val old = displaySession ?: return
+        val old = displaySession
+        if (old == null) {
+            if (startPending) closePending = true
+            return
+        }
         displaySession = null
         closePending = true
         statusView.text = reason + " · закрываю compositor…"
-        closeDisplaySession(old) {
-            closePending = false
-            val nextSurface = pendingSurface
-            val nextWidth = pendingWidth
-            val nextHeight = pendingHeight
-            pendingSurface = null
-            if (
-                !closing && nextSurface != null && nextSurface.isValid &&
-                nextWidth > 0 && nextHeight > 0
-            ) {
-                onSurfaceChanged(nextSurface, nextWidth, nextHeight)
-            }
+        closeDisplaySession(old) { resumePendingSurface() }
+    }
+
+    private fun resumePendingSurface() {
+        closePending = false
+        val nextSurface = pendingSurface
+        val nextWidth = pendingWidth
+        val nextHeight = pendingHeight
+        pendingSurface = null
+        if (
+            !closing && nextSurface != null && nextSurface.isValid &&
+            nextWidth > 0 && nextHeight > 0
+        ) {
+            onSurfaceChanged(nextSurface, nextWidth, nextHeight)
         }
     }
 
