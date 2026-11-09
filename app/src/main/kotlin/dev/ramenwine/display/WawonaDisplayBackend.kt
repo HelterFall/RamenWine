@@ -230,6 +230,8 @@ internal object WawonaProcessSessionGuard {
 internal object WawonaRuntimePaths {
     private const val RUNTIME_DIRECTORY_NAME = "wawona-runtime"
     private const val SOCKET_NAME = "wayland-0"
+    private const val SOCKET_LOCK_NAME = "wayland-0.lock"
+    private const val INSTANCE_LOCK_NAME = "instance.lock"
     private const val ANDROID_SUN_PATH_BYTES = 108
     // Upstream JNI reserves 32 bytes for the longest socket suffix.
     private const val UPSTREAM_SOCKET_SUFFIX_RESERVE = 32
@@ -341,7 +343,7 @@ internal object WawonaRuntimePaths {
             )
         }
         try {
-            Os.unlink(file.absolutePath)
+            Os.remove(file.absolutePath)
         } catch (error: ErrnoException) {
             throw IOException("Could not remove a stale Wawona lock file.", error)
         }
@@ -364,7 +366,7 @@ internal object WawonaRuntimePaths {
             throw IOException("Refusing to unlink a Wayland socket owned by another UID.")
         }
         try {
-            Os.unlink(socket.absolutePath)
+            Os.remove(socket.absolutePath)
         } catch (error: ErrnoException) {
             throw IOException("Could not remove a stale Wawona Wayland socket.", error)
         }
