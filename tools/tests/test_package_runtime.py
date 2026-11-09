@@ -234,6 +234,21 @@ class RuntimePackagerTests(unittest.TestCase):
             package_runtime.ELF_MACHINE_AARCH64,
             executable=True,
         )
+        (backend / "host" / "PROVENANCE.json").write_text(
+            json.dumps({
+                "formatVersion": 1,
+                "target": "android-bionic-arm64",
+                "termuxPackagesCommit": package_runtime.PROOT_TERMUX_PACKAGES_COMMIT,
+                "downstreamPatches": {
+                    "prootTermination": {
+                        "id": package_runtime.PROOT_SIGTERM_PATCH_ID,
+                        "file": "packages/proot/build.sh",
+                        "recipeSha256": "a" * 64,
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
 
         rootfs = backend / "rootfs"
         self._write_elf64(
@@ -352,6 +367,36 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_proot_host_without_sigterm_cleanup_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "host" / "PROVENANCE.json").unlink()
+
+            with self.assertRaisesRegex(ValueError, "SIGTERM cleanup patch provenance"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_old_proot_payload_without_downstream_sigterm_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            manifest_path = backend / "host" / "PROVENANCE.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["downstreamPatches"]["prootTermination"]["id"] = "unpatched-upstream"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "required SIGTERM tracee-cleanup patch"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_malformed_recipe_hash_in_proot_patch_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            manifest_path = backend / "host" / "PROVENANCE.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["downstreamPatches"]["prootTermination"]["recipeSha256"] = "not-a-hash"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "provenance hash is malformed"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_wrong_architecture_in_any_box64_bundled_library(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
