@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -57,6 +58,8 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     private var currentHeight = 0
     private var launchJob: Job? = null
     private var launchSession: GameLaunchSession? = null
+    private val shutdownJobs = mutableSetOf<Job>()
+    private var cleanupShutdownRequested = false
     private var generation = 0
     private var closing = false
 
@@ -183,11 +186,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
 
         val active = launchSession
         launchSession = null
-        if (active != null) {
-            cleanupScope.launch {
-                runCatching { active.stop() }
-            }
-        }
+        scheduleSessionStop(active)
     }
 
     private fun startGame(surface: Surface, widthPx: Int, heightPx: Int) {
@@ -220,9 +219,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
                     latestSurface !== surface ||
                     !surface.isValid
                 ) {
-                    cleanupScope.launch {
-                        runCatching { created.stop() }
-                    }
+                    scheduleSessionStop(created)
                     return@launch
                 }
 
@@ -286,13 +283,52 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
 
         val active = launchSession
         launchSession = null
-        cleanupScope.launch {
-            if (active != null) {
-                runCatching { active.stop() }
+        scheduleSessionStop(active) {
+            if (!isFinishing) finish()
+        }
+    }
+
+    /**
+     * Stops are tracked until the process and its display lease are both released.
+     * The cleanup scope is cancelled only after Activity teardown has started and
+     * every stop (plus any in-flight launch coroutine) has completed.
+     */
+    private fun scheduleSessionStop(
+        session: GameLaunchSession?,
+        onComplete: (() -> Unit)? = null
+    ) {
+        if (session == null) {
+            onComplete?.invoke()
+            cancelCleanupScopeWhenIdle()
+            return
+        }
+
+        val job = cleanupScope.launch {
+            withContext(NonCancellable) {
+                runCatching { session.stop() }
             }
-            withContext(Dispatchers.Main) {
-                if (!isFinishing) finish()
+            if (onComplete != null) {
+                withContext(Dispatchers.Main.immediate) {
+                    onComplete()
+                }
             }
+        }
+        trackShutdownJob(job)
+    }
+
+    private fun trackShutdownJob(job: Job) {
+        shutdownJobs.add(job)
+        job.invokeOnCompletion {
+            mainHandler.post {
+                shutdownJobs.remove(job)
+                cancelCleanupScopeWhenIdle()
+            }
+        }
+    }
+
+    private fun cancelCleanupScopeWhenIdle() {
+        if (cleanupShutdownRequested && shutdownJobs.isEmpty()) {
+            cleanupScope.cancel()
         }
     }
 
@@ -333,17 +369,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
 
         val active = launchSession
         launchSession = null
-        mainScopeCleanup(active)
+
+        cleanupShutdownRequested = true
+        launchJob?.let(::trackShutdownJob)
+        scheduleSessionStop(active)
+        cancelCleanupScopeWhenIdle()
+
         uiScope.cancel()
         super.onDestroy()
-    }
-
-    private fun mainScopeCleanup(active: GameLaunchSession?) {
-        cleanupScope.launch {
-            if (active != null) {
-                runCatching { active.stop() }
-            }
-            cleanupScope.cancel()
-        }
     }
 }
