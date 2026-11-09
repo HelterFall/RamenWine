@@ -200,6 +200,7 @@ fun RamenWineApp() {
                     runtimeInspection = runtimeInspection,
                     nativeDiagnostic = nativeDiagnostic,
                     installingRuntime = installingRuntime,
+                    showDeveloperTools = BuildConfig.DEBUG,
                     onInstallRuntime = {
                         runtimePackagePicker.launch(
                             arrayOf(
@@ -223,7 +224,7 @@ fun RamenWineApp() {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Тестировать Wawona / Wayland")
+                        Text("Тест графики Wawona (для разработчиков)")
                     }
                 }
 
@@ -340,6 +341,7 @@ private fun RuntimeStatusCard(
     runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
     nativeDiagnostic: String,
     installingRuntime: Boolean,
+    showDeveloperTools: Boolean,
     onInstallRuntime: () -> Unit
 ) {
     Card(
@@ -393,16 +395,27 @@ private fun RuntimeStatusCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(
-                onClick = onInstallRuntime,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !installingRuntime
-            ) {
-                Text(if (installingRuntime) "Установка…" else "Установить runtime из ZIP")
+            if (showDeveloperTools) {
+                Text(
+                    "Служебная функция для разработчиков. Готовый Wine/Proton runtime пока не входит в APK. " +
+                        "Обычному пользователю не нужно искать или скачивать ZIP вручную.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = onInstallRuntime,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !installingRuntime
+                ) {
+                    Text(
+                        if (installingRuntime) "Установка…" else
+                            "Импортировать runtime из ZIP (для разработчиков)"
+                    )
+                }
+                HorizontalDivider()
+                Text("Native bridge · диагностика", fontWeight = FontWeight.Bold)
+                Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
             }
-            HorizontalDivider()
-            Text("Native bridge", fontWeight = FontWeight.Bold)
-            Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
