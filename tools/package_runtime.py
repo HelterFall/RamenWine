@@ -71,6 +71,26 @@ ELF_DT_RUNPATH = 29
 PE_MACHINE_AMD64 = 0x8664
 PE_MACHINE_I386 = 0x014C
 
+# Public Android NDK libraries available to an app at the project's minSdk 26.
+# Anything else needed by the Bionic PRoot host must be shipped under host/lib.
+ANDROID_PUBLIC_SYSTEM_LIBRARIES = frozenset({
+    "libaaudio.so",
+    "libandroid.so",
+    "libcamera2ndk.so",
+    "libc.so",
+    "libdl.so",
+    "libEGL.so",
+    "libGLESv2.so",
+    "libjnigraphics.so",
+    "liblog.so",
+    "libm.so",
+    "libmediandk.so",
+    "libnativewindow.so",
+    "libOpenSLES.so",
+    "libvulkan.so",
+    "libz.so",
+})
+
 
 def resolve_guest_file(rootfs: Path, guest_path: str) -> Path:
     """Resolve a guest absolute path, interpreting absolute symlinks inside rootfs."""
@@ -525,6 +545,79 @@ def validate_wine_pe_directory(
     return inspected
 
 
+def validate_android_proot_host_dependency_closure(backend_root: Path) -> int:
+    """Resolve PRoot's complete Bionic ELF dependency closure before packaging."""
+    host_root = (backend_root / "host").resolve(strict=True)
+    library_directory = (host_root / "lib").resolve(strict=True)
+    try:
+        library_directory.relative_to(host_root)
+    except ValueError as error:
+        raise ValueError("PRoot host library directory escapes the host payload.") from error
+
+    libraries: dict[str, Path] = {}
+    for candidate in sorted(library_directory.iterdir(), key=lambda item: item.name):
+        if not candidate.name.startswith("lib") or ".so" not in candidate.name:
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(library_directory)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"PRoot host library is missing or escapes host/lib: {candidate.name}"
+            ) from error
+        if not resolved.is_file():
+            raise ValueError(f"PRoot host library is not a regular file: {candidate.name}")
+        libraries[candidate.name] = candidate
+
+    entry_points = (
+        (host_root / "bin" / "proot", "PRoot executable"),
+        (host_root / "libexec" / "proot" / "loader", "PRoot ELF loader"),
+    )
+    queue: list[tuple[Path, list[str]]] = [
+        (path, [label]) for path, label in entry_points
+    ]
+    visited: set[Path] = set()
+
+    while queue:
+        path, chain = queue.pop(0)
+        try:
+            real_path = path.resolve(strict=True)
+            real_path.relative_to(host_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                "PRoot host dependency is missing or escapes the host payload: "
+                + str(path)
+            ) from error
+        if real_path in visited:
+            continue
+        visited.add(real_path)
+
+        info = read_elf64(real_path, "Android PRoot host ELF " + real_path.name)
+        if info.machine != ELF_MACHINE_AARCH64:
+            raise ValueError(
+                "Android PRoot host ELF dependency has the wrong machine: "
+                + real_path.name
+            )
+        if info.interpreter is not None and info.interpreter != "/system/bin/linker64":
+            raise ValueError(
+                f"Android PRoot host ELF {real_path.name} uses an unexpected interpreter: "
+                f"{info.interpreter}"
+            )
+
+        for dependency in info.needed:
+            if dependency in ANDROID_PUBLIC_SYSTEM_LIBRARIES:
+                continue
+            bundled = libraries.get(dependency)
+            if bundled is None:
+                raise ValueError(
+                    f"unresolved Android PRoot host dependency {dependency!r}; "
+                    f"dependency chain: {' -> '.join(chain + [dependency])}"
+                )
+            queue.append((bundled, chain + [dependency]))
+
+    return len(visited)
+
+
 def validate_glibc_proot_box64(root: Path) -> None:
     """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
     backend_root = root.resolve(strict=True)
@@ -593,6 +686,11 @@ def validate_glibc_proot_box64(root: Path) -> None:
         raise ValueError("PRoot ELF loader is missing or escapes the backend.") from error
     require_executable(proot_loader_real, "PRoot ELF loader")
     require_elf64(proot_loader_real, "PRoot ELF loader", ELF_MACHINE_AARCH64)
+
+    # PRoot runs under Android's linker, not inside the guest rootfs. Check
+    # that its complete Bionic dependency graph is either bundled or public
+    # Android NDK API; guest glibc validation cannot cover this host process.
+    validate_android_proot_host_dependency_closure(backend_root)
 
     rootfs = backend_root / "rootfs"
     try:

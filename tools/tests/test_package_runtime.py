@@ -64,15 +64,16 @@ class RuntimePackagerTests(unittest.TestCase):
         needed: tuple[str, ...] = (),
         rpath: str | None = None,
         runpath: str | None = None,
+        interpreter: str | None = None,
         executable: bool = False,
     ) -> Path:
-        """Write a tiny ELF64 fixture with a real PT_DYNAMIC string table."""
+        """Write a tiny ELF64 fixture with PT_DYNAMIC and an optional PT_INTERP."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        strings = bytearray(b"\x00")
+        strings = bytearray(b"\\x00")
 
         def add_string(value: str) -> int:
             offset = len(strings)
-            strings.extend(value.encode("utf-8") + b"\x00")
+            strings.extend(value.encode("utf-8") + b"\\x00")
             return offset
 
         dynamic_tags: list[tuple[int, int]] = [
@@ -84,17 +85,17 @@ class RuntimePackagerTests(unittest.TestCase):
             for name in needed
         )
         if rpath is not None:
-            dynamic_tags.append(
-                (package_runtime.ELF_DT_RPATH, add_string(rpath))
-            )
+            dynamic_tags.append((package_runtime.ELF_DT_RPATH, add_string(rpath)))
         if runpath is not None:
-            dynamic_tags.append(
-                (package_runtime.ELF_DT_RUNPATH, add_string(runpath))
-            )
+            dynamic_tags.append((package_runtime.ELF_DT_RUNPATH, add_string(runpath)))
         dynamic_tags.append((package_runtime.ELF_DT_NULL, 0))
 
-        dynamic_offset = 64 + 2 * 56
-        string_table_offset = dynamic_offset + 16 * len(dynamic_tags)
+        program_header_count = 3 if interpreter is not None else 2
+        dynamic_offset = 64 + program_header_count * 56
+        dynamic_data = b"".join(
+            struct.pack("<qQ", tag, value) for tag, value in dynamic_tags
+        )
+        string_table_offset = dynamic_offset + len(dynamic_data)
         dynamic_tags[0] = (
             package_runtime.ELF_DT_STRTAB,
             0x1000 + string_table_offset,
@@ -106,12 +107,19 @@ class RuntimePackagerTests(unittest.TestCase):
         dynamic_data = b"".join(
             struct.pack("<qQ", tag, value) for tag, value in dynamic_tags
         )
-        file_size = string_table_offset + len(strings)
+        string_table_offset = dynamic_offset + len(dynamic_data)
+        interpreter_bytes = (
+            interpreter.encode("ascii") + b"\\x00"
+            if interpreter is not None else b""
+        )
+        interpreter_offset = string_table_offset + len(strings)
+        file_size = interpreter_offset + len(interpreter_bytes)
 
-        ident = b"\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
+        ident = b"\\x7fELF" + bytes((2, 1, 1, 0)) + bytes(8)
         header = struct.pack(
             "<16sHHIQQQIHHHHHH",
-            ident, 3, machine, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0,
+            ident, 3, machine, 1, 0, 64, 0, 0, 64, 56,
+            program_header_count, 0, 0, 0,
         )
         load_segment = struct.pack(
             "<IIQQQQQQ",
@@ -135,9 +143,22 @@ class RuntimePackagerTests(unittest.TestCase):
             len(dynamic_data),
             8,
         )
-        path.write_bytes(
-            header + load_segment + dynamic_segment + dynamic_data + strings
-        )
+        data = header + load_segment + dynamic_segment
+        if interpreter is not None:
+            interpreter_segment = struct.pack(
+                "<IIQQQQQQ",
+                package_runtime.ELF_PT_INTERP,
+                4,
+                interpreter_offset,
+                0,
+                0,
+                len(interpreter_bytes),
+                len(interpreter_bytes),
+                1,
+            )
+            data += interpreter_segment
+        data += dynamic_data + strings + interpreter_bytes
+        path.write_bytes(data)
         path.chmod(0o755 if executable else 0o644)
         return path
 
@@ -412,6 +433,53 @@ class RuntimePackagerTests(unittest.TestCase):
             library = backend / "host" / "lib" / "libandroid-shmem.so"
             self._write_elf64(library, package_runtime.ELF_MACHINE_X86_64)
             with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_validates_complete_android_proot_host_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            host_lib = backend / "host" / "lib"
+            self._write_elf64_dynamic(
+                backend / "host" / "bin" / "proot",
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libtalloc.so.2", "libandroid-shmem.so", "liblog.so"),
+                interpreter="/system/bin/linker64",
+                executable=True,
+            )
+            self._write_elf64_dynamic(
+                host_lib / "libtalloc.so.2.5.0",
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libc.so",),
+            )
+            self._write_elf64_dynamic(
+                host_lib / "libandroid-shmem.so",
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libandroid.so",),
+            )
+
+            package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_unresolved_transitive_android_proot_host_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            host_lib = backend / "host" / "lib"
+            self._write_elf64_dynamic(
+                backend / "host" / "bin" / "proot",
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libtalloc.so.2",),
+                interpreter="/system/bin/linker64",
+                executable=True,
+            )
+            self._write_elf64_dynamic(
+                host_lib / "libtalloc.so.2.5.0",
+                package_runtime.ELF_MACHINE_AARCH64,
+                needed=("libmissing-host.so.1",),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "unresolved Android PRoot host dependency.*libmissing-host.so.1",
+            ):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_box64_x64_emulation_library(self) -> None:
