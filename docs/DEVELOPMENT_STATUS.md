@@ -27,7 +27,8 @@
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
 - Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, graceful/forced termination and output draining before the exit callback.
-- GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped.
+- GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
+- Serialized display-session resize/close operations and JVM regression tests for idempotent cleanup and concurrent PRoot stop calls.
 - JVM regression tests for command construction, process output/termination and rejection of placeholder Wayland socket files.
 - A compositor-facing GameDisplayBackend/GameDisplaySession contract that accepts an Android Surface and exports a per-session Wayland endpoint.
 - Android lstat-based validation that the configured Wayland endpoint is an actual Unix-domain socket, not a regular file.
@@ -68,7 +69,7 @@ See Android Display Backend Research for the findings and integration gates. The
 - No Wine, Proton, FEX, Box64, Box86 or PRoot runtime binaries are bundled.
 - No Linux rootfs is built or installed.
 - No signed runtime package metadata or pinned release signing key exists. SHA-256 verifies payload integrity but does not authenticate the publisher.
-- GameLaunchCoordinator can manage a display/process session when a backend is supplied, but no concrete compositor is registered and the coordinator is not yet wired to the Compose UI.
+- GameLaunchCoordinator can manage a display/process session when a backend is supplied, including cleanup on cancellation/stop failure, but no concrete compositor is registered and the coordinator is not yet wired to the Compose UI.
 - Process teardown has not been validated against Android PRoot/Wine child-process behavior on a device.
 - The builder reserves per-game prefix directories, but Wine prefix initialization (for example, through wineboot) and first-start validation are not implemented.
 - No Android game surface is connected to a Wine display/window backend.

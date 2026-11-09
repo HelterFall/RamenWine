@@ -116,6 +116,65 @@ class ProotWineProcessSupervisorTest {
         }
     }
 
+    @Test
+    fun concurrentStopCallsShareOneExitCallback() = runBlocking {
+        val fixture = ScriptFixture(
+            """
+            import os
+            import signal
+            import time
+
+            stopping = False
+
+            def handle_sigterm(_signal, _frame):
+                global stopping
+                os.write(1, b"stopping\n")
+                stopping = True
+
+            signal.signal(signal.SIGTERM, handle_sigterm)
+            os.write(1, b"ready\n")
+            while not stopping:
+                time.sleep(0.01)
+            """.trimIndent()
+        )
+        try {
+            val output = CopyOnWriteArrayList<String>()
+            val ready = CountDownLatch(1)
+            val exitCount = AtomicInteger()
+            val exit = CompletableDeferred<Int>()
+            val session = ProotWineProcessSupervisor(Dispatchers.Unconfined).start(
+                command = fixture.command(),
+                onOutput = { line ->
+                    output += line
+                    if (line == "ready") ready.countDown()
+                },
+                onExit = { code ->
+                    exitCount.incrementAndGet()
+                    exit.complete(code)
+                }
+            )
+
+            assertTrue(
+                "The fixture process did not become ready. Output: $output",
+                ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            )
+
+            val stopResults = kotlinx.coroutines.coroutineScope {
+                val first = kotlinx.coroutines.async { session.stop(3_000L) }
+                val second = kotlinx.coroutines.async { session.stop(3_000L) }
+                listOf(first.await(), second.await())
+            }
+
+            assertEquals(listOf(0, 0), stopResults)
+            assertEquals(0, withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() })
+            assertEquals(1, exitCount.get())
+            assertTrue(output.contains("stopping"))
+            assertFalse(session.isAlive())
+        } finally {
+            fixture.close()
+        }
+    }
+
     private class ScriptFixture(scriptBody: String) : AutoCloseable {
         private val root = Files.createTempDirectory("ramenwine-process-test").toFile()
         private val executable = File(root, "fake-proot").apply {

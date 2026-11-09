@@ -6,9 +6,8 @@ import android.view.Surface
 import dev.ramenwine.display.GameDisplayBackend
 import dev.ramenwine.display.GameDisplaySession
 import dev.ramenwine.library.ImportedGame
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /**
@@ -87,28 +86,40 @@ class GameLaunchSession internal constructor(
     }
 
     suspend fun stop(gracePeriodMillis: Long = 1_500L): Int {
-        val exitCode = processSession.stop(gracePeriodMillis)
-        displayLease.close()
-        return exitCode
+        return try {
+            processSession.stop(gracePeriodMillis)
+        } finally {
+            // Always release the Android surface/compositor, even if the
+            // process cannot be stopped or the caller is being cancelled.
+            withContext(NonCancellable) {
+                displayLease.close()
+            }
+        }
     }
 }
 
 internal class DisplaySessionLease(
     private val session: GameDisplaySession
 ) {
-    private val closed = AtomicBoolean(false)
-    private val failure = AtomicReference<Throwable?>(null)
+    private var closed = false
+
+    @Volatile
+    private var failure: Throwable? = null
 
     val closeFailure: Throwable?
-        get() = failure.get()
+        get() = failure
 
+    @Synchronized
     fun resize(widthPx: Int, heightPx: Int) {
-        check(!closed.get()) { "The game display session is already closed." }
+        check(!closed) { "The game display session is already closed." }
         session.resize(widthPx, heightPx)
     }
 
+    @Synchronized
     fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        runCatching { session.close() }.onFailure(failure::set)
+        if (closed) return
+        closed = true
+        runCatching { session.close() }
+            .onFailure { failure = it }
     }
 }
