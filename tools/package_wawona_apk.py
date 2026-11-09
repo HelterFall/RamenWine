@@ -35,6 +35,9 @@ ROOT_LIBRARIES = (
     "libGLESv2_angle.so",
 )
 OPTIONAL_ROOT_LIBRARIES = (
+    # Wawona's JNI SHM demo wrapper calls dlopen() on this library by name;
+    # it is not a DT_NEEDED dependency of libwawona.so.
+    "libweston_simple_shm.so",
     # Wawona can use this as its bundled offscreen ICD for nested clients.
     # It is not a substitute for Android's host Vulkan WSI driver.
     "libvk_swiftshader.so",
