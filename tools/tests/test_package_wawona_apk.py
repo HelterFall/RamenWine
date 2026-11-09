@@ -328,6 +328,31 @@ ELF Header:
             self.assertFalse((output / "wawona/about/README.txt").exists())
             self.assertEqual("rules", (output / "wawona/xkb/rules/evdev").read_text())
 
+    def test_hashes_each_extracted_asset_for_android_integrity_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            asset = root / "wawona" / "xkb" / "rules" / "evdev"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"wayland keymap rules")
+
+            hashes = package_wawona_apk.hash_extracted_assets(
+                root,
+                ["wawona/xkb/rules/evdev"],
+            )
+
+            self.assertEqual(
+                {"wawona/xkb/rules/evdev": package_wawona_apk.sha256_file(asset)},
+                hashes,
+            )
+
+    def test_rejects_missing_file_in_extracted_asset_hash_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "extracted Wawona asset is missing"):
+                package_wawona_apk.hash_extracted_assets(
+                    Path(temporary),
+                    ["wawona/fonts/truetype/missing.ttf"],
+                )
+
     def test_rejects_asset_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             apk = Path(temporary) / "wawona.apk"
