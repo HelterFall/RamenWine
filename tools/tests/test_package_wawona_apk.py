@@ -96,7 +96,7 @@ ELF Header:
 
 
     def test_accepts_all_jni_exports_required_by_the_kotlin_adapter(self) -> None:
-        output = "\\n".join(
+        output = "\n".join(
             f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
             f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
             for index, method in enumerate(
@@ -107,7 +107,7 @@ ELF Header:
         package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
 
     def test_rejects_undefined_jni_symbol_as_a_missing_export(self) -> None:
-        output = "\\n".join(
+        output = "\n".join(
             f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT "
             f"{'UND' if method == 'nativePrepareShellEnvironment' else '12'} "
             f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
@@ -126,7 +126,7 @@ ELF Header:
         output = (
             "  1: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
             + package_wawona_apk.WAWONA_JNI_CLASS_PREFIX
-            + "nativeInit\\n"
+            + "nativeInit\n"
         )
         with self.assertRaisesRegex(
             ValueError,
@@ -355,7 +355,7 @@ ELF Header:
 
         commands = []
         methods = package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS
-        dynamic_symbols = "\\n".join(
+        dynamic_symbols = "\n".join(
             f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
             f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
             for index, method in enumerate(methods, start=1)
@@ -370,7 +370,7 @@ ELF Header:
         def fake_readelf(command, **_kwargs):
             commands.append(command)
             output = (
-                elf_metadata + "\\n" + dynamic_symbols
+                elf_metadata + "\n" + dynamic_symbols
                 if "--dyn-syms" in command
                 else elf_metadata
             )
