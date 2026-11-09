@@ -119,6 +119,28 @@ ELF Header:
                 lambda filename, _data: dependencies[filename],
             )
 
+    def test_keeps_dlopen_only_weston_shm_smoke_client(self) -> None:
+        libraries = {
+            "libwawona.so": b"wawona",
+            "libEGL_angle.so": b"angle-egl",
+            "libGLESv2_angle.so": b"angle-gles",
+            "libweston_simple_shm.so": b"weston-shm",
+        }
+        dependencies = {
+            "libwawona.so": ([], "libwawona.so"),
+            "libEGL_angle.so": ([], "libEGL_angle.so"),
+            "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
+            "libweston_simple_shm.so": (
+                ["libandroid.so", "liblog.so", "libm.so"],
+                "libweston_simple_shm.so",
+            ),
+        }
+        selected = package_wawona_apk.collect_native_closure(
+            libraries,
+            lambda filename, _data: dependencies[filename],
+        )
+        self.assertIn("libweston_simple_shm.so", selected)
+
     def test_keeps_optional_swiftshader_icd_when_present(self) -> None:
         libraries = {
             "libwawona.so": b"wawona",
