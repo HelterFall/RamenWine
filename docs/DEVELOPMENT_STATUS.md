@@ -27,6 +27,7 @@
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
 - PRoot launch preflight now requires both the ARM64 glibc loader (for ARM64 Linux Box64) and the x86-64 glibc loader (for Wine), plus both halves of Wine's Wayland driver; Android/Bionic `LD_LIBRARY_PATH` is reserved for the PRoot host and guest x86-64 libraries use `BOX64_LD_LIBRARY_PATH`.
+- PRoot runtime packaging now requires the separately-installed ARM64 helper at `host/libexec/proot/loader` and passes its app-private path through `PROOT_LOADER`; this avoids the Termux build prefix being baked into the executable.
 - Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback.
 - WinePrefixInitializer that runs Box64 → wineboot --init for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
 - GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.

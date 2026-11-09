@@ -98,6 +98,7 @@ object ProotWineCommandBuilder {
         )
 
         val proot = executableFile(backendRoot, "host/bin/proot")
+        val prootLoader = executableFile(backendRoot, "host/libexec/proot/loader")
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
@@ -242,6 +243,7 @@ object ProotWineCommandBuilder {
         val environment = linkedMapOf(
             // These variables apply to the Android/Bionic PRoot host only.
             "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
+            "PROOT_LOADER" to prootLoader.canonicalPath,
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
         )
 

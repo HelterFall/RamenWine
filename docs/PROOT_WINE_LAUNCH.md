@@ -14,7 +14,10 @@ The runtime package must include at least:
 host/
   bin/
     proot                  # ARM64 Android/Bionic executable
-  lib/                     # Bionic dependencies used only by the PRoot host process
+  lib/                     # Bionic dependencies (including libtalloc/libandroid-shmem) for PRoot
+  libexec/
+    proot/
+      loader               # ARM64 PRoot ELF helper; selected with PROOT_LOADER
 rootfs/                    # ARM64 Linux distribution with glibc
   lib/
     ld-linux-aarch64.so.1  # ARM64 glibc ELF interpreter for Box64
@@ -45,7 +48,7 @@ These pins define the first reproducible build attempt. They are source inputs, 
 
 | Component | Source pin | Build / package note |
 |---|---|---|
-| Android PRoot host | [Termux PRoot v5.1.107.102](https://github.com/termux/proot/tree/v5.1.107.102), commit `52d65a4dc140ca554d241a1438ddd4f6b00c9813` | Use the Android-patched Termux fork; its package recipe builds with `PROOT_WITH_LIBANDROID_SHMEM=true` and declares `libandroid-shmem` + `libtalloc` host dependencies. The recipe pins the source archive SHA-256 to `30d12a6e2cc4147123756ff58edea262d3083bbc238c12d0ab9b39e3d1c40852`. |
+| Android PRoot host | [Termux PRoot v5.1.107.102](https://github.com/termux/proot/tree/v5.1.107.102), commit `52d65a4dc140ca554d241a1438ddd4f6b00c9813` | Use the Android-patched Termux fork; its package recipe builds with `PROOT_WITH_LIBANDROID_SHMEM=true` and declares `libandroid-shmem` + `libtalloc` host dependencies. The recipe pins the source archive SHA-256 to `30d12a6e2cc4147123756ff58edea262d3083bbc238c12d0ab9b39e3d1c40852`. Build with `PROOT_UNBUNDLE_LOADER=<staging>/host/libexec/proot`, which installs `loader` there, then set the runtime host variable `PROOT_LOADER=<backend>/host/libexec/proot/loader` to override the Termux prefix path compiled into the binary. |
 | PRoot host support libraries | [libandroid-shmem v0.7](https://github.com/termux/libandroid-shmem/tree/v0.7) and [talloc 2.5.0](https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz) | Build/package only the ARM64 Android/Bionic libraries needed by PRoot. Do not expose these Bionic libraries as guest glibc libraries. |
 | ARM64 glibc rootfs seed | [Ubuntu Base 24.04.5 ARM64](https://cdimages.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz) | SHA-256: `a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2`. This is the official minimal base archive, not the completed Wine/Box64 runtime. |
 | Box64 guest | [Box64 v0.4.4](https://github.com/ptitSeb/box64/tree/2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a), commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a` | Build inside ARM64 Linux/PRoot with the upstream ARM64/PRoot configuration (`ARM64=1`, `ARM_DYNAREC=ON`, `BAD_SIGNAL=ON`, GCC). Output belongs in the ARM64 glibc rootfs. |
@@ -76,7 +79,7 @@ The launch environment uses:
 - `TMPDIR=/tmp`
 The environment is deliberately split into two layers:
 
-- Android/PRoot host environment: `LD_LIBRARY_PATH=<backend>/host/lib` for Bionic PRoot dependencies and `PROOT_TMP_DIR=<app-private host cache path>`. These are passed to the PRoot process by `ProcessBuilder`.
+- Android/PRoot host environment: `LD_LIBRARY_PATH=<backend>/host/lib` for Bionic PRoot dependencies, `PROOT_LOADER=<backend>/host/libexec/proot/loader` for the separately-installed PRoot ELF helper, and `PROOT_TMP_DIR=<app-private host cache path>`. These are passed to the PRoot process by `ProcessBuilder`; none are passed into the guest Wine environment.
 - ARM64 Linux guest environment: set by the guest `/usr/bin/env` immediately before Box64. It includes `LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu`, `BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix`, `WINEDLLPATH` for the packaged Wine driver directories, `WINEPREFIX`, `HOME`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `WINEARCH=win64`, `LANG`, `LC_ALL`, `PATH` and `BOX64_NOBANNER=1`.
 
 The guest `env -i` invocation discards the entire inherited environment before applying only the explicit ARM64 glibc, Box64, Wine, Wayland and locale variables. This prevents Android/Bionic paths and unrelated host settings from leaking into Wine or the game process. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.

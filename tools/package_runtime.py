@@ -251,6 +251,15 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/system/bin/linker64",
     )
 
+    proot_loader_path = backend_root / "host" / "libexec" / "proot" / "loader"
+    try:
+        proot_loader_real = proot_loader_path.resolve(strict=True)
+        proot_loader_real.relative_to(backend_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot ELF loader is missing or escapes the backend.") from error
+    require_executable(proot_loader_real, "PRoot ELF loader")
+    require_elf64(proot_loader_real, "PRoot ELF loader", ELF_MACHINE_AARCH64)
+
     rootfs = backend_root / "rootfs"
     if not rootfs.is_dir():
         raise ValueError("ARM64 Linux/glibc rootfs directory is missing.")

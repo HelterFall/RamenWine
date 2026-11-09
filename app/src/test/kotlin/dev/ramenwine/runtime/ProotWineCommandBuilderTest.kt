@@ -25,6 +25,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertEquals(fixture.prootLoader.absolutePath, command.environment["PROOT_LOADER"])
             assertEquals(fixture.prootTempDirectory.absolutePath, command.environment["PROOT_TMP_DIR"])
             assertFalse(command.environment.containsKey("BOX64_LD_LIBRARY_PATH"))
             assertFalse(command.environment.containsKey("WINEDLLPATH"))
@@ -307,6 +308,7 @@ class ProotWineCommandBuilderTest {
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
+        val prootLoader = executable(backendRoot, "host/libexec/proot/loader")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val guestEnv = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")

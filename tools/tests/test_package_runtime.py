@@ -78,6 +78,11 @@ class RuntimePackagerTests(unittest.TestCase):
             "/system/bin/linker64",
             executable=True,
         )
+        self._write_elf64(
+            backend / "host" / "libexec" / "proot" / "loader",
+            package_runtime.ELF_MACHINE_AARCH64,
+            executable=True,
+        )
 
         rootfs = backend / "rootfs"
         self._write_elf64(
@@ -122,6 +127,13 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_runtime_missing_proot_loader(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "host" / "libexec" / "proot" / "loader").unlink()
+            with self.assertRaisesRegex(ValueError, "PRoot ELF loader is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_box64_built_for_android_bionic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

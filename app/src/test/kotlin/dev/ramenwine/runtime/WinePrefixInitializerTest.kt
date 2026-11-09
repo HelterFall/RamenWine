@@ -92,6 +92,7 @@ class WinePrefixInitializerTest {
         ).apply { mkdirs() }
         private val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         private val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        private val prootLoader = executable(backendRoot, "host/libexec/proot/loader")
         private val proot = executable(
             backendRoot,
             "host/bin/proot",
