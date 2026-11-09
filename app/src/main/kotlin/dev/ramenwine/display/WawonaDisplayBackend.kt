@@ -63,7 +63,9 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                 WawonaNative.nativeSetDisplayDensity(
                     appContext.resources.displayMetrics.density
                 )
-                WawonaNative.nativeSetHostSeatMode(0) // Multi-touch seat mode.
+                // Touch is converted to mouse by WawonaSurfaceView; don't emit a
+                // second pointer stream from Wawona's native touch emulation.
+                WawonaNative.nativeSetTouchPointerEmulation(false)
 
                 WawonaNative.nativeSetSurface(surface)
                 // Mirror WawonaSettings' clean-install defaults so the host
