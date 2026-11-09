@@ -103,6 +103,15 @@ class WinePrefixInitializerTest {
             executable(rootfs, "usr/bin/box64")
             executable(rootfs, "usr/bin/wine")
             executable(rootfs, "usr/bin/wineboot")
+            regular(rootfs, "lib64/ld-linux-x86-64.so.2")
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+            )
             File(displayDirectory, "wayland-0").writeText("test socket placeholder")
             val gameDirectory = File(filesDirectory, "games/$gameId").apply { mkdirs() }
             File(gameDirectory, "game.exe").writeBytes(byteArrayOf(0x4D, 0x5A))
@@ -133,6 +142,13 @@ class WinePrefixInitializerTest {
 
         override fun close() {
             root.deleteRecursively()
+        }
+
+        private fun regular(parent: File, relativePath: String): File {
+            val file = File(parent, relativePath)
+            file.parentFile?.mkdirs()
+            file.writeText("fixture runtime file")
+            return file
         }
 
         private fun executable(
