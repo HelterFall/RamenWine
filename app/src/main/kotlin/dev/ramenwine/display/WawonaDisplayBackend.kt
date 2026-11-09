@@ -40,7 +40,7 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
         try {
             runtimeDirectory = WawonaRuntimePaths.prepare(appContext.cacheDir)
 
-            WawonaProcessSessionGuard.withLease(leaseToken) {
+            WawonaProcessSessionGuard.withLease(inputLeaseToken) {
                 assets.ensureInstalled()
 
                 // Upstream JNI sets WAWONA_FILES_DIR, XDG_RUNTIME_DIR and
@@ -100,7 +100,7 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
             )
         } catch (error: Throwable) {
             runCatching {
-                WawonaProcessSessionGuard.withLease(leaseToken) {
+                WawonaProcessSessionGuard.withLease(inputLeaseToken) {
                     if (nativeInitializationAttempted) {
                         try {
                             // nativeInit creates the Vulkan instance before the
@@ -162,16 +162,20 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
     }
 }
 
+internal interface WawonaInputSessionLease {
+    val inputLeaseToken: Any
+}
+
 private class WawonaGameDisplaySession(
     private val surface: Surface,
     override val endpoint: WaylandDisplayEndpoint,
-    private val leaseToken: Any
-) : GameDisplaySession {
+    override val inputLeaseToken: Any
+) : GameDisplaySession, WawonaInputSessionLease {
     private var closed = false
 
     override fun resize(widthPx: Int, heightPx: Int) {
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
-        WawonaProcessSessionGuard.withLease(leaseToken) {
+        WawonaProcessSessionGuard.withLease(inputLeaseToken) {
             check(!closed) { "The Wawona display session is already closed." }
             WawonaNative.nativeResizeSurface(widthPx, heightPx)
             WawonaNative.nativeSyncOutputSize(widthPx, heightPx)
@@ -179,7 +183,7 @@ private class WawonaGameDisplaySession(
     }
 
     override fun close() {
-        WawonaProcessSessionGuard.closeLease(leaseToken) {
+        WawonaProcessSessionGuard.closeLease(inputLeaseToken) {
             if (closed) return@closeLease
             closed = true
             try {
@@ -209,6 +213,13 @@ internal object WawonaProcessSessionGuard {
     fun <T> withLease(token: Any, block: () -> T): T {
         check(activeLease === token) { "The Wawona compositor lease is no longer active." }
         return block()
+    }
+
+    @Synchronized
+    fun runIfActive(token: Any, block: () -> Unit): Boolean {
+        if (activeLease !== token) return false
+        block()
+        return true
     }
 
     @Synchronized
