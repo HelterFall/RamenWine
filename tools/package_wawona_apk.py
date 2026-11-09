@@ -42,6 +42,44 @@ ROOT_LIBRARIES = (
     "libEGL_angle.so",
     "libGLESv2_angle.so",
 )
+
+# These are the native methods declared by RamenWine's minimal Kotlin adapter.
+# Keep this list in sync with WawonaNative.kt; checking the actual .dynsym table
+# prevents an UnsatisfiedLinkError on the first compositor start.
+WAWONA_JNI_CLASS_PREFIX = "Java_com_aspauldingcode_wawona_WawonaNative_"
+REQUIRED_WAWONA_JNI_METHODS = (
+    "nativePrepareShellEnvironment",
+    "nativeInit",
+    "nativeIsCompositorReady",
+    "nativeSetSurface",
+    "nativeDestroySurface",
+    "nativeResizeSurface",
+    "nativeSyncOutputSize",
+    "nativeShutdown",
+    "nativeSetDisplayDensity",
+    "nativeSetTouchPointerEmulation",
+    "nativeApplySettings",
+    "nativeApplyHostKeyLevels",
+    "nativeReloadHostKeymap",
+    "nativeTouchDown",
+    "nativeTouchUp",
+    "nativeTouchMotion",
+    "nativeTouchCancel",
+    "nativeTouchFrame",
+    "nativeRunWestonSimpleSHM",
+    "nativeStopWestonSimpleSHM",
+    "nativeIsWestonSimpleSHMRunning",
+    "nativeKeyEvent",
+    "nativePointerMotion",
+    "nativePointerButton",
+    "nativePointerEnter",
+    "nativePointerLeave",
+    "nativePointerAxis",
+    "nativeKeyboardFocus",
+)
+WAWONA_JNI_EXPORT_RE = re.compile(
+    r"\\b" + re.escape(WAWONA_JNI_CLASS_PREFIX) + r"(native[A-Za-z0-9_]+)\\b"
+)
 OPTIONAL_ROOT_LIBRARIES = (
     # Wawona's JNI SHM demo wrapper calls dlopen() on this library by name;
     # it is not a DT_NEEDED dependency of libwawona.so.
@@ -212,6 +250,16 @@ def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | No
     return needed, soname_match.group(1) if soname_match else None
 
 
+def validate_wawona_jni_exports(readelf_output: str, filename: str) -> None:
+    """Require every JNI method declared by RamenWine's WawonaNative adapter."""
+    exported = set(WAWONA_JNI_EXPORT_RE.findall(readelf_output))
+    missing = sorted(set(REQUIRED_WAWONA_JNI_METHODS) - exported)
+    if missing:
+        raise ValueError(
+            f"{filename} is missing required Wawona JNI exports: " + ", ".join(missing)
+        )
+
+
 def collect_native_closure(
     apk_libraries: Mapping[str, bytes],
     read_dependencies: Callable[[str, bytes], tuple[list[str], str | None]],
@@ -282,8 +330,17 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
         with tempfile.NamedTemporaryFile(prefix="ramenwine-", suffix=".so") as temp:
             temp.write(data)
             temp.flush()
+            readelf_command = [
+                readelf,
+                "--wide",
+                "--file-header",
+                "--program-headers",
+                "--dynamic",
+            ]
+            if filename == "libwawona.so":
+                readelf_command.append("--dyn-syms")
             result = subprocess.run(
-                [readelf, "--wide", "--file-header", "--program-headers", "--dynamic", temp.name],
+                [*readelf_command, temp.name],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -294,6 +351,8 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
             )
         validate_arm64_elf_header(result.stdout, filename)
         validate_arm64_elf_16kb_alignment(result.stdout, filename)
+        if filename == "libwawona.so":
+            validate_wawona_jni_exports(result.stdout, filename)
         return parse_dynamic_dependencies(result.stdout)
 
     return read_dependencies
