@@ -217,7 +217,7 @@ fun RamenWineApp() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Development build · Phase 1: import and EXE inspection",
+                        text = "Тестовая сборка · разработка Windows-движка",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
