@@ -253,6 +253,38 @@ fun RamenWineApp() {
                     ) {
                         Text("Тест графики Wawona (для разработчиков)")
                     }
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(
+                                        GamePlayerActivity.EXTRA_WAYLAND_PROBE_ARCHITECTURE,
+                                        "x86-64"
+                                    )
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = prootRuntimeReady
+                    ) {
+                        Text("Тест Windows + Wayland (x64)")
+                    }
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(
+                                        GamePlayerActivity.EXTRA_WAYLAND_PROBE_ARCHITECTURE,
+                                        "x86"
+                                    )
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = prootRuntimeReady
+                    ) {
+                        Text("Тест Windows + Wayland (x86)")
+                    }
                 }
 
                 if (installingRuntime) {
