@@ -158,7 +158,7 @@ payload/
     lib64/ld-linux-x86-64.so.2
     usr/bin/box64
     usr/bin/wine
-    usr/bin/wineboot
+    usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe
     usr/lib/x86_64-linux-gnu/wine/...
 ```
 
@@ -213,7 +213,7 @@ Example manifest:
       "target": "usr/bin"
     },
     {
-      "path": "rootfs/usr/bin/wineboot",
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
       "target": "wine"
     }
   ]

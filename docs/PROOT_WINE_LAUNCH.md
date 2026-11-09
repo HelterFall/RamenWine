@@ -27,7 +27,6 @@ rootfs/                    # ARM64 Linux distribution with glibc
     env                    # ARM64 coreutils env used to create a clean guest environment
     box64                  # ARM64 Linux/glibc Box64 executable
     wine                   # x86-64 Wine 11 unified WoW64 loader
-    wineboot               # Wine prefix initializer (entry point for the unified loader)
   usr/lib/x86_64-linux-gnu/wine/
     x86_64-unix/
       winewayland.so       # x86-64 Unix side of Wine's Wayland driver
@@ -40,7 +39,7 @@ RamenWine normalizes the runtime package to these paths. The rootfs is **ARM64 g
 
 The command builder refuses to launch if either glibc loader or either Wayland driver half is missing. The package build must include the ARM64 dependency closure for Box64, the x86-64 dependency closure for Wine and its Wayland Unix driver, and the Wayland client/protocol libraries selected by that Wine build. Wine's PE Wayland driver must be packaged as well.
 
-A runtime inventory that omits any required executable is not launch-ready. The command builder checks the PRoot host executable, the host library directory, and the Box64/Wine executables directly before constructing a process command. Prefix initialization additionally requires an executable `/usr/bin/wineboot` entry; a relative symlink to the unified Wine loader is acceptable when included safely in the runtime package.
+The runtime preflight checks the PRoot host, Box64/Wine ELF files and both Wayland drivers. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
 
 ## Pinned upstream build inputs (not yet assembled or device-validated)
 
@@ -53,7 +52,7 @@ These pins define the first reproducible build attempt. They are source inputs, 
 | PRoot host support libraries | [libandroid-shmem v0.7](https://github.com/termux/libandroid-shmem/tree/v0.7) and [talloc 2.5.0](https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz) | Termux package recipes at the pinned build-system commit set source SHA-256 values: libandroid-shmem `1e5ff8459bc0a8c229dd8a94b27d119987e09ef3414331c2b5ebfff20b98e867`; talloc `912afa237510ae542a7733998eb18a12bcda35ab6729c8e2ddb43e8d0ebab007`. Build/package only the ARM64 Android/Bionic libraries needed by PRoot. |
 | ARM64 glibc rootfs seed | [Ubuntu Base 24.04.5 ARM64](https://cdimages.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz) | SHA-256: `a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2`. This is the official minimal base archive, not the completed Wine/Box64 runtime. |
 | Box64 guest | [Box64 v0.4.4](https://github.com/ptitSeb/box64/tree/2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a), commit `2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a` | Build inside ARM64 Linux/PRoot with the upstream ARM64/PRoot configuration (`ARM64=1`, `ARM_DYNAREC=ON`, `BAD_SIGNAL=ON`, GCC). Output belongs in the ARM64 glibc rootfs. |
-| Wine guest | [Wine 11.0 source](https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz) | SHA-256: `c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701`. Build x86-64 Unix Wine with PE targets `--enable-archs=i386,x86_64` and the corresponding MinGW/LLVM-MinGW cross-compilers to support the new WoW64 mode. Do not use `--enable-win64` alone: Wine configure describes it as a Win64-only emulator that will not run Win32 binaries. Install the normal Wine build outputs and explicitly verify the executable `/usr/bin/wine` and `/usr/bin/wineboot` entries; there is no `--enable-tools` configure option. Install Wayland development headers and libraries before configure, do not pass `--without-wayland`, and fail the build if either `winewayland.so` or `winewayland.drv` is absent. |
+| Wine guest | [Wine 11.0 source](https://dl.winehq.org/wine/source/11.0/wine-11.0.tar.xz) | SHA-256: `c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701`. Build x86-64 Unix Wine with PE targets `--enable-archs=i386,x86_64` and matching MinGW/LLVM-MinGW cross-compilers for new WoW64. Do not use `--enable-win64` alone. Configure with `--prefix=/usr --bindir=/usr/bin --libdir=/usr/lib/x86_64-linux-gnu`; verify `/usr/bin/wine` is the Linux ELF loader and `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe` is an AMD64 PE program. Wine source declares `MODULE = wineboot.exe`, not a Linux launcher. Install Wayland development headers before configure, do not pass `--without-wayland`, and fail the build if either Wayland driver output is missing. |
 
 Wine 11.0 completes the new WoW64 implementation and replaces the separate `wine64` loader with one `wine` loader; the runtime must therefore build both i386 and x86-64 PE targets while retaining the x86-64 Unix ABI used by Box64. The source-build gate checks the generated driver files and the installed Wine entry points rather than trusting configure options alone.
 
@@ -137,12 +136,12 @@ PRoot's documented CLI supports the rootfs, bind and initial-working-directory o
 Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither \`system.reg\` nor \`user.reg\` exists, it builds a separate PRoot command:
 
 \`\`\`text
-/usr/bin/env -i <guest environment assignments> /usr/bin/box64 /usr/bin/wineboot --init
+/usr/bin/env -i <guest environment assignments> /usr/bin/box64 /usr/bin/wine /usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe --init
 \`\`\`
 
 The initializer serializes concurrent requests, tags output with \`[wineboot]\`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both \`system.reg\` and \`user.reg\` exist. If exactly one registry file exists, the prefix is treated as partial and fails closed rather than being overwritten automatically.
 
-The package must expose Wineboot at \`/usr/bin/wineboot\`; standard Wine package layouts provide that entry point, often as a symlink to the unified \`wine\` loader. The \`--init\` option creates the initial prefix. See the [Wineboot manual](https://manpages.debian.org/testing/wine-development/wineboot.1.en.html) and the [Arch Wine file list](https://archlinux.org/packages/extra/x86_64/wine/files/).
+Wineboot is a PE program (`MODULE = wineboot.exe` in Wine 11), not a Linux ELF launcher. RamenWine places it under `x86_64-windows` and passes its full path to `/usr/bin/wine`, which loads it with `--init`. The initializer accepts success only after both registry files exist.
 
 The JVM tests use a controlled fake PRoot process that creates the expected registry files. This verifies orchestration, timeout/error gating and concurrency, but it is not proof that a real Wine build can initialize a prefix in the final rootfs.
 
