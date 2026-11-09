@@ -1,7 +1,18 @@
-name: Build Android PRoot host payload (manual runtime only)
+name: Build Android PRoot host payload (runtime artifact only)
 
 on:
+  push:
+    branches:
+      - feature/wawona-shm-smoke
+    paths:
+      - ".github/workflows/build-proot-host-runtime.yml"
+      - "tools/assemble_proot_host.py"
+      - "tools/tests/test_assemble_proot_host.py"
   workflow_dispatch:
+
+concurrency:
+  group: ramenwine-proot-host-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -36,7 +47,7 @@ jobs:
       - name: Build PRoot and its Android dependencies for ARM64
         run: |
           cd termux-packages
-          TERMUX_BUILDER_IMAGE_NAME=ramenwine-termux-package-builder:29a6879366dad92650fb7db7719c5a4b1b9d55f1 \
+          TERMUX_BUILDER_IMAGE_NAME=ramenwine-termux-package-builder:29a6879366dad92650fb7db7719c5a4b1b9 \
           CONTAINER_NAME=ramenwine-termux-package-builder \
             ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot
 
