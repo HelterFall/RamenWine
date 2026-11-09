@@ -72,10 +72,15 @@ object ProotWineCommandBuilder {
         requireContained(backendRoot, rootfs, "Linux rootfs")
         requireDirectory(rootfs, "Linux rootfs")
 
-        // Box64 itself is an ARM64 Android/Bionic executable. The Wine loader
-        // and its Wayland driver are x86-64 Linux files inside the guest rootfs.
-        // Validate both driver halves before launching: the PE .drv is loaded
-        // by Wine, while the Unix .so links against the guest Wayland libraries.
+        // The guest rootfs is ARM64 Linux/glibc: Box64 is an ARM64 Linux
+        // executable and needs the ARM64 loader before it can start. Box64 then
+        // loads x86-64 Wine and its guest libraries through the x86-64 loader.
+        // Check both ABI loaders and both halves of Wine's Wayland driver.
+        runtimeFile(
+            rootfs,
+            ARM64_GLIBC_LOADER_PATH,
+            "ARM64 glibc loader"
+        )
         runtimeFile(
             rootfs,
             GLIBC_LOADER_PATH,
@@ -344,6 +349,7 @@ object ProotWineCommandBuilder {
     }
 
     private const val MAX_UNIX_SOCKET_PATH_BYTES = 108
+    private const val ARM64_GLIBC_LOADER_PATH = "lib/ld-linux-aarch64.so.1"
     private const val GLIBC_LOADER_PATH = "lib64/ld-linux-x86-64.so.2"
     private const val WINE_WAYLAND_UNIX_DRIVER_PATH =
         "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
