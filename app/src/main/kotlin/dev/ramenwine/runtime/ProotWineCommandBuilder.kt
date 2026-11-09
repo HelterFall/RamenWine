@@ -254,6 +254,8 @@ object ProotWineCommandBuilder {
             "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
             "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
             "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
+            // Wine 11 reads WINEARCH=wow64 to force its 64-bit WoW64 path.
+            // The resulting prefix is still a 64-bit prefix (#arch=win64).
             "WINEARCH" to "wow64",
             "LANG" to request.locale,
             "LC_ALL" to request.locale,

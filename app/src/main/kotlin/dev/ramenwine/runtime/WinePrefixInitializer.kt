@@ -16,6 +16,8 @@ import kotlinx.coroutines.sync.withLock
  * Creates a new per-game Wine prefix before the selected Windows executable is
  * started. A prefix is ready only when both Wine registry files are present
  * and system.reg marks it as a 64-bit (win64) prefix for Wine 11 WoW64.
+ * WINEARCH=wow64 selects the loader mode; it does not change the required
+ * #arch=win64 prefix marker.
  *
  * The prefix lock prevents two launches from running wineboot into the same
  * directory at the same time.
