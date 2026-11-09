@@ -26,7 +26,8 @@
 - Python tests for archive output, traversal, case collisions, virtual mount symlinks and symlink escape.
 - JVM tests for PE parsing, game path validation and runtime manifest/symlink states.
 - PRoot/Box64/Wine command construction as a validated argument vector (no shell), including per-game private directories, host/guest path checks, Wayland endpoint preconditions and a Wine 11 unified-loader path.
-- Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, graceful/forced termination and output draining before the exit callback.
+- Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback.
+- WinePrefixInitializer that runs Box64 → wineboot --init for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
 - GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
 - Serialized display-session resize/close operations and JVM regression tests for idempotent cleanup and concurrent PRoot stop calls.
 - JVM regression tests for command construction, process output/termination and rejection of placeholder Wayland socket files.
@@ -44,7 +45,7 @@
 6. Save the game title, relative path, EXE path, architecture and import size in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
 
-The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder, process supervisor and GameLaunchCoordinator are implemented as a separate runtime layer, but they are not connected to a Play action because no concrete compositor backend is available yet. Runtime installation checks package integrity and inventory; it does not execute Wine or test a Windows program.
+The current UI clearly says that imported games cannot be launched yet. EXE inspection/import never executes the inspected game. The PRoot command builder, process supervisor, WinePrefixInitializer and GameLaunchCoordinator are implemented as a separate runtime layer, but they are not connected to a Play action because no concrete compositor backend is available yet. Prefix initialization is tested with a controlled fake PRoot process; a real Wine package/rootfs and physical-device launch remain unverified.
 
 ## Runtime backend strategy
 
@@ -71,7 +72,7 @@ See Android Display Backend Research for the findings and integration gates. The
 - No signed runtime package metadata or pinned release signing key exists. SHA-256 verifies payload integrity but does not authenticate the publisher.
 - GameLaunchCoordinator can manage a display/process session when a backend is supplied, including cleanup on cancellation/stop failure, but no concrete compositor is registered and the coordinator is not yet wired to the Compose UI.
 - Process teardown has not been validated against Android PRoot/Wine child-process behavior on a device.
-- The builder reserves per-game prefix directories, but Wine prefix initialization (for example, through wineboot) and first-start validation are not implemented.
+- WinePrefixInitializer has host-side JVM coverage only; it has not been validated against a real Wine build, the final Linux rootfs or an Android device.
 - No Android game surface is connected to a Wine display/window backend.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No audio bridge, input mapping, game pause/resume integration or save management exists.
@@ -89,7 +90,7 @@ See Android Display Backend Research for the findings and integration gates. The
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. Focused checks on the current head (aca3540, run #82) passed: all 5 Python runtime-packager tests and Gradle testDebugUnitTest. The earlier runs #79 and #80 exposed timing-sensitive OS-signal fixtures; manual-stop and concurrent-stop regression tests now use a controlled Process/pipe, and the latest run passed. The workflow does not build an APK, run lint, or set up NDK/CMake. Host CI success does not substitute for physical Android/ARM64 device validation.
+The latest completed Android CI run on main (run #66, commit 439aa47ad63720c089926900fcb7bd120aeca711) passed build, unit tests and lint. The current branch head (685dd61, run #86) passed all 5 Python runtime-packager tests and Gradle testDebugUnitTest, including the new Wine-prefix initialization and path-containment tests. The focused workflow does not build an APK, run lint, or set up NDK/CMake. Host CI success does not substitute for physical Android/ARM64 device validation.
 
 ## Next engineering steps
 
@@ -99,7 +100,7 @@ The latest completed Android CI run on main (run #66, commit 439aa47ad63720c0899
 4. Build a minimal Android/Bionic Wine + ARM64EC/FEX package and validate its ELF dependencies and ABI.
 5. Build a glibc rootfs + PRoot + Box64 fallback package.
 6. Run the same original Windows GUI test executable through each backend.
-7. Implement a concrete GameDisplayBackend, then connect GameLaunchCoordinator to the Compose Surface lifecycle and initialize/validate each Wine prefix.
+7. Implement a concrete GameDisplayBackend, then connect GameLaunchCoordinator to the Compose Surface lifecycle and validate wineboot, prefix state and process teardown on a real ARM64 device.
 8. Connect Wine's Wayland/X11 display path to the Android game surface.
 9. Add 32-bit Windows execution after a confirmed 64-bit path.
 10. Add graphics and audio backend probing only after the first Wine window renders.

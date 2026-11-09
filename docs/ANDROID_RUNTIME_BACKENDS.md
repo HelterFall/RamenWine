@@ -133,15 +133,17 @@ Graphics selection remains a separate router:
 Implemented in RamenWine:
 - `RuntimeBackendId` for the three package families;
 - a bounded `runtime.properties` inventory reader;
-- checks for host ABI, safe relative paths, required files and executable bits;
+- an offline ZIP installer with streaming extraction, SHA-256 payload verification, executable flags, safe symlink creation, staged activation and rollback;
+- a Python runtime package builder for manifest-backed ZIP archives;
+- PRoot/Box64/Wine argument-vector construction and a host-tested Wine-prefix initializer;
 - UI display of backend states;
-- JVM tests for missing, incomplete, complete and path-escape cases.
+- JVM tests for inventory states, path containment, command construction and process lifecycle.
 
 Not implemented yet:
 - no Wine, FEX, Box64 or PRoot runtime package is bundled;
-- no rootfs is built or installed;
-- no runtime package installer or checksum verifier exists;
-- no EXE launch process exists;
+- no Linux rootfs is built or installed;
+- runtime metadata is not signed, so SHA-256 does not authenticate the publisher;
+- no real Windows EXE launch has been validated;
 - no graphics backend is integrated;
 - no physical-device performance/compatibility results exist.
 
@@ -195,6 +197,10 @@ Example manifest:
     {
       "path": "rootfs/bin",
       "target": "usr/bin"
+    },
+    {
+      "path": "rootfs/usr/bin/wineboot",
+      "target": "wine"
     }
   ]
 }
@@ -202,7 +208,8 @@ Example manifest:
 
 The manifest file list is illustrative only; each backend has its own real file
 requirements. Every file listed in the manifest must be present under
-`payload/`, and its SHA-256 must match. Paths must be relative, unique
+`payload/`, and its SHA-256 must match. Entries listed under `symlinks` are created
+only after their targets are normalized and confirmed to remain inside the backend. Paths must be relative, unique
 case-insensitively and remain inside the backend staging directory. Symlink
 targets are normalized to remain inside that backend directory. The installer
 sets executable permissions from the manifest and writes the runtime inventory

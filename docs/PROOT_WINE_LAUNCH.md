@@ -1,6 +1,6 @@
 # PRoot + Box64 + Wine launch contract
 
-**Status:** command builder and process supervisor implemented; actual runtime package and device launch remain unverified.
+**Status:** command builder, process supervisor and host-tested Wine-prefix initializer implemented; actual runtime package and device launch remain unverified.
 
 ## Purpose
 
@@ -18,6 +18,7 @@ rootfs/
   usr/bin/
     box64                  # ARM64 Linux/glibc Box64 executable
     wine                   # Wine 11 unified WoW64 loader used by the launcher
+    wineboot               # Wine prefix initializer (usually a link to wine)
   ...
 ```
 
@@ -27,7 +28,7 @@ The Wine installation must also include the matching Wayland driver components f
 - `winewayland.so` for the relevant Unix architecture(s);
 - Wayland client libraries and protocols required by that Wine build.
 
-A runtime inventory that omits any required executable is not launch-ready. The command builder checks the PRoot host executable, the host library directory, and the Box64/Wine executables directly before constructing a process command. It also reserves per-game prefix/home/temp directories; it does not run `wineboot` or otherwise prove that the prefix has been initialized.
+A runtime inventory that omits any required executable is not launch-ready. The command builder checks the PRoot host executable, the host library directory, and the Box64/Wine executables directly before constructing a process command. Prefix initialization additionally requires an executable `/usr/bin/wineboot` entry; a relative symlink to the unified Wine loader is acceptable when included safely in the runtime package.
 
 ## Host/guest path mapping
 
@@ -79,6 +80,20 @@ proot
 
 PRoot's documented CLI supports the rootfs, bind and initial-working-directory options used above. PRoot bind targets are prepared inside the guest rootfs before process launch. The implementation does not use `-0`: the Windows game remains in the Android app's ordinary UID/sandbox and does not receive fake root.
 
+## Wine prefix initialization
+
+Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither \`system.reg\` nor \`user.reg\` exists, it builds a separate PRoot command:
+
+\`\`\`text
+/usr/bin/box64 /usr/bin/wineboot --init
+\`\`\`
+
+The initializer serializes concurrent requests, tags output with \`[wineboot]\`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both \`system.reg\` and \`user.reg\` exist. If exactly one registry file exists, the prefix is treated as partial and fails closed rather than being overwritten automatically.
+
+The package must expose Wineboot at \`/usr/bin/wineboot\`; standard Wine package layouts provide that entry point, often as a symlink to the unified \`wine\` loader. The \`--init\` option creates the initial prefix. See the [Wineboot manual](https://manpages.debian.org/testing/wine-development/wineboot.1.en.html) and the [Arch Wine file list](https://archlinux.org/packages/extra/x86_64/wine/files/).
+
+The JVM tests use a controlled fake PRoot process that creates the expected registry files. This verifies orchestration, timeout/error gating and concurrency, but it is not proof that a real Wine build can initialize a prefix in the final rootfs.
+
 ## Display preconditions
 
 The command builder refuses to construct a launch if the Wayland socket is absent or is not an actual Unix-domain socket (checked with Android lstat). This prevents a regular file or stale placeholder from masquerading as a compositor endpoint.
@@ -96,14 +111,14 @@ The process supervisor:
 - waits for the output stream to reach EOF before delivering the exit callback, including the manual-stop path;
 - supports graceful termination followed by forced termination and reports an error if PRoot remains alive.
 
-JVM regression tests exercise merged output, natural exit and a termination trap that writes a final diagnostic line. The GameLaunchCoordinator closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
+JVM regression tests exercise merged output, natural exit, deterministic final-output draining, concurrent stop calls, graceful-to-forced termination escalation, prefix initialization and fail-closed prefix checks. The GameLaunchCoordinator runs prefix initialization before starting the selected game and closes its display session once the supervised PRoot process exits or is stopped. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
 
 ## Validation gates before enabling Play
 
 1. Package PRoot for Android/Bionic ARM64 and run `proot --version` under the app UID.
 2. Package a minimal ARM64 glibc rootfs and run a Linux ARM64 smoke executable inside it.
 3. Run Box64 inside that rootfs and validate host library resolution.
-4. Build Wine x86-64 with the Wayland driver and validate the installed PE/Unix driver files.
+4. Build Wine x86-64 with the Wayland driver, verify `wineboot --init` on the target rootfs, and validate the installed PE/Unix driver files.
 5. Start the Wayland compositor on Android, bind its socket into the rootfs and run an original Win32 GDI test window.
 6. Verify the window appears on the Android SurfaceView and that touch, keyboard, close, pause/resume and process teardown work.
 7. Run x86-64 and WoW64 samples before attempting commercial visual-novel engines.
