@@ -114,7 +114,7 @@ ELF Header:
         )
         with self.assertRaisesRegex(
             ValueError,
-            "missing required Wawona JNI exports: nativeApplySettings",
+            "missing required Wawona JNI exports: nativeApplyHostKeyLevels",
         ):
             package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
 
