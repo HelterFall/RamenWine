@@ -100,7 +100,7 @@ The environment is deliberately split into two layers:
 where `wow64` selects Wine 11's loader mode while the new prefix is still a
 64-bit `win64` prefix whose `system.reg` begins with `#arch=win64`, `LANG`, `LC_ALL`, `PATH` and `BOX64_NOBANNER=1`.
 
-The guest `env -i` invocation discards the entire inherited environment before applying only the explicit ARM64 glibc, Box64, Wine, Wayland and locale variables. This prevents Android/Bionic paths and unrelated host settings from leaking into Wine or the game process. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.
+The guest `env -i` invocation discards the entire inherited environment before applying only the explicit ARM64 glibc, Box64, Wine, Wayland and locale variables. `BOX64_PREFER_WRAPPED=1` is especially important for this backend: the pinned Box64 source documents that its default mode can prefer an emulated library when the game requests it by an absolute path. Enabling this option tells Box64 to try its native ARM64 wrapper first even for an absolute path; libraries without a wrapper can still fall back to x86-64 emulation. This is what makes the separately packaged ARM64 Wayland/XKB libraries useful to Box64's Wayland wrappers. The clean environment also prevents Android/Bionic paths and unrelated host settings from leaking into Wine or the game process. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.
 
 The Android app does not grant INTERNET permission in this scaffold. The game process inherits the app UID and Android sandbox; PRoot is not root and the command does not use PRoot's fake-root option.
 
@@ -128,6 +128,7 @@ proot
   WINEPREFIX=/prefixes/<id>
   LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu
   BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/box64-x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
+  BOX64_PREFER_WRAPPED=1
   WINEARCH=wow64
   WINEDLLPATH=/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:/usr/lib/x86_64-linux-gnu/wine/i386-windows:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
   WAYLAND_DISPLAY=wayland-0
