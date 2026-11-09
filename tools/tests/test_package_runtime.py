@@ -672,6 +672,7 @@ class RuntimePackagerTests(unittest.TestCase):
                 first,
                 package_runtime.ELF_MACHINE_AARCH64,
                 needed=("libsecond.so.2",),
+                runpath="$ORIGIN",
             )
             self._write_elf64_dynamic(second, package_runtime.ELF_MACHINE_AARCH64)
 
@@ -835,13 +836,21 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             host_lib = backend / "host" / "lib"
+            proot_binary = backend / "host" / "bin" / "proot"
             self._write_elf64_dynamic(
-                backend / "host" / "bin" / "proot",
+                proot_binary,
                 package_runtime.ELF_MACHINE_AARCH64,
                 needed=("libtalloc.so.2", "libandroid-shmem.so", "liblog.so"),
                 interpreter="/system/bin/linker64",
                 executable=True,
             )
+            # Recalculate the fixture provenance after replacing its PRoot ELF.
+            manifest_path = backend / "host" / "PROVENANCE.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["downstreamPatches"]["prootTermination"]["binarySha256"] = (
+                package_runtime.sha256_file(proot_binary)
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             self._write_elf64_dynamic(
                 host_lib / "libtalloc.so.2.5.0",
                 package_runtime.ELF_MACHINE_AARCH64,
@@ -970,7 +979,7 @@ class RuntimePackagerTests(unittest.TestCase):
                 / "wine" / "x86_64-windows" / "wineboot.exe",
                 machine=0x014C,
             )
-            with self.assertRaisesRegex(ValueError, "wineboot PE program must target AMD64"):
+            with self.assertRaisesRegex(ValueError, "wineboot PE program has the wrong PE machine"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_non_amd64_wine_wayland_pe_driver(self) -> None:
@@ -981,7 +990,7 @@ class RuntimePackagerTests(unittest.TestCase):
                 / "wine" / "x86_64-windows" / "winewayland.drv",
                 machine=0x014C,
             )
-            with self.assertRaisesRegex(ValueError, "must target AMD64"):
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_creates_manifest_and_payload(self) -> None:

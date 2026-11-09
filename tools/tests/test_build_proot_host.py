@@ -151,7 +151,7 @@ class BuildProotHostTests(unittest.TestCase):
             output = root / "output"
             output.mkdir()
             (output / "keep.txt").write_text("do not overwrite")
-            with self.assertRaisesRegex(ValueError, "must not exist or must be empty"):
+            with self.assertRaisesRegex(ValueError, "must not exist or must be an empty directory"):
                 build_proot_host.validate_paths(root / "work", output)
 
     def test_accepts_separate_empty_build_directories(self) -> None:
