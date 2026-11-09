@@ -80,11 +80,24 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             self.assertIn("APT::Architecture=amd64", options)
             self.assertIn("APT::Architectures::=arm64", options)
 
+    def test_box64_bundle_script_cleanup_is_scoped_to_its_build_directory(self) -> None:
+        source = (
+            "rm -rf /tmp/box64-bundle.*\n"
+            "dir_tmp=\"$(mktemp -d /tmp/box64-bundle.XXXXXX)\"\n"
+        )
+        safe = build_glibc_runtime.make_box64_bundle_script_safe(source)
+
+        self.assertNotIn("rm -rf /tmp/box64-bundle.*", safe)
+        self.assertIn('[ -z "${dir_tmp:-}" ] || rm -rf "${dir_tmp}"', safe)
+        self.assertIn('mktemp -d "${TMPDIR:-/tmp}/box64-bundle.XXXXXX"', safe)
+
     def test_source_pins_and_wow64_wayland_build_options_are_explicit(self) -> None:
         self.assertEqual(
             build_glibc_runtime.BOX64_COMMIT,
             "2f130fab1d6e1a4ee8a71dc60cfdfcc839ad192a",
         )
+        self.assertIn("libstdc++.so.6", build_glibc_runtime.BOX64_REQUIRED_X64_LIBRARIES)
+        self.assertIn("libunwind.so.8", build_glibc_runtime.BOX64_REQUIRED_X64_LIBRARIES)
         self.assertEqual(
             build_glibc_runtime.WINE_SHA256,
             "c07a6857933c1fc60dff5448d79f39c92481c1e9db5aa628db9d0358446e0701",

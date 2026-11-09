@@ -118,6 +118,21 @@ object ProotWineCommandBuilder {
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libstdc++.so.6",
+            "Box64 bundled libstdc++",
+        )
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libgcc_s.so.1",
+            "Box64 bundled libgcc_s",
+        )
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libunwind.so.8",
+            "Box64 bundled libunwind",
+        )
         executableFile(rootfs, "usr/bin/wine")
         if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
             runtimeFile(rootfs, WINEBOOT_PE_RELATIVE_PATH, "wineboot PE program")
@@ -389,7 +404,10 @@ object ProotWineCommandBuilder {
         "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =
         "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
-            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:" +
+            "/usr/lib/box64-x86_64-linux-gnu"
+    private const val BOX64_X64_LIBRARY_DIRECTORY =
+        "usr/lib/box64-x86_64-linux-gnu"
     private const val GUEST_WINE_DLL_PATH =
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
             "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +

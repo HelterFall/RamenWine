@@ -60,7 +60,8 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals(
                 "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
-                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:" +
+                    "/usr/lib/box64-x86_64-linux-gnu",
                 guestEnvironment["BOX64_LD_LIBRARY_PATH"]
             )
             assertEquals(
@@ -148,6 +149,20 @@ class ProotWineCommandBuilderTest {
 
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("wineboot"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingBox64BundledLibunwind() {
+        val fixture = Fixture()
+        try {
+            fixture.box64Libunwind.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Box64 bundled libunwind"))
         } finally {
             fixture.cleanup()
         }
@@ -360,6 +375,18 @@ class ProotWineCommandBuilderTest {
         )
         val arm64GlibcLoader = regular(rootfs, "lib/ld-linux-aarch64.so.1")
         val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
+        val box64Libstdcpp = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libstdc++.so.6"
+        )
+        val box64Libgcc = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libgcc_s.so.1"
+        )
+        val box64Libunwind = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libunwind.so.8"
+        )
         val wineWaylandUnix = regular(
             rootfs,
             "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"

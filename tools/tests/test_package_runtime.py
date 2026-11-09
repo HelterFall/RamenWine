@@ -117,6 +117,15 @@ class RuntimePackagerTests(unittest.TestCase):
             "/lib/ld-linux-aarch64.so.1",
             executable=True,
         )
+        for library_name in (
+            "libstdc++.so.6",
+            "libgcc_s.so.1",
+            "libunwind.so.8",
+        ):
+            self._write_elf64(
+                rootfs / "usr" / "lib" / "box64-x86_64-linux-gnu" / library_name,
+                package_runtime.ELF_MACHINE_X86_64,
+            )
         wine = self._write_elf64(
             rootfs / "usr" / "bin" / "wine",
             package_runtime.ELF_MACHINE_X86_64,
@@ -146,6 +155,14 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_runtime_missing_box64_x64_emulation_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "rootfs" / "usr" / "lib" / "box64-x86_64-linux-gnu"
+             / "libunwind.so.8").unlink()
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_i386_wine_wayland_driver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

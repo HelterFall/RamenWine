@@ -297,6 +297,22 @@ def validate_glibc_proot_box64(root: Path) -> None:
         "/lib/ld-linux-aarch64.so.1",
     )
 
+    box64_library_directory = "/usr/lib/box64-x86_64-linux-gnu"
+    for library_name in (
+        "libstdc++.so.6",
+        "libgcc_s.so.1",
+        "libunwind.so.8",
+    ):
+        library = resolve_guest_file(
+            rootfs,
+            box64_library_directory + "/" + library_name,
+        )
+        require_elf64(
+            library,
+            "Box64 bundled x86-64 library " + library_name,
+            ELF_MACHINE_X86_64,
+        )
+
     wine = resolve_guest_file(rootfs, "/usr/bin/wine")
     require_executable(wine, "Wine unified loader")
     require_elf64(

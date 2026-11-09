@@ -41,6 +41,7 @@ HOST_PACKAGES = (
     "gettext", "git", "g++-aarch64-linux-gnu", "gcc-aarch64-linux-gnu",
     "g++-mingw-w64-i686", "gcc-mingw-w64-i686",
     "g++-mingw-w64-x86-64", "gcc-mingw-w64-x86-64",
+    "binutils", "coreutils", "cpio", "rpm2cpio", "unzip", "zstd", "which",
     "binutils-mingw-w64", "libasound2-dev", "libdbus-1-dev",
     "libegl-dev", "libfontconfig1-dev", "libfreetype-dev",
     "libgphoto2-dev", "libgnutls28-dev", "libgstreamer1.0-dev",
@@ -75,6 +76,13 @@ REQUIRED_TOOLS = (
     "apt-get", "cmake", "dpkg-deb", "git", "make", "tar",
     "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-g++", "wayland-scanner",
     "i686-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc",
+    "awk", "cpio", "curl", "rpm2cpio", "sha256sum", "unzip", "which",
+)
+
+BOX64_REQUIRED_X64_LIBRARIES = (
+    "libstdc++.so.6",
+    "libgcc_s.so.1",
+    "libunwind.so.8",
 )
 
 WINE_CONFIGURE_FLAGS = (
@@ -286,6 +294,94 @@ def checkout_box64(work_dir: Path) -> Path:
     return source
 
 
+def make_box64_bundle_script_safe(source_text: str) -> str:
+    cleanup_marker = "rm -rf /tmp/box64-bundle.*"
+    temp_marker = "mktemp -d /tmp/box64-bundle.XXXXXX"
+    if cleanup_marker not in source_text or temp_marker not in source_text:
+        raise ValueError("The pinned Box64 library bundle script changed unexpectedly.")
+    safe_text = source_text.replace(
+        cleanup_marker,
+        '[ -z "${dir_tmp:-}" ] || rm -rf "${dir_tmp}"',
+    )
+    safe_text = safe_text.replace(
+        temp_marker,
+        'mktemp -d "${TMPDIR:-/tmp}/box64-bundle.XXXXXX"',
+    )
+    return safe_text
+
+
+def bundle_box64_x64_libraries(
+    source: Path,
+    rootfs: Path,
+    work_dir: Path,
+) -> dict[str, object]:
+    source_script = source / "box64-bundle-x86-libs.sh"
+    source_csv = source / "box64-bundle-x86-libs.csv"
+    if not source_script.is_file() or not source_csv.is_file():
+        raise ValueError("Pinned Box64 source is missing its x86 library bundle inputs.")
+
+    original_script = source_script.read_text(encoding="utf-8")
+    csv_text = source_csv.read_text(encoding="utf-8")
+    safe_script = make_box64_bundle_script_safe(original_script)
+
+    bundle_work = work_dir / "box64-x86-library-bundle"
+    bundle_work.mkdir()
+    local_script = bundle_work / "box64-bundle-x86-libs.sh"
+    local_csv = bundle_work / "box64-bundle-x86-libs.csv"
+    local_script.write_text(safe_script, encoding="utf-8")
+    local_csv.write_text(csv_text, encoding="utf-8")
+    local_script.chmod(0o755)
+
+    run(
+        ["sh", str(local_script)],
+        cwd=bundle_work,
+        extra_env={"TMPDIR": str(bundle_work)},
+    )
+
+    archive = bundle_work / "box64-bundle-x86-libs.tar.gz"
+    if not archive.is_file():
+        raise ValueError("Box64 did not produce its x86 library bundle archive.")
+    archive_sha256 = sha256_file(archive)
+
+    # The new Wine WoW64 path runs x86 Windows programs inside the x86-64
+    # Unix Wine process. We need Box64's x86-64 Linux libraries, not its
+    # separate i386 Linux library directory.
+    run([
+        "tar", "-xzf", str(archive), "--no-same-owner",
+        "-C", str(rootfs), "./usr/lib/box64-x86_64-linux-gnu",
+    ])
+
+    library_directory = rootfs / "usr" / "lib" / "box64-x86_64-linux-gnu"
+    if not library_directory.is_dir():
+        raise ValueError("Box64 x86-64 emulated library directory was not extracted.")
+
+    for name in BOX64_REQUIRED_X64_LIBRARIES:
+        library = library_directory / name
+        if not library.is_file():
+            raise ValueError("Box64 x86-64 library bundle is missing " + name)
+        package_runtime.require_elf64(
+            library.resolve(strict=True),
+            "Box64 bundled x86-64 library " + name,
+            package_runtime.ELF_MACHINE_X86_64,
+        )
+
+    packages_archive = bundle_work / "box64-bundle-x86-pkgs.tar.gz"
+    if packages_archive.exists():
+        packages_archive.unlink()
+    checksum_file = bundle_work / "box64-bundle-x86-libs.sha256"
+    if checksum_file.exists():
+        checksum_file.unlink()
+
+    return {
+        "sourceCommit": BOX64_COMMIT,
+        "csvSha256": hashlib.sha256(csv_text.encode("utf-8")).hexdigest(),
+        "scriptSha256": hashlib.sha256(original_script.encode("utf-8")).hexdigest(),
+        "libraryArchiveSha256": archive_sha256,
+        "installedDirectory": "rootfs/usr/lib/box64-x86_64-linux-gnu",
+        "requiredLibraries": list(BOX64_REQUIRED_X64_LIBRARIES),
+    }
+
+
 def build_box64(source: Path, rootfs: Path, work_dir: Path, jobs: int, dynarec: bool) -> None:
     build = work_dir / "box64-build"
     build.mkdir()
@@ -325,7 +421,11 @@ def build_wine(source_archive: Path, rootfs: Path, work_dir: Path, jobs: int) ->
 
 
 def write_provenance(
-    backend: Path, snapshot: str, packages: list[dict[str, str]], dynarec: bool
+    backend: Path,
+    snapshot: str,
+    packages: list[dict[str, str]],
+    dynarec: bool,
+    box64_bundle: dict[str, object],
 ) -> None:
     document = {
         "formatVersion": 1,
@@ -339,6 +439,7 @@ def write_provenance(
             "arm64Dynarec": dynarec,
             "badSignal": True,
         },
+        "box64LibraryBundle": box64_bundle,
         "wine": {
             "version": "11.0",
             "url": WINE_URL,
@@ -391,6 +492,7 @@ def build(args: argparse.Namespace) -> None:
     )
 
     box64_source = checkout_box64(work)
+    box64_bundle = bundle_box64_x64_libraries(box64_source, rootfs, work)
     build_box64(box64_source, rootfs, work, args.jobs, not args.no_arm_dynarec)
 
     wine_archive = download_verified(
@@ -398,7 +500,13 @@ def build(args: argparse.Namespace) -> None:
     )
     build_wine(wine_archive, rootfs, work, args.jobs)
 
-    write_provenance(backend, args.snapshot, package_provenance, not args.no_arm_dynarec)
+    write_provenance(
+        backend,
+        args.snapshot,
+        package_provenance,
+        not args.no_arm_dynarec,
+        box64_bundle,
+    )
     package_runtime.validate_glibc_proot_box64(backend)
 
     output_path = args.output.resolve()
