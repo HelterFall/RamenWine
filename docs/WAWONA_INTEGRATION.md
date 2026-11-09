@@ -61,7 +61,7 @@ Only the three required JNI/renderer roots, their recursive ELF `DT_NEEDED` clos
 
 The generated directory is ignored by Git and included through the Android `main` source set. A clean checkout can still run JVM/Python tests without the optional generated native payload. The runtime adapter fails clearly when its Wawona assets or libraries are not present.
 
-The extractor records the input APK SHA-256, the pinned revision supplied by the build command, each staged library SHA-256 and the extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not a cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
+Before following ELF dependencies, the extractor uses NDK `llvm-readelf` to require ELF64/AArch64 for every selected shared library, including versioned SONAMEs. It calculates the input APK SHA-256 as a stream (without reading the whole APK into memory) and records that hash, the pinned revision supplied by the build command, each staged library SHA-256 and extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
 
 Run the packager tests without Nix:
 
@@ -74,7 +74,7 @@ python -m unittest discover -s tools/tests -v
 The adapter is split across:
 
 - `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`.
-- `WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets.
+`WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
 - `WawonaDisplayBackend.kt`: starts the compositor, verifies its live socket, attaches an Android `Surface`, and returns a `GameDisplaySession`.
 - `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events after its owner enables input.
 - `GameLaunchCoordinator`: remains the owner that joins a supplied display session with the PRoot process lifecycle.
@@ -91,12 +91,14 @@ Upstream separates Vulkan surface cleanup from Rust compositor shutdown. RamenWi
 
 1. Start the Rust Wayland core and create its socket.
 2. Verify the socket is a real AF_UNIX socket.
-3. Attach the Android `Surface` to the upstream Vulkan renderer.
-4. Synchronize the initial logical output size with `nativeSyncOutputSize(width, height)`.
-5. Apply the Wawona clean-install graphics defaults (system Vulkan WSI, ANGLE, automatic compositor backend).
-6. On close, call `nativeDestroySurface(surface)`.
-7. Then call `nativeShutdown()` to stop/free the Rust core.
-8. Release the process-wide lease.
+3. Dump the Android host keymap before `nativeInit`, then call `nativeReloadHostKeymap()` after the Rust core is ready (matching upstream `MainActivity`).
+4. Set display density and the Android multi-touch seat mode.
+5. Attach the Android `Surface` to the upstream Vulkan renderer.
+6. Synchronize the initial logical output size with `nativeSyncOutputSize(width, height)`.
+7. Apply the Wawona clean-install graphics defaults (system Vulkan WSI, ANGLE, automatic compositor backend).
+8. On close, call `nativeDestroySurface(surface)`.
+9. Then call `nativeShutdown()` to stop/free the Rust core.
+10. Release the process-wide lease.
 
 Resize calls upstream `nativeResizeSurface` and then synchronizes the logical output size. The RamenWine session close is idempotent; a second start remains blocked until the first session releases its lease.
 
