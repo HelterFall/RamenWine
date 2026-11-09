@@ -227,13 +227,17 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
 
     private fun stopSmokeClient() {
         val smoke = displaySession as? WawonaSmokeTestSession ?: return
+        pollRunnable?.let(mainHandler::removeCallbacks)
+        pollRunnable = null
         runCatching { smoke.stopWestonSimpleShm() }
+            .onSuccess {
+                statusView.text =
+                    "Stop request отправлен. Upstream не предоставляет join для SHM-потока."
+            }
             .onFailure {
                 statusView.text = "Ошибка остановки SHM-клиента: " +
                     (it.message ?: it.javaClass.simpleName)
             }
-        statusView.text =
-            "Stop request отправлен. Upstream не предоставляет join для SHM-потока."
     }
 
     private fun beginSmokePolling(smoke: WawonaSmokeTestSession) {
@@ -301,8 +305,9 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         session: GameDisplaySession,
         onClosed: () -> Unit
     ) {
-        // GameDisplaySession.close() requests native SHM stop, applies the
-        // upstream-compatible grace window, then destroys the Surface and core.
+        // GameDisplaySession.close() requests native SHM stop (once per
+        // session), applies a short best-effort grace window, then destroys
+        // the Surface and core. Upstream does not expose a pthread join.
         runCatching {
             nativeExecutor.execute {
                 runCatching { session.close() }
