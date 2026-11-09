@@ -163,7 +163,7 @@ The adapter source establishes a concrete startup/shutdown path and a live Wayla
 
 The basic input view forwards multi-touch, Android key-down/up, mouse motion/buttons and scroll. The debug-only SHM preview can exercise a real in-process Wayland client against the host compositor. Upstream's SHM stop JNI method only sets a running flag and resets its counter; its client runs on a detached pthread and upstream provides no join/completion API. RamenWine records whether a client was launched, sends at most one stop request per session, and applies a short best-effort grace window before surface/core teardown. The native running flag is meaningful while the client is active, but a false value after stop is **not** proof that the detached thread has exited. Device-side teardown must still be validated. The preview is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
 
-The adapter is not yet connected to a user-facing Play action. RamenWine still has no bundled PRoot/Box64/Wine Linux rootfs and no real Wine package. The presence of `GameLaunchCoordinator` plus a display backend is not a claim that imported Windows games can launch.
+The Wawona display adapter is connected to the library's **Играть** action through `GamePlayerActivity` and `GameLaunchCoordinator`. When the required runtime package is installed, the game screen starts Wawona on its Android Surface before launching the PRoot process. However, RamenWine still has no built and installed PRoot/Box64/Wine Linux rootfs package or staged Wawona native payload. The source-level connection is not proof that Wine boots or that an imported Windows game can launch.
 
 ## Licensing and release obligations
 
