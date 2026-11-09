@@ -11,7 +11,12 @@ import android.view.SurfaceView
 import com.aspauldingcode.wawona.WawonaNative
 
 /**
- * Android SurfaceView host for Wawona's compositor and basic game input.
+ * Android SurfaceView host for Wawona's compositor and game input.
+ *
+ * Touchscreen input is mapped to a left mouse click/drag because conventional
+ * Windows visual novels usually expose mouse interaction rather than a touch
+ * digitizer. No desktop UI or on-screen keyboard/mouse is presented to players.
+ * Hardware keyboard and mouse events remain optional passthrough input.
  *
  * The owner starts WawonaDisplayBackend from onSurfaceChanged and calls
  * bindSession only after the display session has been created. Every input
@@ -36,6 +41,8 @@ class WawonaSurfaceView @JvmOverloads constructor(
     @Volatile
     private var inputLeaseToken: Any? = null
 
+    private val touchInputMapper = TouchMouseInputMapper()
+
     init {
         holder.addCallback(this)
         isFocusable = true
@@ -52,6 +59,11 @@ class WawonaSurfaceView @JvmOverloads constructor(
         val token = (session as? WawonaInputSessionLease)?.inputLeaseToken
         require(session == null || token != null) {
             "The display session is not owned by Wawona."
+        }
+
+        // Release a touch held by the old session before replacing its lease.
+        if (token !== inputLeaseToken) {
+            dispatchTouchCommands(touchInputMapper.cancel(SystemClockCompat.uptimeMillis()))
         }
         inputLeaseToken = token
         inputEnabled = token != null
@@ -79,40 +91,54 @@ class WawonaSurfaceView @JvmOverloads constructor(
         }
 
         val timestamp = event.eventTime.toNativeTimestamp()
-        dispatchNative {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN,
-                MotionEvent.ACTION_POINTER_DOWN -> {
-                    val index = event.actionIndex
-                    WawonaNative.nativeTouchDown(
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val index = event.actionIndex
+                dispatchTouchCommands(
+                    touchInputMapper.pointerDown(
                         event.getPointerId(index),
-                        event.getX(index),
-                        event.getY(index),
+                        event.getX(index).toDouble(),
+                        event.getY(index).toDouble(),
                         timestamp
                     )
-                    WawonaNative.nativeTouchFrame()
-                }
+                )
+            }
 
-                MotionEvent.ACTION_MOVE -> {
-                    for (index in 0 until event.pointerCount) {
-                        WawonaNative.nativeTouchMotion(
-                            event.getPointerId(index),
-                            event.getX(index),
-                            event.getY(index),
-                            timestamp
+            MotionEvent.ACTION_MOVE -> {
+                val pointerId = touchInputMapper.activePointerId
+                if (pointerId != null) {
+                    val index = event.findPointerIndex(pointerId)
+                    if (index >= 0) {
+                        dispatchTouchCommands(
+                            touchInputMapper.pointerMove(
+                                pointerId,
+                                event.getX(index).toDouble(),
+                                event.getY(index).toDouble(),
+                                timestamp
+                            )
                         )
+                    } else {
+                        dispatchTouchCommands(touchInputMapper.cancel(timestamp))
                     }
-                    WawonaNative.nativeTouchFrame()
                 }
+            }
 
-                MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_POINTER_UP -> {
-                    val index = event.actionIndex
-                    WawonaNative.nativeTouchUp(event.getPointerId(index), timestamp)
-                    WawonaNative.nativeTouchFrame()
-                }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP -> {
+                val index = event.actionIndex
+                dispatchTouchCommands(
+                    touchInputMapper.pointerUp(
+                        event.getPointerId(index),
+                        event.getX(index).toDouble(),
+                        event.getY(index).toDouble(),
+                        timestamp
+                    )
+                )
+            }
 
-                MotionEvent.ACTION_CANCEL -> WawonaNative.nativeTouchCancel()
+            MotionEvent.ACTION_CANCEL -> {
+                dispatchTouchCommands(touchInputMapper.cancel(timestamp))
             }
         }
         return true
@@ -214,6 +240,39 @@ class WawonaSurfaceView @JvmOverloads constructor(
         }
     }
 
+    private fun dispatchTouchCommands(commands: List<TouchMouseInputMapper.Command>) {
+        if (commands.isEmpty()) return
+        dispatchNative {
+            commands.forEach { command ->
+                when (command) {
+                    is TouchMouseInputMapper.Command.PointerEnter -> {
+                        WawonaNative.nativePointerEnter(
+                            command.x,
+                            command.y,
+                            command.timestamp
+                        )
+                    }
+
+                    is TouchMouseInputMapper.Command.PointerMotion -> {
+                        WawonaNative.nativePointerMotion(
+                            command.x,
+                            command.y,
+                            command.timestamp
+                        )
+                    }
+
+                    is TouchMouseInputMapper.Command.PointerButton -> {
+                        WawonaNative.nativePointerButton(
+                            command.button,
+                            if (command.pressed) 1 else 0,
+                            command.timestamp
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun dispatchNative(block: () -> Unit) {
         val token = inputLeaseToken ?: return
         if (!inputEnabled) return
@@ -227,4 +286,9 @@ class WawonaSurfaceView @JvmOverloads constructor(
         const val BTN_RIGHT = 0x111
         const val BTN_MIDDLE = 0x112
     }
+}
+
+/** Small adapter to avoid depending on Android clock APIs in input logic. */
+private object SystemClockCompat {
+    fun uptimeMillis(): Long = android.os.SystemClock.uptimeMillis()
 }
