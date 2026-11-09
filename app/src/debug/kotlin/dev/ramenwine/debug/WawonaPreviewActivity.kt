@@ -122,7 +122,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
                             statusView.text = "Не удалось запустить Wawona: " +
                                 (it.message ?: it.javaClass.simpleName)
                         }
-                        resumePendingSurface()
+                        if (closing) {
+                            nativeExecutor.shutdown()
+                        } else {
+                            resumePendingSurface()
+                        }
                         return@post
                     }
                     if (
@@ -181,7 +185,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
             startPending = false
             statusView.text = "Не удалось поставить запуск в очередь: " +
                 (it.message ?: it.javaClass.simpleName)
-            resumePendingSurface()
+            if (closing) {
+                nativeExecutor.shutdown()
+            } else {
+                resumePendingSurface()
+            }
         }
     }
 
@@ -280,6 +288,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
 
     private fun resumePendingSurface() {
         closePending = false
+        if (closing) {
+            nativeExecutor.shutdown()
+            pendingSurface = null
+            return
+        }
         val nextSurface = pendingSurface
         val nextWidth = pendingWidth
         val nextHeight = pendingHeight
@@ -355,15 +368,11 @@ class WawonaPreviewActivity : Activity(), WawonaSurfaceView.Callbacks {
         val old = displaySession
         displaySession = null
         if (old != null) {
-            runCatching {
-                nativeExecutor.execute {
-                    val smoke = old as? WawonaSmokeTestSession
-                    runCatching { smoke?.stopWestonSimpleShm() }
-                    runCatching { old.close() }
-                }
-            }.onFailure { old.close() }
+            closePending = true
+            closeDisplaySession(old) { resumePendingSurface() }
+        } else if (!startPending && !closePending) {
+            nativeExecutor.shutdown()
         }
-        nativeExecutor.shutdown()
         super.onDestroy()
     }
 
