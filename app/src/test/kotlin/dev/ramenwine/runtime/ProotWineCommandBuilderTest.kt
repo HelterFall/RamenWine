@@ -64,6 +64,7 @@ class ProotWineCommandBuilderTest {
                     "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
                 guestEnvironment["BOX64_LD_LIBRARY_PATH"]
             )
+            assertEquals("1", guestEnvironment["BOX64_PREFER_WRAPPED"])
             assertEquals(
                 "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
                     "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +
