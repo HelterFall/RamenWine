@@ -14,7 +14,8 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Creates a new per-game Wine prefix before the selected Windows executable is
- * started. A prefix is ready only when both Wine registry files are present.
+ * started. A prefix is ready only when both Wine registry files are present
+ * and system.reg marks it as a 64-bit (win64) prefix for Wine 11 WoW64.
  *
  * The prefix lock prevents two launches from running wineboot into the same
  * directory at the same time.
@@ -43,6 +44,13 @@ internal class WinePrefixInitializer(
             val hasUserRegistry = File(prefixDirectory, USER_REGISTRY).isFile
 
             if (hasSystemRegistry && hasUserRegistry) {
+                if (!hasExpectedArchitecture(prefixDirectory)) {
+                    throw IOException(
+                        "The existing Wine prefix is not a 64-bit (win64) prefix. " +
+                            "Wine 11 WoW64 cannot use a 32-bit prefix, and the prefix " +
+                            "will not be overwritten automatically."
+                    )
+                }
                 return@withLock
             }
             if (hasSystemRegistry || hasUserRegistry) {
@@ -77,7 +85,8 @@ internal class WinePrefixInitializer(
                 }
                 if (!isInitialized(prefixDirectory)) {
                     throw IOException(
-                        "wineboot exited successfully but did not create both Wine registry files."
+                        "wineboot exited successfully but did not create a complete 64-bit " +
+                            "Wine prefix (system.reg, user.reg and #arch=win64)."
                     )
                 }
             } catch (error: Throwable) {
@@ -121,7 +130,22 @@ internal class WinePrefixInitializer(
 
     private fun isInitialized(prefixDirectory: File): Boolean =
         File(prefixDirectory, SYSTEM_REGISTRY).isFile &&
-            File(prefixDirectory, USER_REGISTRY).isFile
+            File(prefixDirectory, USER_REGISTRY).isFile &&
+            hasExpectedArchitecture(prefixDirectory)
+
+    private fun hasExpectedArchitecture(prefixDirectory: File): Boolean {
+        val systemRegistry = File(prefixDirectory, SYSTEM_REGISTRY)
+        if (!systemRegistry.isFile) return false
+
+        return try {
+            systemRegistry.useLines { lines ->
+                lines.take(REGISTRY_HEADER_LINE_LIMIT)
+                    .any { line -> line.trim() == WINE_PREFIX_ARCHITECTURE_MARKER }
+            }
+        } catch (_: IOException) {
+            false
+        }
+    }
 
     private companion object {
         // A process-wide lock also covers multiple Activity/coordinator instances.
@@ -131,6 +155,8 @@ internal class WinePrefixInitializer(
         private const val DEFAULT_INITIALIZATION_TIMEOUT_MILLIS = 5 * 60 * 1000L
         private const val SYSTEM_REGISTRY = "system.reg"
         private const val USER_REGISTRY = "user.reg"
+        private const val WINE_PREFIX_ARCHITECTURE_MARKER = "#arch=win64"
+        private const val REGISTRY_HEADER_LINE_LIMIT = 16
         private val GAME_ID_PATTERN =
             Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     }

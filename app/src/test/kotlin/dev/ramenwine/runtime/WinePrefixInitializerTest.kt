@@ -35,6 +35,11 @@ class WinePrefixInitializerTest {
 
             assertTrue(File(fixture.prefixDirectory, "system.reg").isFile)
             assertTrue(File(fixture.prefixDirectory, "user.reg").isFile)
+            assertTrue(
+                File(fixture.prefixDirectory, "system.reg")
+                    .readText()
+                    .contains("#arch=win64")
+            )
             assertEquals("1", File(fixture.prefixDirectory, "wineboot-count").readText())
             assertTrue(output.any { it.contains("wineboot finished") })
         } finally {
@@ -53,6 +58,47 @@ class WinePrefixInitializerTest {
             assertTrue(error is IOException)
             assertTrue(error?.message.orEmpty().contains("exit code 7"))
             assertFalse(File(fixture.prefixDirectory, "system.reg").exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun refusesToUseExisting32BitPrefixInWine11Wow64Mode() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win32\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win32\n"
+            )
+
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("not a 64-bit"))
+            assertFalse(File(fixture.prefixDirectory, "wineboot-count").exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun rejectsWinebootSuccessWhenItCreates32BitPrefix() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix-win32")
+        try {
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("#arch=win64"))
+            assertTrue(File(fixture.prefixDirectory, "system.reg").isFile)
+            assertTrue(File(fixture.prefixDirectory, "user.reg").isFile)
         } finally {
             fixture.close()
         }
@@ -196,8 +242,10 @@ class WinePrefixInitializerTest {
                 counter = prefix / "wineboot-count"
                 count = int(counter.read_text() if counter.exists() else "0") + 1
                 counter.write_text(str(count))
-                (prefix / "system.reg").write_text("REGEDIT4")
-                (prefix / "user.reg").write_text("REGEDIT4")
+                arch = "win32" if "$fixtureScript" == "create-prefix-win32" else "win64"
+                registry = f"WINE REGISTRY Version 2\n#arch={arch}\n"
+                (prefix / "system.reg").write_text(registry)
+                (prefix / "user.reg").write_text(registry)
                 print("wineboot finished", flush=True)
             """.trimIndent() + "\n"
         }

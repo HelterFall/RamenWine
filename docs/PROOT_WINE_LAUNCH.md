@@ -143,11 +143,11 @@ Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer
 /usr/bin/env -i <guest environment assignments> /usr/bin/box64 /usr/bin/wine /usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe --init
 \`\`\`
 
-The initializer serializes concurrent requests, tags output with \`[wineboot]\`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both \`system.reg\` and \`user.reg\` exist. If exactly one registry file exists, the prefix is treated as partial and fails closed rather than being overwritten automatically.
+The initializer serializes concurrent requests, tags output with `[wineboot]`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both `system.reg` and `user.reg` exist and `system.reg` contains `#arch=win64`. A prefix marked `#arch=win32` is rejected: Wine 11's new WoW64 mode cannot use a pure 32-bit prefix. If either registry is missing, or the architecture marker is absent or incorrect, the prefix fails closed rather than being overwritten automatically.
 
 Wineboot is a PE program (`MODULE = wineboot.exe` in Wine 11), not a Linux ELF launcher. RamenWine places it under `x86_64-windows` and passes its full path to `/usr/bin/wine`, which loads it with `--init`. The initializer accepts success only after both registry files exist.
 
-The JVM tests use a controlled fake PRoot process that creates the expected registry files. This verifies orchestration, timeout/error gating and concurrency, but it is not proof that a real Wine build can initialize a prefix in the final rootfs.
+The JVM tests use a controlled fake PRoot process that creates the expected registry files and architecture marker. They verify orchestration, rejection of old 32-bit prefixes, timeout/error gating and concurrency, but they are not proof that a real Wine build can initialize a prefix in the final rootfs.
 
 ## Display preconditions
 
