@@ -47,7 +47,9 @@ HOST_PACKAGES = (
     "libgstreamer-plugins-base1.0-dev", "liblcms2-dev", "libldap2-dev",
     "libmpg123-dev", "libopenal-dev", "libpcap0.8-dev", "libpulse-dev",
     "libudev-dev", "libunwind-dev", "libusb-1.0-0-dev", "libvulkan-dev",
-    "libwayland-dev", "libxkbcommon-dev", "libzstd-dev", "pkg-config",
+    "libwayland-dev", "libxkbcommon-dev", "libzstd-dev", "libjpeg-dev",
+    "libpng-dev", "libtiff-dev", "libwebp-dev", "libxml2-dev", "libxslt1-dev",
+    "libgcrypt20-dev", "libgsm1-dev", "libavcodec-dev", "libsdl2-dev", "pkg-config",
     "wayland-protocols", "ninja-build",
 )
 
@@ -71,7 +73,7 @@ RUNTIME_PACKAGES = (
 
 REQUIRED_TOOLS = (
     "apt-get", "cmake", "dpkg-deb", "git", "make", "tar",
-    "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-g++",
+    "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-g++", "wayland-scanner",
     "i686-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc",
 )
 
@@ -178,7 +180,7 @@ def download_verified(url: str, destination: Path, expected: str) -> Path:
     return destination
 
 
-def prepare_apt_root(apt_root: Path) -> tuple[Path, list[str]]:
+def prepare_apt_root(apt_root: Path, keyring: Path | None = None) -> tuple[Path, list[str]]:
     apt_root.mkdir(parents=True, exist_ok=True)
     lists = apt_root / "lists"
     archives = apt_root / "archives"
@@ -187,7 +189,7 @@ def prepare_apt_root(apt_root: Path) -> tuple[Path, list[str]]:
     status = apt_root / "status"
     status.write_text("", encoding="utf-8")
 
-    keyring = Path("/usr/share/keyrings/ubuntu-archive-keyring.gpg")
+    keyring = keyring or Path("/usr/share/keyrings/ubuntu-archive-keyring.gpg")
     if not keyring.is_file():
         raise ValueError("Ubuntu archive signing keyring is missing from the build host.")
     sources = apt_root / "sources.list"
