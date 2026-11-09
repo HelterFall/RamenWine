@@ -42,7 +42,7 @@ RamenWine normalizes the runtime package to these paths. The rootfs is **ARM64 g
 
 The package preflight also checks every shared library staged under `host/lib`: each must be an ARM64 ELF and remain inside the package. It requires both `libtalloc.so.2` and `libandroid-shmem.so`, which are part of the Android PRoot host payload. The command builder refuses to launch if either glibc loader or any of the three Wayland driver files is missing: the x86-64 Unix module, the x86-64 PE driver and the i386 PE driver. Wine 11's new WoW64 mode still needs the i386 PE driver for 32-bit Windows programs. The package build must include the ARM64 dependency closure for Box64, the x86-64 dependency closure for Wine and its Wayland Unix driver, and the Wayland client/protocol libraries selected by that Wine build. Wine's PE Wayland driver must be packaged as well.
 
-The runtime preflight checks the PRoot host, Box64/Wine ELF files and both Wayland drivers. Before the ZIP is produced, the packager also follows the `DT_NEEDED` entries of the ARM64 launch programs, the x86-64 Wine loader and its Unix Wayland modules, and the bundled x86-64 Box64 support libraries. It verifies that every transitive ELF dependency resolves inside the rootfs and has the expected machine architecture. It also checks the XKB rules, keycodes and US symbols data files. This is a static package check; it does not run the loader or prove that the final binary pair starts on an Android device. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
+The runtime preflight checks the PRoot host, Box64/Wine ELF files and all three Wine Wayland driver components. Before the ZIP is produced, the packager follows the `DT_NEEDED` entries of the ARM64 launch programs, the x86-64 Wine loader and its Unix Wayland modules, and the bundled x86-64 Box64 support libraries. It verifies that every transitive ELF dependency resolves inside the rootfs and has the expected machine architecture. It also checks the XKB rules, keycodes and US symbols data files. In addition, it scans both Wine PE trees (`x86_64-windows` and `i386-windows`), requires `ntdll.dll` in each, and validates the machine type of every packaged `.dll`, `.exe`, `.drv`, `.ocx`, `.cpl`, `.scr`, `.sys` and `.com` image. This catches accidentally mixed or missing 32-bit/64-bit Wine components before packaging. These are static package checks; they do not run the loader or prove that the final binary pair starts on an Android device. Prefix initialization additionally requires the AMD64 PE program `/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe`, invoked through the Linux ELF loader `/usr/bin/wine`.
 
 ## Pinned upstream build inputs (not yet assembled or device-validated)
 
@@ -125,7 +125,7 @@ proot
   LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu
   BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/box64-x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
   WINEARCH=wow64
-  WINEDLLPATH=/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
+  WINEDLLPATH=/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:/usr/lib/x86_64-linux-gnu/wine/i386-windows:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix
   WAYLAND_DISPLAY=wayland-0
   XDG_RUNTIME_DIR=/run/user/<uid>
   /usr/bin/box64
@@ -151,9 +151,9 @@ The JVM tests use a controlled fake PRoot process that creates the expected regi
 
 ## Display preconditions
 
-The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. It also requires both guest glibc loaders — ARM64 for Box64 and x86-64 for Wine — and both Wine Wayland driver files before preparing PRoot. This catches a rootfs with the wrong ABI or missing display payload before starting a process.
+The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. It requires both guest glibc loaders — ARM64 for Box64 and x86-64 for Wine — plus all three Wine Wayland components: the x86-64 Unix ELF module, the AMD64 PE driver and the i386 PE driver. This catches a rootfs with the wrong ABI or missing display payload before starting a process.
 
-The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The RamenWine adapter source is present, but its pinned Nix-built native payload still has to be generated/staged and its Vulkan surface must pass a physical-device smoke test. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. This launcher is still not connected to a user-facing Play button.
+The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The RamenWine adapter source is present, but its pinned Nix-built native payload still has to be generated/staged and its Vulkan surface must pass a physical-device smoke test. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. The library's **Играть** action is already wired to `GamePlayerActivity`, which opens the dedicated game-only surface and delegates launch to this coordinator. However, the action is enabled only when `RuntimeLayout` reports `FILES_PRESENT`; that state checks package contents and permissions, not whether Wine can actually boot. The full runtime ZIP and Wawona native payload still have not been built, installed and verified on a physical phone.
 
 Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
 
@@ -168,14 +168,16 @@ The process supervisor:
 
 JVM regression tests exercise merged output, natural exit, deterministic final-output draining, concurrent stop calls, graceful-to-forced termination escalation, prefix initialization and fail-closed prefix checks. The process-wide prefix lock is shared between coordinator instances, while each display-session lease serializes resize and close. The GameLaunchCoordinator runs prefix initialization before starting the selected game and closes its display session once the supervised PRoot process exits or is stopped. Wawona's native compositor teardown runs on `Dispatchers.IO`, not the Android main thread; the public exit callback is delivered back on Main after display cleanup. The implementation has not yet been validated against Wine child-process trees on a physical Android device; a production backend must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
 
-## Validation gates before enabling Play
+## Validation gates before claiming a working Windows game launch
 
-1. Package PRoot for Android/Bionic ARM64 and run `proot --version` under the app UID.
-2. Install an ARM64 glibc rootfs and run a Linux ARM64 smoke executable inside it; verify its ARM64 ELF interpreter is present.
-3. Build Box64 for generic ARM64 Linux/glibc inside an ARM64 PRoot/chroot environment; run `box64 -v` and an x86-64 ELF smoke program. Do not use Box64's native Termux build, which upstream labels experimental and says will not run Linux binaries.
-4. Add the x86-64 glibc loader and library closure to the same rootfs. Build Wine 11 WoW64 with Wayland development dependencies present, verify both Wayland driver outputs, and prove `wineboot --init` creates both registry files.
-5. Start the Wayland compositor on Android, bind its socket into the rootfs and run an original Win32 GDI test window.
-6. Verify the window appears on the Android SurfaceView and that touch, keyboard, close, pause/resume and process teardown work.
-7. Run x86-64 and WoW64 samples before attempting commercial visual-novel engines.
+The main-library Play action and the immersive game Activity are wired in source. The UI enables Play when the required runtime files are inventoried as present, but this is only a package-presence gate. The following evidence is still required before describing the engine as working:
 
+1. Build the pinned Android/Bionic PRoot host payload and run it under the app UID.
+2. Build the Ubuntu ARM64 rootfs, ARM64 Box64 and x86-64 Wine 11 WoW64 runtime. The packager must validate both ELF dependency closures and every PE image in both Wine architecture directories.
+3. Install the runtime ZIP on an ARM64 phone, then run Box64 and an x86-64 Linux smoke program inside the PRoot guest.
+4. Create a real per-game Wine prefix using Wine 11 wineboot.exe --init; confirm the two registry files and the #arch=win64 marker.
+5. Build and stage the pinned Wawona native payload. Show a real Wayland SHM test-client window on the Android Surface; a ready socket or native running flag alone is insufficient.
+6. Launch an original Win32 GDI test window through PRoot, Box64 and Wine and confirm that its pixels appear directly on the game Surface, without a Windows desktop shell.
+7. Verify touch-to-click, pointer movement, keyboard input, resize, exit, pause/resume, Activity recreation and full process cleanup on the device.
+8. Run both 32-bit and 64-bit Windows samples, then test an appropriately licensed visual novel and record its engine, architecture and device configuration.
 No actual Windows EXE launch is claimed until these gates pass.

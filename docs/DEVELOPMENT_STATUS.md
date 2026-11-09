@@ -1,6 +1,6 @@
 # RamenWine development status
 
-**Snapshot:** 2026-11-09  
+**Snapshot:** 2026-11-10  
 **Current milestone:** finish a real Windows execution runtime and launch an original visual-novel test executable. The installable APK is a final packaging step only.
 
 ## Implemented
@@ -33,6 +33,7 @@
 - PRoot runtime packaging now requires the separately-installed ARM64 helper at `host/libexec/proot/loader` and passes its app-private path through `PROOT_LOADER`; this avoids the Termux build prefix being baked into the executable.
 - Added a Termux-based source build and staging tool for the Android/Bionic PRoot host. It verifies exact package versions, symlink containment, ARM64 ELF files and records package/toolchain hashes. This produces a separate runtime input, not an APK; no validated host payload is currently bundled in the app.
 - Added `tools/build_glibc_runtime.py` for the guest runtime: pinned Ubuntu Base ARM64, ARM64 Box64, Box64's x86-64 fallback-library bundle, Wine 11.0 with i386 and x86-64 PE targets, Wayland, XKB data and an offline runtime ZIP. It validates required files and records source/dependency provenance. The builder source exists; the full runtime has not yet been built or launched.
+- Runtime packager checks the full Wine WoW64 PE trees: it requires `ntdll.dll` in both `x86_64-windows` and `i386-windows` and rejects a Windows executable, DLL or driver whose PE machine type does not match its directory.
 - Coroutine PRoot process supervision with one process-exit waiter, merged stdout/stderr, main-thread callbacks, serialized stop requests, graceful/forced termination and output draining before the exit callback. Process creation is cancellation-safe: if the screen closes before a process session is handed back, the new process is stopped instead of being orphaned.
 - WinePrefixInitializer that runs Box64 → Wine's unified Linux ELF loader → the AMD64 PE `wineboot.exe --init` program for a new per-game prefix, serializes requests, enforces a timeout and verifies system.reg/user.reg before permitting game launch (host-tested with a fake PRoot process).
 - GameLaunchCoordinator that starts the display session before building the launch command, owns process/display lifetime, and closes the display once the process exits or is stopped, including cancellation and stop failures.
