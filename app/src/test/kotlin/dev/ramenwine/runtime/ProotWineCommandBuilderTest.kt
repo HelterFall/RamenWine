@@ -60,8 +60,8 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals(
                 "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
-                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:" +
-                    "/usr/lib/box64-x86_64-linux-gnu",
+                    "/usr/lib/box64-x86_64-linux-gnu:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
                 guestEnvironment["BOX64_LD_LIBRARY_PATH"]
             )
             assertEquals(

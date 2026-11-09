@@ -424,8 +424,8 @@ object ProotWineCommandBuilder {
         "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
     private const val GUEST_X64_LIBRARY_PATH =
         "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
-            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix:" +
-            "/usr/lib/box64-x86_64-linux-gnu"
+            "/usr/lib/box64-x86_64-linux-gnu:" +
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
     private const val BOX64_X64_LIBRARY_DIRECTORY =
         "usr/lib/box64-x86_64-linux-gnu"
     private const val GUEST_WINE_DLL_PATH =

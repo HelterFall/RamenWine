@@ -284,7 +284,7 @@ def prepare_apt_root(apt_root: Path, keyring: Path | None = None) -> tuple[Path,
 
 def download_and_extract_guest_packages(
     rootfs: Path, apt_root: Path, snapshot: str
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     archives, options = prepare_apt_root(apt_root)
     run(["apt-get", *options, "update", "--snapshot", snapshot])
     run([
@@ -295,21 +295,27 @@ def download_and_extract_guest_packages(
     if not debs:
         raise ValueError("APT did not download any guest runtime packages.")
 
-    provenance: list[dict[str, str]] = []
+    provenance: list[dict[str, object]] = []
     for deb in debs:
         name = output(["dpkg-deb", "-f", str(deb), "Package"])
         version = output(["dpkg-deb", "-f", str(deb), "Version"])
         architecture = output(["dpkg-deb", "-f", str(deb), "Architecture"])
         digest = sha256_file(deb)
-        if name == "libwine":
-            continue
-        run(["dpkg-deb", "-x", str(deb), str(rootfs)])
-        provenance.append({
+        # Ubuntu's libwine package is a dependency seed only. Its dependency
+        # closure supplies optional runtime libraries, but its Wine 9 files
+        # must never be unpacked over the separately-built Wine 11 payload.
+        package_record: dict[str, object] = {
             "name": name,
             "version": version,
             "architecture": architecture,
             "sha256": digest,
-        })
+            "extracted": False,
+        }
+        provenance.append(package_record)
+        if name == "libwine":
+            continue
+        run(["dpkg-deb", "-x", str(deb), str(rootfs)])
+        package_record["extracted"] = True
     return provenance
 
 
@@ -458,7 +464,7 @@ def build_wine(source_archive: Path, rootfs: Path, work_dir: Path, jobs: int) ->
 def write_provenance(
     backend: Path,
     snapshot: str,
-    packages: list[dict[str, str]],
+    packages: list[dict[str, object]],
     dynarec: bool,
     box64_bundle: dict[str, object],
 ) -> None:

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
@@ -96,6 +97,86 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             self.assertTrue((archives / "partial").is_dir())
             self.assertIn("APT::Architecture=amd64", options)
             self.assertIn("APT::Architectures::=arm64", options)
+
+
+    def test_records_libwine_as_dependency_seed_without_extracting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archives = root / "apt" / "archives"
+            archives.mkdir(parents=True)
+            rootfs = root / "rootfs"
+            rootfs.mkdir()
+            libc_deb = archives / "libc6_2.39.deb"
+            wine_deb = archives / "libwine_9.0.deb"
+            libc_deb.write_bytes(b"libc package fixture")
+            wine_deb.write_bytes(b"Ubuntu Wine package fixture")
+            metadata = {
+                libc_deb.name: {
+                    "Package": "libc6",
+                    "Version": "2.39-0ubuntu8",
+                    "Architecture": "arm64",
+                },
+                wine_deb.name: {
+                    "Package": "libwine",
+                    "Version": "9.0~repack-4build3",
+                    "Architecture": "amd64",
+                },
+            }
+            executed: list[list[str]] = []
+
+            def fake_output(command: list[str]) -> str:
+                return metadata[Path(command[2]).name][command[-1]]
+
+            with (
+                patch.object(
+                    build_glibc_runtime,
+                    "prepare_apt_root",
+                    return_value=(archives, ["-o", "Dir::State::test"]),
+                ),
+                patch.object(
+                    build_glibc_runtime,
+                    "run",
+                    side_effect=lambda command, **kwargs: executed.append(command),
+                ),
+                patch.object(
+                    build_glibc_runtime,
+                    "output",
+                    side_effect=fake_output,
+                ),
+                patch.object(
+                    build_glibc_runtime,
+                    "sha256_file",
+                    return_value="a" * 64,
+                ),
+            ):
+                provenance = build_glibc_runtime.download_and_extract_guest_packages(
+                    rootfs,
+                    root / "apt",
+                    "20261109T000000Z",
+                )
+
+            self.assertEqual(
+                {"libc6", "libwine"},
+                {str(item["name"]) for item in provenance},
+            )
+            extracted = {
+                str(item["name"]): item["extracted"]
+                for item in provenance
+            }
+            self.assertTrue(extracted["libc6"])
+            self.assertFalse(extracted["libwine"])
+            self.assertTrue(
+                any(
+                    command[:2] == ["dpkg-deb", "-x"] and command[2] == str(libc_deb)
+                    for command in executed
+                )
+            )
+            self.assertFalse(
+                any(
+                    command[:2] == ["dpkg-deb", "-x"] and command[2] == str(wine_deb)
+                    for command in executed
+                )
+            )
 
     def test_box64_bundle_script_cleanup_is_scoped_to_its_build_directory(self) -> None:
         source = (
