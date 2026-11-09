@@ -66,7 +66,7 @@ kotlin {
 // Gradle build. Without the property, the existing optional generated source
 // directory is left untouched so source/JVM-only builds remain possible.
 val androidSdkComponents = extensions
-    .getByType<com.android.build.api.dsl.ApplicationExtension>()
+    .getByType<com.android.build.api.variant.ApplicationAndroidComponentsExtension>()
     .sdkComponents
 val wawonaArtifactZipPath = providers.gradleProperty("wawonaArtifactZip")
     .orElse(providers.environmentVariable("WAWONA_ARTIFACT_ZIP"))
