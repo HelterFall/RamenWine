@@ -56,6 +56,32 @@ class WawonaDisplayBackendTest {
     }
 
     @Test
+    fun runIfActiveDispatchesOnlyForCurrentLease() {
+        val first = WawonaProcessSessionGuard.acquire()
+        var calls = 0
+        try {
+            assertTrue(WawonaProcessSessionGuard.runIfActive(first) { calls += 1 })
+        } finally {
+            WawonaProcessSessionGuard.release(first)
+        }
+
+        val second = WawonaProcessSessionGuard.acquire()
+        try {
+            val staleDispatched = WawonaProcessSessionGuard.runIfActive(first) {
+                calls += 100
+            }
+            val currentDispatched = WawonaProcessSessionGuard.runIfActive(second) {
+                calls += 1
+            }
+            assertTrue(!staleDispatched)
+            assertTrue(currentDispatched)
+            assertEquals(2, calls)
+        } finally {
+            WawonaProcessSessionGuard.release(second)
+        }
+    }
+
+    @Test
     fun closeLeaseIsIdempotentAndReleasesAfterSuccess() {
         val lease = WawonaProcessSessionGuard.acquire()
         var closeCalls = 0
