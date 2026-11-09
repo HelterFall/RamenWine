@@ -23,19 +23,19 @@ class WawonaApkPackagerTests(unittest.TestCase):
 
             with zipfile.ZipFile(apk) as archive:
                 libraries = package_wawona_apk.apk_native_libraries(archive)
+                self.assertIn("libwayland-server.so.0", libraries)
 
-            self.assertIn("libwayland-server.so.0", libraries)
-            dependencies = {
-                "libwawona.so": (["libwayland-server.so.0"], "libwawona.so"),
-                "libEGL_angle.so": ([], "libEGL_angle.so"),
-                "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
-                "libwayland-server.so.0": (["liblog.so"], "libwayland-server.so.0"),
-            }
-            selected = package_wawona_apk.collect_native_closure(
-                libraries,
-                lambda filename, _data: dependencies[filename],
-            )
-            self.assertIn("libwayland-server.so.0", selected)
+                dependencies = {
+                    "libwawona.so": (["libwayland-server.so.0"], "libwawona.so"),
+                    "libEGL_angle.so": ([], "libEGL_angle.so"),
+                    "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
+                    "libwayland-server.so.0": (["liblog.so"], "libwayland-server.so.0"),
+                }
+                selected = package_wawona_apk.collect_native_closure(
+                    libraries,
+                    lambda filename, _data: dependencies[filename],
+                )
+                self.assertIn("libwayland-server.so.0", selected)
 
     def test_parses_dt_needed_and_soname(self) -> None:
         output = """
