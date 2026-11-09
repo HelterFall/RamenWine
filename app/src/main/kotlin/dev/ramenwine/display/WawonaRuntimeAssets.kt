@@ -48,9 +48,8 @@ internal class WawonaRuntimeAssets(context: Context) {
 
     private fun copyAssetTree(assetPath: String, destination: File, required: Boolean) {
         val entries = appContext.assets.list(assetPath)
-            ?: throw IOException("Missing packaged Wawona asset tree: " + assetPath)
-        if (entries.isEmpty()) {
-            if (required) throw IOException("Wawona asset tree is empty: " + assetPath)
+        if (entries == null || entries.isEmpty()) {
+            if (required) throw IOException("Missing or empty Wawona asset tree: " + assetPath)
             return
         }
 
