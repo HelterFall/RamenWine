@@ -336,6 +336,23 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "required guest path is missing"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
+    def test_rejects_unresolved_wineserver_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            self._write_elf64_dynamic(
+                backend / "rootfs" / "usr" / "bin" / "wineserver",
+                package_runtime.ELF_MACHINE_X86_64,
+                needed=("libmissing-wineserver.so.1",),
+                interpreter="/lib64/ld-linux-x86-64.so.2",
+                executable=True,
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "unresolved ELF dependency.*libmissing-wineserver.so.1",
+            ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
     def test_rejects_wrong_architecture_for_wine_server(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
