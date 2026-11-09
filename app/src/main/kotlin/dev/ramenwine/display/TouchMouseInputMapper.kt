@@ -28,6 +28,8 @@ internal class TouchMouseInputMapper {
             val pressed: Boolean,
             val timestamp: Int
         ) : Command()
+
+        data class KeyboardFocus(val focused: Boolean) : Command()
     }
 
     val activePointerId: Int?
@@ -46,6 +48,9 @@ internal class TouchMouseInputMapper {
         ownerPointerId = pointerId
         return listOf(
             Command.PointerEnter(x, y, timestamp),
+            // The native focus callback can arrive before pointer hit-testing
+            // has identified a Wayland window. Focus it only after PointerEnter.
+            Command.KeyboardFocus(focused = true),
             Command.PointerButton(BTN_LEFT, pressed = true, timestamp = timestamp)
         )
     }
