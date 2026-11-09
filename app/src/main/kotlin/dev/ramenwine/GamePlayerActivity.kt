@@ -42,6 +42,9 @@ import kotlinx.coroutines.withContext
 class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     companion object {
         const val EXTRA_GAME_ID = "dev.ramenwine.extra.GAME_ID"
+        const val EXTRA_WAYLAND_PROBE_ARCHITECTURE =
+            "dev.ramenwine.extra.WAYLAND_PROBE_ARCHITECTURE"
+        private const val WAYLAND_PROBE_GAME_ID = "11111111-1111-4111-8111-111111111111"
         private const val EXIT_DIAGNOSTIC_LINES = 10
         private const val STARTUP_DIAGNOSTIC_LINES = 8
     }
@@ -54,6 +57,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     private lateinit var statusView: TextView
     private lateinit var game: ImportedGame
     private lateinit var coordinator: GameLaunchCoordinator
+    private var launchOperation = dev.ramenwine.runtime.ProotWineOperation.RUN_GAME
 
     private val runtimeOutput = RuntimeOutputBuffer()
 
@@ -113,16 +117,72 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
             }
         )
 
-        val gameId = intent.getStringExtra(EXTRA_GAME_ID)
-        val storedGame = gameId?.let { id ->
-            GameLibraryStore(applicationContext).list().firstOrNull { it.id == id }
+        val probeArchitecture = intent.getStringExtra(EXTRA_WAYLAND_PROBE_ARCHITECTURE)
+        if (probeArchitecture != null) {
+            if (!BuildConfig.DEBUG) {
+                showStatus("Тестовое Windows-окно доступно только в debug-сборке.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+            if (probeArchitecture != "x86" && probeArchitecture != "x86-64") {
+                showStatus("Неизвестная архитектура тестового Windows-окна.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+
+            val gamesRoot = java.io.File(filesDir, "games")
+            if (!gamesRoot.exists() && !gamesRoot.mkdirs()) {
+                showStatus("Не удалось подготовить папку тестовой игры.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+            val canonicalGamesRoot = gamesRoot.canonicalFile
+            if (canonicalGamesRoot.parentFile != filesDir.canonicalFile) {
+                showStatus("Папка тестовой игры выходит за пределы хранилища приложения.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+            val probeDirectory = java.io.File(canonicalGamesRoot, WAYLAND_PROBE_GAME_ID)
+            if (!probeDirectory.exists() && !probeDirectory.mkdir()) {
+                showStatus("Не удалось создать папку тестовой игры.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+            if (!probeDirectory.isDirectory ||
+                probeDirectory.canonicalFile.parentFile != canonicalGamesRoot
+            ) {
+                showStatus("Папка тестовой игры повреждена или небезопасна.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+
+            val probeExecutable = if (probeArchitecture == "x86") {
+                "wayland-probe-i386.exe"
+            } else {
+                "wayland-probe-x86_64.exe"
+            }
+            game = ImportedGame(
+                id = WAYLAND_PROBE_GAME_ID,
+                title = "RamenWine — тест Wayland",
+                relativeDirectory = "games/" + WAYLAND_PROBE_GAME_ID,
+                executableRelativePath = probeExecutable,
+                architecture = probeArchitecture,
+                totalBytes = 0L,
+                importedAtEpochMillis = 0L
+            )
+            launchOperation = dev.ramenwine.runtime.ProotWineOperation.RUN_WAYLAND_PROBE
+        } else {
+            val gameId = intent.getStringExtra(EXTRA_GAME_ID)
+            val storedGame = gameId?.let { id ->
+                GameLibraryStore(applicationContext).list().firstOrNull { it.id == id }
+            }
+            if (storedGame == null) {
+                showStatus("Эта игра больше не найдена в библиотеке. Вернись назад и добавь её снова.")
+                surfaceView.visibility = View.GONE
+                return
+            }
+            game = storedGame
         }
-        if (storedGame == null) {
-            showStatus("Эта игра больше не найдена в библиотеке. Вернись назад и добавь её снова.")
-            surfaceView.visibility = View.GONE
-            return
-        }
-        game = storedGame
 
         if (game.architecture != "x86" && game.architecture != "x86-64") {
             showStatus(
@@ -147,7 +207,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
             applicationContext,
             WawonaDisplayBackend(applicationContext)
         )
-        showStatus("Ожидание игрового экрана…")
+        showStatus(
+            if (launchOperation == dev.ramenwine.runtime.ProotWineOperation.RUN_WAYLAND_PROBE) {
+                "Ожидание экрана тестового Windows-окна…"
+            } else {
+                "Ожидание игрового экрана…"
+            }
+        )
         // Surface callbacks can arrive before the library/runtime checks finish.
         // Start now if Android already created the Surface.
         currentSurface?.takeIf { it.isValid }?.let { surface ->
@@ -194,7 +260,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     private fun startGame(surface: Surface, widthPx: Int, heightPx: Int) {
         val requestedGeneration = ++generation
         runtimeOutput.clear()
-        showStatus("Запускаю новеллу…")
+        showStatus(
+            if (launchOperation == dev.ramenwine.runtime.ProotWineOperation.RUN_WAYLAND_PROBE) {
+                "Запускаю тестовое Windows-окно…"
+            } else {
+                "Запускаю новеллу…"
+            }
+        )
 
         launchJob = uiScope.launch {
             try {
@@ -205,6 +277,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
                         widthPx = widthPx,
                         heightPx = heightPx,
                         onOutput = runtimeOutput::append,
+                        operation = launchOperation,
                         onExit = { exitCode ->
                             // The supervisor drains merged stdout/stderr before
                             // invoking onExit, so this snapshot includes Wine's
@@ -273,12 +346,15 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         if (closing || isFinishing || isDestroyed) return
         surfaceView.bindSession(null)
         launchSession = null
+        val subject = if (
+            launchOperation == dev.ramenwine.runtime.ProotWineOperation.RUN_WAYLAND_PROBE
+        ) "Тестовое Windows-окно" else "Новелла"
         val message = if (exitCode == 0) {
-            "Новелла завершилась."
+            subject + " завершилось."
         } else {
             val diagnosticText = if (recentOutput.isEmpty()) "" else
                 "\n\n" + recentOutput.joinToString("\n")
-            "Новелла закрылась (код $exitCode)." + diagnosticText
+            subject + " закрылось (код $exitCode)." + diagnosticText
         }
         showStatus(message)
     }
@@ -289,7 +365,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         generation += 1
         cancelPendingLaunch()
         surfaceView.bindSession(null)
-        showStatus("Закрываю новеллу…")
+        showStatus(
+            if (launchOperation == dev.ramenwine.runtime.ProotWineOperation.RUN_WAYLAND_PROBE) {
+                "Закрываю тестовое Windows-окно…"
+            } else {
+                "Закрываю новеллу…"
+            }
+        )
 
         val active = launchSession
         launchSession = null
