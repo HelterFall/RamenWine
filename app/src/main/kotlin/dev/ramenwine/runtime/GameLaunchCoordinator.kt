@@ -39,7 +39,8 @@ class GameLaunchCoordinator(
         onOutput: (String) -> Unit,
         onExit: (Int) -> Unit,
         hostUid: Int = Process.myUid(),
-        locale: String = "C.UTF-8"
+        locale: String = "C.UTF-8",
+        operation: ProotWineOperation = ProotWineOperation.RUN_GAME
     ): GameLaunchSession {
         require(surface.isValid) { "The Android game surface is not ready." }
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
@@ -57,7 +58,8 @@ class GameLaunchCoordinator(
                 game = game,
                 display = displaySession.endpoint,
                 hostUid = hostUid,
-                locale = locale
+                locale = locale,
+                operation = operation
             )
             // Never launch the game in an empty or partially-created prefix.
             // The initializer is a no-op once both Wine registry files exist.
