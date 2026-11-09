@@ -12,6 +12,31 @@ import package_wawona_apk
 
 
 class WawonaApkPackagerTests(unittest.TestCase):
+    def test_includes_versioned_shared_library_sonames(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            apk = Path(temporary) / "wawona.apk"
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("lib/arm64-v8a/libwawona.so", b"wawona")
+                archive.writestr("lib/arm64-v8a/libEGL_angle.so", b"angle-egl")
+                archive.writestr("lib/arm64-v8a/libGLESv2_angle.so", b"angle-gles")
+                archive.writestr("lib/arm64-v8a/libwayland-server.so.0", b"wayland")
+
+            with zipfile.ZipFile(apk) as archive:
+                libraries = package_wawona_apk.apk_native_libraries(archive)
+
+            self.assertIn("libwayland-server.so.0", libraries)
+            dependencies = {
+                "libwawona.so": (["libwayland-server.so.0"], "libwawona.so"),
+                "libEGL_angle.so": ([], "libEGL_angle.so"),
+                "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
+                "libwayland-server.so.0": (["liblog.so"], "libwayland-server.so.0"),
+            }
+            selected = package_wawona_apk.collect_native_closure(
+                libraries,
+                lambda filename, _data: dependencies[filename],
+            )
+            self.assertIn("libwayland-server.so.0", selected)
+
     def test_parses_dt_needed_and_soname(self) -> None:
         output = """
  0x0000000000000001 (NEEDED) Shared library: [libwayland-server.so]
