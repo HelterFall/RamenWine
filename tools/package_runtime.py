@@ -924,6 +924,20 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
     require_pe_i386(wayland_i386_pe, "Wine 32-bit Wayland PE driver")
 
+    for relative_path, validator, label in (
+        (
+            "/usr/lib/ramenwine/probes/wayland-probe-x86_64.exe",
+            require_pe_amd64,
+            "AMD64 Wayland probe",
+        ),
+        (
+            "/usr/lib/ramenwine/probes/wayland-probe-i386.exe",
+            require_pe_i386,
+            "i386 Wayland probe",
+        ),
+    ):
+        validator(resolve_guest_file(rootfs, relative_path), label)
+
     wine_pe_root = "/usr/lib/x86_64-linux-gnu/wine"
     validate_wine_pe_directory(
         rootfs,
