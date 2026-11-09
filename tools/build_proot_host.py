@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import platform
 import shutil
@@ -27,6 +29,113 @@ REQUIRED_PROOT_CLI_OPTIONS = (
     "--link2symlink",
     "--sysvipc",
 )
+
+PROOT_SIGTERM_PATCH_ID = "ramenwine-proot-sigterm-cleanup-v1"
+PROOT_SIGTERM_PATCH_MARKER = "# RAMENWINE_PROOT_SIGTERM_CLEANUP_V1"
+PROOT_SIGTERM_RECIPE_PATCH = r"""    # RAMENWINE_PROOT_SIGTERM_CLEANUP_V1
+    # Android Process.destroy() sends SIGTERM. The pinned PRoot ignores it
+    # unless this signal is routed through its existing tracee cleanup handler.
+    event_source="$TERMUX_PKG_SRCDIR/src/tracee/event.c"
+    if ! grep -Fq 'case SIGQUIT:' "$event_source"; then
+        echo "Unexpected pinned PRoot signal switch; refusing to patch it." >&2
+        return 1
+    fi
+    if ! grep -Fq 'if (signum != SIGQUIT)' "$event_source"; then
+        echo "Unexpected pinned PRoot SIGQUIT exit condition; refusing to patch it." >&2
+        return 1
+    fi
+    if grep -Fq 'case SIGTERM:' "$event_source" ||
+       grep -Fq 'if (signum != SIGQUIT && signum != SIGTERM)' "$event_source"; then
+        echo "Pinned PRoot source already contains a partial SIGTERM patch." >&2
+        return 1
+    fi
+    sed -i '/^[[:space:]]*case SIGQUIT:$/a\
+        case SIGTERM:' "$event_source" || return 1
+    sed -i 's/if (signum != SIGQUIT)/if (signum != SIGQUIT \&\& signum != SIGTERM)/' "$event_source" || return 1
+    grep -Fq 'case SIGTERM:' "$event_source" || return 1
+    grep -Fq 'if (signum != SIGQUIT && signum != SIGTERM)' "$event_source" || return 1
+"""
+
+
+
+def patch_pinned_proot_recipe(source: Path) -> bool:
+    """Patch the pinned Termux recipe so SIGTERM reaps Wine/Box64 tracees."""
+    recipe_path = source / "packages" / "proot" / "build.sh"
+    if not recipe_path.is_file() or recipe_path.is_symlink():
+        raise ValueError("Pinned Termux PRoot build recipe is missing or unsafe.")
+
+    recipe = recipe_path.read_text(encoding="utf-8")
+    marker_present = PROOT_SIGTERM_PATCH_MARKER in recipe
+    required_tokens = (
+        'event_source="$TERMUX_PKG_SRCDIR/src/tracee/event.c"',
+        "/^[[:space:]]*case SIGQUIT:$/a",
+        "case SIGTERM:",
+        "if (signum != SIGQUIT && signum != SIGTERM)",
+    )
+    if marker_present:
+        missing = [token for token in required_tokens if token not in recipe]
+        if missing:
+            raise ValueError(
+                "Pinned PRoot recipe contains an incomplete SIGTERM patch: "
+                + ", ".join(missing)
+            )
+        return False
+    if any(token in recipe for token in required_tokens):
+        raise ValueError("Pinned PRoot recipe contains an unmarked or partial downstream patch.")
+
+    start_token = "termux_step_pre_configure() {"
+    if recipe.count(start_token) != 1:
+        raise ValueError("Pinned Termux PRoot recipe has an unexpected pre-configure layout.")
+    start = recipe.index(start_token)
+    end = recipe.find("\n}", start)
+    if end < 0:
+        raise ValueError("Pinned Termux PRoot pre-configure function is not terminated.")
+    function_body = recipe[start:end]
+    if function_body.count("CPPFLAGS+=") != 1:
+        raise ValueError(
+            "Pinned Termux PRoot pre-configure function changed; refusing to patch it."
+        )
+
+    patched = (
+        recipe[:end]
+        + "\n"
+        + PROOT_SIGTERM_RECIPE_PATCH.rstrip()
+        + recipe[end:]
+    )
+    recipe_path.write_text(patched, encoding="utf-8")
+    return True
+
+
+def record_proot_patch_provenance(host_payload: Path, recipe_path: Path) -> None:
+    """Record the exact downstream PRoot patch that changed signal handling."""
+    provenance_path = host_payload / "PROVENANCE.json"
+    if not provenance_path.is_file() or provenance_path.is_symlink():
+        raise ValueError("PRoot host payload is missing its provenance manifest.")
+    try:
+        metadata = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("PRoot host provenance manifest is invalid.") from error
+    if not isinstance(metadata, dict) or metadata.get("target") != "android-bionic-arm64":
+        raise ValueError("PRoot host provenance manifest has an unexpected target.")
+
+    package_root = recipe_path.parents[2]
+    metadata["downstreamPatches"] = {
+        "prootTermination": {
+            "id": PROOT_SIGTERM_PATCH_ID,
+            "file": recipe_path.relative_to(package_root).as_posix(),
+            "recipeSha256": hashlib.sha256(recipe_path.read_bytes()).hexdigest(),
+            "behavior": (
+                "Treat SIGTERM from Android Process.destroy() as a graceful PRoot "
+                "shutdown request: kill all tracees and let the event loop reap them."
+            ),
+        }
+    }
+    temporary = provenance_path.with_name(provenance_path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, provenance_path)
 
 
 def validate_pinned_proot_source_contract(source: Path) -> None:
@@ -80,6 +189,15 @@ def validate_pinned_proot_source_contract(source: Path) -> None:
                 "Pinned Termux PRoot package recipe is missing a required Android build setting: "
                 + required
             )
+
+    for required in (
+        PROOT_SIGTERM_PATCH_MARKER,
+        'event_source="$TERMUX_PKG_SRCDIR/src/tracee/event.c"',
+        "case SIGTERM:",
+        "if (signum != SIGQUIT && signum != SIGTERM)",
+    ):
+        if required not in package_recipe:
+            raise ValueError("Pinned Termux PRoot SIGTERM cleanup patch is missing: " + required)
 
 
 def run(
@@ -171,8 +289,12 @@ def build(args: argparse.Namespace) -> Path:
             "Termux checkout does not match the pinned source commit: " + revision
         )
 
-    # Confirm that the exact pinned PRoot source and package recipe still
-    # provide every CLI flag and host integration used by Android at runtime.
+    # Android Process.destroy() sends SIGTERM; patch the pinned PRoot recipe
+    # to route it through the upstream tracee cleanup handler.
+    patch_pinned_proot_recipe(source)
+
+    # Confirm the pinned source and patched recipe still provide the command
+    # contract used by the Android runtime.
     validate_pinned_proot_source_contract(source)
 
     container_name = "ramenwine-proot-host-" + uuid.uuid4().hex[:12]
@@ -220,6 +342,7 @@ def build(args: argparse.Namespace) -> Path:
     host_payload = output / "host"
     if not host_payload.is_dir():
         raise ValueError("The PRoot assembler did not create its host payload.")
+    record_proot_patch_provenance(host_payload, source / "packages/proot" / "build.sh")
     print("Validated Android/Bionic PRoot host payload:", host_payload)
     return host_payload
 
