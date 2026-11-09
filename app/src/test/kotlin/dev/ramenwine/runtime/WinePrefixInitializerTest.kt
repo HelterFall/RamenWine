@@ -103,6 +103,7 @@ class WinePrefixInitializerTest {
             executable(rootfs, "usr/bin/box64")
             executable(rootfs, "usr/bin/wine")
             executable(rootfs, "usr/bin/wineboot")
+            regular(rootfs, "lib/ld-linux-aarch64.so.1")
             regular(rootfs, "lib64/ld-linux-x86-64.so.2")
             regular(
                 rootfs,
