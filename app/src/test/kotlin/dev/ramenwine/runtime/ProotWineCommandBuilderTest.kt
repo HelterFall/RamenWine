@@ -65,6 +65,7 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals(
                 "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +
                     "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
                 guestEnvironment["WINEDLLPATH"]
             )

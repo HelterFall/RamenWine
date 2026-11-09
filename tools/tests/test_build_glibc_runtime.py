@@ -43,6 +43,24 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                 "20261109T000000Z", "runtime-1", 33
             )
 
+    def test_host_build_uses_only_official_noble_amd64_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            keyring = root / "ubuntu-archive-keyring.gpg"
+            keyring.write_bytes(b"test keyring")
+            options = build_glibc_runtime.prepare_host_apt(
+                root / "host-apt",
+                keyring=keyring,
+            )
+            sources = (root / "host-apt" / "sources.list").read_text(encoding="utf-8")
+
+            self.assertIn("archive.ubuntu.com/ubuntu noble", sources)
+            self.assertIn("security.ubuntu.com/ubuntu noble-security", sources)
+            self.assertNotIn("ports.ubuntu.com", sources)
+            self.assertNotIn("ppa.launchpad", sources)
+            self.assertIn("APT::Architecture=amd64", options)
+            self.assertIn("Dir::Etc::sourceparts=-", options)
+
     def test_runtime_package_sources_cover_arm64_and_amd64(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

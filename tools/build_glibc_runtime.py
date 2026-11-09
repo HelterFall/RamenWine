@@ -128,11 +128,36 @@ def apt_command() -> list[str]:
     return ["sudo", "apt-get"]
 
 
-def install_host_packages(snapshot: str) -> None:
+def prepare_host_apt(apt_root: Path, keyring: Path | None = None) -> list[str]:
+    apt_root.mkdir(parents=True, exist_ok=True)
+    lists = apt_root / "lists"
+    (lists / "partial").mkdir(parents=True, exist_ok=True)
+    keyring = keyring or Path("/usr/share/keyrings/ubuntu-archive-keyring.gpg")
+    if not keyring.is_file():
+        raise ValueError("Ubuntu archive signing keyring is missing from the build host.")
+    sources = apt_root / "sources.list"
+    entries = [
+        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse",
+        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse",
+        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse",
+        "deb [arch=amd64 signed-by=" + str(keyring) + "] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse",
+    ]
+    sources.write_text("\n".join(entries) + "\n", encoding="utf-8")
+    return [
+        "-o", "Dir::Etc::sourcelist=" + str(sources),
+        "-o", "Dir::Etc::sourceparts=-",
+        "-o", "Dir::State::lists=" + str(lists),
+        "-o", "APT::Architecture=amd64",
+        "-o", "APT::Get::List-Cleanup=0",
+    ]
+
+
+def install_host_packages(snapshot: str, apt_root: Path) -> None:
     apt = apt_command()
-    run([*apt, "update", "--snapshot", snapshot])
+    options = prepare_host_apt(apt_root)
+    run([*apt, *options, "update", "--snapshot", snapshot])
     run([
-        *apt, "install", "--yes", "--no-install-recommends",
+        *apt, *options, "install", "--yes", "--no-install-recommends",
         "--snapshot", snapshot, *HOST_PACKAGES,
     ])
 
@@ -346,7 +371,7 @@ def build(args: argparse.Namespace) -> None:
         raise ValueError("PRoot host payload has no lib directory.")
 
     if not args.skip_host_dependencies:
-        install_host_packages(args.snapshot)
+        install_host_packages(args.snapshot, work / "apt-host")
     require_tools()
 
     cache = work / "cache"
@@ -378,7 +403,7 @@ def build(args: argparse.Namespace) -> None:
 
     output_path = args.output.resolve()
     if output_path == backend or backend in output_path.parents:
-        raise ValueError("The output ZIP must be outside the build work directory.")
+        raise ValueError("The output ZIP must be outside the prepared runtime directory.")
     run([
         sys.executable,
         str(Path(__file__).with_name("package_runtime.py")),

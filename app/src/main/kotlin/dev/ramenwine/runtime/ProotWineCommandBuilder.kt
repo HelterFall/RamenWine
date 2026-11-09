@@ -392,6 +392,7 @@ object ProotWineCommandBuilder {
             "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
     private const val GUEST_WINE_DLL_PATH =
         "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+            "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +
             "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
