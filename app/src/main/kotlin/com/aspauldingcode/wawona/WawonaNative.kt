@@ -27,7 +27,9 @@ object WawonaNative {
     external fun nativeSyncOutputSize(width: Int, height: Int)
     external fun nativeShutdown()
     external fun nativeSetDisplayDensity(density: Float)
-    external fun nativeSetHostSeatMode(mode: Int)
+    // RamenWine synthesizes mouse clicks from touch, so disable Wawona's
+    // separate touch-to-pointer emulation to avoid duplicate Wayland events.
+    external fun nativeSetTouchPointerEmulation(enabled: Boolean)
     external fun nativeApplySettings(
         forceServerSideDecorations: Boolean,
         autoRetinaScaling: Boolean,
