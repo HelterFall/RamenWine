@@ -12,6 +12,24 @@ import org.junit.Test
 
 class ProotWineCommandBuilderTest {
     @Test
+    fun rejectsUnsupportedWindowsArchitectureBeforePreparingRuntimePaths() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(architecture = "ARM64")
+            )
+
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Unsupported Windows executable architecture"))
+            assertFalse(File(fixture.rootfs, "games/" + fixture.gameId).exists())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun buildsProotBox64WineCommandWithPrivateBindsAndWaylandSocket() {
         val fixture = Fixture()
         try {

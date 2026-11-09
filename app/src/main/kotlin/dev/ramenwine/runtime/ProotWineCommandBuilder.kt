@@ -59,6 +59,15 @@ object ProotWineCommandBuilder {
             throw IOException("The selected game file is not an EXE.")
         }
 
+        if (request.operation == ProotWineOperation.RUN_GAME &&
+            request.game.architecture !in SUPPORTED_GAME_ARCHITECTURES
+        ) {
+            throw IOException(
+                "Unsupported Windows executable architecture: " + request.game.architecture +
+                    ". The current runtime supports x86 and x86-64 games."
+            )
+        }
+
         val filesRoot = request.filesDirectory.canonicalFile
         val runtimeRoot = File(filesRoot, "runtime/current").canonicalFile
         requireContained(filesRoot, runtimeRoot, "Runtime root")
@@ -359,6 +368,8 @@ object ProotWineCommandBuilder {
     }
 
     private const val MAX_UNIX_SOCKET_PATH_BYTES = 108
+    private val SUPPORTED_GAME_ARCHITECTURES = setOf("x86", "x86-64")
+
     private const val ARM64_GLIBC_LOADER_PATH = "lib/ld-linux-aarch64.so.1"
     private const val GLIBC_LOADER_PATH = "lib64/ld-linux-x86-64.so.2"
     private const val WINE_WAYLAND_UNIX_DRIVER_PATH =

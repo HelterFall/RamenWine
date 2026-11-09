@@ -38,6 +38,7 @@ import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.inspection.MainExecutableSelector
+import dev.ramenwine.inspection.PeArchitecture
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
@@ -465,6 +466,10 @@ private fun SelectedExecutableCard(
     onImport: () -> Unit
 ) {
     val isValidPe = candidate.peInspection?.isValidPe == true
+    val isSupportedArchitecture = candidate.peInspection?.architecture in setOf(
+        PeArchitecture.X86,
+        PeArchitecture.X86_64
+    )
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -495,6 +500,13 @@ private fun SelectedExecutableCard(
                 Text(
                     "Заголовок PE не прошёл проверку. Выбери другой EXE.",
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else if (!isSupportedArchitecture) {
+                Text(
+                    "Папку можно добавить, но запуск этой архитектуры пока не поддерживается. " +
+                        "Текущий движок рассчитан на Windows x86 и x86-64.",
+                    color = MaterialTheme.colorScheme.tertiary,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -609,6 +621,8 @@ private fun LibraryCard(
         ) {
             Text("Библиотека", fontWeight = FontWeight.Bold)
             games.forEach { game ->
+                val gameArchitectureSupported = game.architecture == "x86" ||
+                    game.architecture == "x86-64"
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(game.title, fontWeight = FontWeight.Medium)
                     Text(
@@ -624,11 +638,18 @@ private fun LibraryCard(
                     Button(
                         onClick = { onLaunch(game) },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = launchEnabled
+                        enabled = launchEnabled && gameArchitectureSupported
                     ) {
                         Text("Играть")
                     }
-                    if (!launchEnabled) {
+                    if (!gameArchitectureSupported) {
+                        Text(
+                            "Пока поддерживаются только Windows x86 и x86-64. " +
+                                "Эта игра сохранена, но запуск для неё пока недоступен.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    } else if (!launchEnabled) {
                         Text(
                             "Игровой движок ещё не установлен.",
                             style = MaterialTheme.typography.labelSmall,

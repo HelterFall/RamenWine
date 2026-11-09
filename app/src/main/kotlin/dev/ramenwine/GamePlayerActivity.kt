@@ -117,6 +117,16 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         }
         game = storedGame
 
+        if (game.architecture != "x86" && game.architecture != "x86-64") {
+            showStatus(
+                "Эта новелла использует архитектуру " + game.architecture +
+                    ". Сейчас поддерживаются Windows x86 и x86-64. " +
+                    "Игра осталась в библиотеке, исходная папка не затронута."
+            )
+            surfaceView.visibility = View.GONE
+            return
+        }
+
         val prootBackend = RuntimeLayout.inspect(filesDir).backends.firstOrNull {
             it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64
         }
