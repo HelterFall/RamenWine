@@ -254,6 +254,14 @@ class RuntimePackagerTests(unittest.TestCase):
             rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
             / "i386-windows" / "winewayland.drv",
         )
+        self._write_pe64(
+            rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+            / "x86_64-windows" / "ntdll.dll",
+        )
+        self._write_pe32(
+            rootfs / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+            / "i386-windows" / "ntdll.dll",
+        )
         for relative_path in (
             "rules/evdev",
             "keycodes/evdev",
@@ -268,6 +276,39 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = self._make_glibc_backend(Path(temporary))
             package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_missing_wow64_i386_ntdll(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu" / "wine"
+             / "i386-windows" / "ntdll.dll").unlink()
+
+            with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_mixed_pe_architecture_inside_wow64_i386_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            wrong_module = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "i386-windows" / "kernel32.dll"
+            )
+            self._write_pe64(wrong_module)
+
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_mixed_pe_architecture_inside_wow64_x64_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            wrong_module = (
+                backend / "rootfs" / "usr" / "lib" / "x86_64-linux-gnu"
+                / "wine" / "x86_64-windows" / "kernel32.dll"
+            )
+            self._write_pe32(wrong_module)
+
+            with self.assertRaisesRegex(ValueError, "wrong PE machine"):
+                package_runtime.validate_glibc_proot_box64(backend)
 
     def test_resolves_transitive_elf_dependencies_and_origin_runpath(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

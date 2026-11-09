@@ -472,6 +472,59 @@ def require_pe_amd64(path: Path, label: str) -> None:
 def require_pe_i386(path: Path, label: str) -> None:
     require_pe_machine(path, label, PE_MACHINE_I386)
 
+
+def validate_wine_pe_directory(
+    rootfs: Path,
+    relative_directory: str,
+    expected_machine: int,
+    label: str,
+) -> int:
+    """Require a complete Wine PE directory and validate every executable image's ABI."""
+    root_real = rootfs.resolve(strict=True)
+    directory = rootfs.joinpath(*PurePosixPath(relative_directory).parts)
+    try:
+        real_directory = directory.resolve(strict=True)
+        real_directory.relative_to(root_real)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"{label} PE directory is missing or escapes the guest rootfs: "
+            f"{relative_directory}"
+        ) from error
+    if not real_directory.is_dir():
+        raise ValueError(f"{label} PE path is not a directory: {relative_directory}")
+
+    guest_directory = "/" + PurePosixPath(relative_directory).as_posix()
+    ntdll = resolve_guest_file(rootfs, guest_directory + "/ntdll.dll")
+    require_pe_machine(ntdll, label + " ntdll.dll", expected_machine)
+
+    pe_extensions = {".com", ".cpl", ".dll", ".drv", ".exe", ".ocx", ".scr", ".sys"}
+    inspected = 0
+    for current_directory, child_directories, filenames in os.walk(
+        real_directory, followlinks=False
+    ):
+        child_directories[:] = sorted(
+            name
+            for name in child_directories
+            if not (Path(current_directory) / name).is_symlink()
+        )
+        for filename in sorted(filenames):
+            candidate = Path(current_directory) / filename
+            if candidate.suffix.lower() not in pe_extensions:
+                continue
+            guest_path = "/" + candidate.relative_to(root_real).as_posix()
+            resolved = resolve_guest_file(rootfs, guest_path)
+            require_pe_machine(
+                resolved,
+                f"{label} PE component {candidate.name}",
+                expected_machine,
+            )
+            inspected += 1
+
+    if inspected == 0:
+        raise ValueError(f"{label} PE directory contains no Windows PE components.")
+    return inspected
+
+
 def validate_glibc_proot_box64(root: Path) -> None:
     """Fail closed unless the prepared hybrid ARM64/x86-64 runtime has valid ABIs."""
     backend_root = root.resolve(strict=True)
