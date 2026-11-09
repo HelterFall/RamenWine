@@ -584,12 +584,79 @@ def build_wine(source_archive: Path, rootfs: Path, work_dir: Path, jobs: int) ->
     run(["make", "install"], cwd=build, extra_env={"DESTDIR": str(rootfs)})
 
 
+def build_wayland_probe(rootfs: Path, work_dir: Path) -> dict[str, object]:
+    """Build tiny x86 and x86-64 Win32 clients for real Wine/Wayland smoke tests."""
+    source = Path(__file__).with_name("wayland_probe.c")
+    if not source.is_file():
+        raise ValueError("The Windows Wayland probe source file is missing.")
+
+    build_directory = work_dir / "wayland-probe"
+    build_directory.mkdir()
+    install_directory = rootfs / "usr" / "lib" / "ramenwine" / "probes"
+    install_directory.mkdir(parents=True, exist_ok=True)
+
+    targets = (
+        (
+            "x86_64-w64-mingw32-gcc",
+            "x86_64",
+            "wayland-probe-x86_64.exe",
+            package_runtime.require_pe_amd64,
+            "AMD64",
+        ),
+        (
+            "i686-w64-mingw32-gcc",
+            "i386",
+            "wayland-probe-i386.exe",
+            package_runtime.require_pe_i386,
+            "i386",
+        ),
+    )
+    binaries: list[dict[str, str]] = []
+    for compiler, architecture, filename, validate_pe, label in targets:
+        output = build_directory / filename
+        run([
+            compiler,
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-static",
+            "-s",
+            "-mwindows",
+            "-DUNICODE",
+            "-D_UNICODE",
+            str(source),
+            "-o",
+            str(output),
+            "-luser32",
+            "-lgdi32",
+        ])
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ValueError("MinGW did not produce the " + label + " Wayland probe.")
+        validate_pe(output, label + " Wayland probe")
+
+        installed = install_directory / filename
+        shutil.copy2(output, installed)
+        binaries.append({
+            "architecture": architecture,
+            "path": "usr/lib/ramenwine/probes/" + filename,
+            "sha256": sha256_file(installed),
+        })
+
+    return {
+        "source": "tools/wayland_probe.c",
+        "sourceSha256": sha256_file(source),
+        "binaries": binaries,
+    }
+
+
 def write_provenance(
     backend: Path,
     snapshot: str,
     packages: list[dict[str, object]],
     dynarec: bool,
     box64_bundle: dict[str, object],
+    wayland_probe: dict[str, object],
 ) -> None:
     document = {
         "formatVersion": 1,
@@ -604,6 +671,7 @@ def write_provenance(
             "badSignal": True,
         },
         "box64LibraryBundle": box64_bundle,
+        "waylandProbe": wayland_probe,
         "wine": {
             "version": "11.0",
             "url": WINE_URL,
@@ -662,6 +730,7 @@ def build(args: argparse.Namespace) -> None:
         WINE_URL, cache / "wine-11.0.tar.xz", WINE_SHA256
     )
     build_wine(wine_archive, rootfs, work, args.jobs)
+    wayland_probe = build_wayland_probe(rootfs, work)
 
     write_provenance(
         backend,
@@ -669,6 +738,7 @@ def build(args: argparse.Namespace) -> None:
         package_provenance,
         not args.no_arm_dynarec,
         box64_bundle,
+        wayland_probe,
     )
     package_runtime.validate_glibc_proot_box64(backend)
 
