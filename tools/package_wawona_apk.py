@@ -34,6 +34,11 @@ ROOT_LIBRARIES = (
     "libEGL_angle.so",
     "libGLESv2_angle.so",
 )
+OPTIONAL_ROOT_LIBRARIES = (
+    # Wawona can use this as its bundled offscreen ICD for nested clients.
+    # It is not a substitute for Android's host Vulkan WSI driver.
+    "libvk_swiftshader.so",
+)
 SYSTEM_LIBRARIES = {
     "libaaudio.so",
     "libandroid.so",
@@ -114,6 +119,9 @@ def collect_native_closure(
 
     selected: dict[str, bytes] = {}
     pending = list(ROOT_LIBRARIES)
+    pending.extend(
+        name for name in OPTIONAL_ROOT_LIBRARIES if name.casefold() in by_name
+    )
     inspected: set[str] = set()
 
     while pending:
@@ -261,6 +269,10 @@ def package_apk(
             "apkSha256": sha256_bytes(apk_path.read_bytes()),
             "abi": "arm64-v8a",
             "rootLibraries": list(ROOT_LIBRARIES),
+            "optionalRootLibraries": [
+                name for name in OPTIONAL_ROOT_LIBRARIES
+                if name in selected
+            ],
             "bundledLibraries": {
                 filename: sha256_bytes(data) for filename, data in selected.items()
             },
