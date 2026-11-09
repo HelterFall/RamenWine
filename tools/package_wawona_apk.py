@@ -18,6 +18,7 @@ import stat
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
@@ -61,6 +62,7 @@ SYSTEM_LIBRARIES = {
 MAX_ASSET_FILES = 100_000
 MAX_ASSET_BYTES = 128 * 1024 * 1024
 MAX_SINGLE_ASSET_BYTES = 32 * 1024 * 1024
+MAX_SINGLE_LIBRARY_BYTES = 128 * 1024 * 1024
 NEEDED_RE = re.compile(r"\(NEEDED\).*Shared library: \[([^\]]+)\]")
 SONAME_RE = re.compile(r"\(SONAME\).*Library soname: \[([^\]]+)\]")
 
@@ -173,26 +175,46 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
     return read_dependencies
 
 
-def apk_native_libraries(archive: zipfile.ZipFile) -> dict[str, bytes]:
-    libraries: dict[str, bytes] = {}
-    seen: set[str] = set()
-    for info in archive.infolist():
-        if not info.filename.startswith(APK_LIBRARY_ROOT) or info.is_dir():
-            continue
-        relative = safe_archive_path(info.filename)
-        if not relative.startswith(APK_LIBRARY_ROOT):
-            raise ValueError(f"native entry escaped ABI directory: {info.filename}")
-        filename = relative[len(APK_LIBRARY_ROOT):]
-        if "/" in filename or not (filename.endswith(".so") or ".so." in filename):
-            continue
-        folded = filename.casefold()
-        if folded in seen:
-            raise ValueError(f"duplicate APK native library: {filename}")
-        seen.add(folded)
-        if info.file_size > MAX_SINGLE_ASSET_BYTES:
-            raise ValueError(f"native library is unexpectedly large: {filename}")
-        libraries[filename] = archive.read(info)
-    return libraries
+class ApkNativeLibraries(Mapping[str, bytes]):
+    """Lazy view over APK .so entries; large unrelated helper binaries stay unread."""
+
+    def __init__(self, archive: zipfile.ZipFile):
+        self._archive = archive
+        self._entries: dict[str, zipfile.ZipInfo] = {}
+        seen: set[str] = set()
+        for info in archive.infolist():
+            if not info.filename.startswith(APK_LIBRARY_ROOT) or info.is_dir():
+                continue
+            relative = safe_archive_path(info.filename)
+            if not relative.startswith(APK_LIBRARY_ROOT):
+                raise ValueError(f"native entry escaped ABI directory: {info.filename}")
+            filename = relative[len(APK_LIBRARY_ROOT):]
+            if "/" in filename or not (filename.endswith(".so") or ".so." in filename):
+                continue
+            folded = filename.casefold()
+            if folded in seen:
+                raise ValueError(f"duplicate APK native library: {filename}")
+            seen.add(folded)
+            # APKs can also contain standalone tools disguised with a .so
+            # suffix. Do not read those into memory unless they are within a
+            # reasonable shared-object size; if a required DT_NEEDED edge points
+            # to one, dependency resolution fails closed with its exact name.
+            if info.file_size > MAX_SINGLE_LIBRARY_BYTES:
+                continue
+            self._entries[filename] = info
+
+    def __getitem__(self, filename: str) -> bytes:
+        return self._archive.read(self._entries[filename])
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+
+def apk_native_libraries(archive: zipfile.ZipFile) -> ApkNativeLibraries:
+    return ApkNativeLibraries(archive)
 
 
 def extract_assets(archive: zipfile.ZipFile, destination: Path) -> list[str]:
