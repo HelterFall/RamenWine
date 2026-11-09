@@ -27,9 +27,12 @@ def make_pinned_proot_source(root: Path) -> Path:
         "src/execve/enter.c": 'getenv("PROOT_LOADER");\\nPROOT_UNBUNDLE_LOADER\\n',
         "src/path/temp.c": 'getenv("PROOT_TMP_DIR");\\n',
         "packages/proot/build.sh": (
-            'TERMUX_PKG_DEPENDS="libandroid-shmem, libtalloc"\\n'
-            'TERMUX_PKG_EXTRA_MAKE_ARGS="-C src PROOT_WITH_LIBANDROID_SHMEM=true"\\n'
-            'export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot\\n'
+            'TERMUX_PKG_DEPENDS="libandroid-shmem, libtalloc"\n'
+            'TERMUX_PKG_EXTRA_MAKE_ARGS="-C src PROOT_WITH_LIBANDROID_SHMEM=true"\n'
+            'export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot\n'
+            'termux_step_pre_configure() {\n'
+            '    CPPFLAGS+=" -DARG_MAX=131072 -DVERSION=stub"\n'
+            '}\n'
         ),
     }
     for relative, content in files.items():
@@ -43,7 +46,44 @@ class BuildProotHostTests(unittest.TestCase):
     def test_accepts_exact_pinned_proot_cli_and_termux_recipe_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = make_pinned_proot_source(Path(temporary))
+            self.assertTrue(build_proot_host.patch_pinned_proot_recipe(source))
+            self.assertFalse(build_proot_host.patch_pinned_proot_recipe(source))
             build_proot_host.validate_pinned_proot_source_contract(source)
+
+    def test_patches_sigterm_to_use_the_pinned_proot_tracee_cleanup_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+
+            self.assertTrue(build_proot_host.patch_pinned_proot_recipe(source))
+            patched = recipe.read_text(encoding="utf-8")
+            self.assertIn(build_proot_host.PROOT_SIGTERM_PATCH_MARKER, patched)
+            self.assertIn("case SIGTERM:", patched)
+            self.assertIn("if (signum != SIGQUIT && signum != SIGTERM)", patched)
+
+    def test_rejects_unexpected_termux_preconfigure_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8").replace("CPPFLAGS+=", "OTHER_FLAGS+="),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "pre-configure function changed"):
+                build_proot_host.patch_pinned_proot_recipe(source)
+
+    def test_rejects_unmarked_partial_sigterm_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8") + "
+case SIGTERM:
+",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unmarked or partial"):
+                build_proot_host.patch_pinned_proot_recipe(source)
 
     def test_rejects_missing_pinned_proot_cli_option(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
