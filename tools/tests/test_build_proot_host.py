@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import sys
 import tempfile
@@ -177,6 +178,8 @@ class BuildProotHostTests(unittest.TestCase):
                 if len(command) > 1 and command[1] == str(build_proot_host.ASSEMBLER):
                     host_payload = output / "host"
                     host_payload.mkdir(parents=True, exist_ok=True)
+                    (host_payload / "bin").mkdir(parents=True, exist_ok=True)
+                    (host_payload / "bin" / "proot").write_bytes(b"fixture-proot-binary")
                     (host_payload / "PROVENANCE.json").write_text(
                         '{"formatVersion":1,"target":"android-bionic-arm64"}',
                         encoding="utf-8",
@@ -217,6 +220,10 @@ class BuildProotHostTests(unittest.TestCase):
             self.assertEqual(
                 64,
                 len(provenance["downstreamPatches"]["prootTermination"]["recipeSha256"]),
+            )
+            self.assertEqual(
+                hashlib.sha256((output / "host" / "bin" / "proot").read_bytes()).hexdigest(),
+                provenance["downstreamPatches"]["prootTermination"]["binarySha256"],
             )
             self.assertTrue(any(
                 command[:4] == ["git", "-C", str(work / "termux-packages"), "fetch"]
