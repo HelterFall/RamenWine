@@ -135,8 +135,8 @@ internal class WawonaRuntimeAssets(context: Context) {
 
     private companion object {
         const val ROOTFS_DIRECTORY = "wawona-rootfs"
-        const val MARKER_NAME = ".ramenwine-wawona-assets-" + WAWONA_REVISION
         const val WAWONA_REVISION = "d298ddd25726fec0977285aa5f57181110c966a6"
+        const val MARKER_NAME = ".ramenwine-wawona-assets-" + WAWONA_REVISION
         const val COPY_BUFFER_BYTES = 64 * 1024
         const val MAX_ASSET_FILES = 100_000
         const val MAX_ASSET_BYTES = 128L * 1024L * 1024L
