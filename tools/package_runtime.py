@@ -628,17 +628,21 @@ def validate_android_proot_host_payload(host_root: Path) -> int:
         raise ValueError("PRoot host payload is not a directory.")
 
     library_directory = host_root / "lib"
-    if not library_directory.is_dir():
-        raise ValueError("PRoot host library directory is missing.")
+    try:
+        library_root = library_directory.resolve(strict=True)
+        library_root.relative_to(host_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot host library directory is missing or escapes the host payload.") from error
+    if not library_root.is_dir():
+        raise ValueError("PRoot host library directory is not a directory.")
 
     libraries = [
-        path for path in sorted(library_directory.iterdir(), key=lambda item: item.name)
+        path for path in sorted(library_root.iterdir(), key=lambda item: item.name)
         if path.name.startswith("lib") and ".so" in path.name
     ]
     if not libraries:
         raise ValueError("PRoot host shared-library payload is empty.")
 
-    library_root = library_directory.resolve(strict=True)
     for library in libraries:
         try:
             real_library = library.resolve(strict=True)

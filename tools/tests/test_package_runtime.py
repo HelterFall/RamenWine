@@ -417,6 +417,18 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "required guest path is missing"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
+    def test_rejects_proot_host_library_directory_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backend = self._make_glibc_backend(root)
+            host_lib = backend / "host" / "lib"
+            external_lib = root / "external-lib"
+            host_lib.rename(external_lib)
+            host_lib.symlink_to(external_lib, target_is_directory=True)
+
+            with self.assertRaisesRegex(ValueError, "PRoot host library directory.*escapes"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
     def test_rejects_proot_host_directory_symlink_escape(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
