@@ -144,10 +144,14 @@ def validate_proot_host_provenance(host_root: Path) -> None:
     """Require a pinned, intact PRoot host artifact produced by our assembler."""
     host_root = host_root.resolve(strict=True)
     manifest_path = host_root / "PROVENANCE.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("PRoot host provenance must be a regular app-owned payload file.")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("PRoot host provenance is missing or invalid JSON.") from error
+        manifest_real = manifest_path.resolve(strict=True)
+        manifest_real.relative_to(host_root)
+        manifest = json.loads(manifest_real.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("PRoot host provenance is missing, escaping or invalid JSON.") from error
 
     expected_fields = {
         "formatVersion": 1,

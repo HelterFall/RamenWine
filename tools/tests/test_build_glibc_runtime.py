@@ -76,7 +76,7 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             "stagedSha256": staged_hashes,
         }
         (host / "PROVENANCE.json").write_text(
-            json.dumps(provenance, indent=2) + "\\n",
+            json.dumps(provenance, indent=2) + "\n",
             encoding="utf-8",
         )
         return host
@@ -95,6 +95,19 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "termuxPackagesCommit"):
+                build_glibc_runtime.validate_proot_host_provenance(host)
+
+    def test_rejects_symlinked_proot_host_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            host = self._make_proot_host_with_provenance(root)
+            manifest = host / "PROVENANCE.json"
+            external_manifest = root / "external-provenance.json"
+            external_manifest.write_bytes(manifest.read_bytes())
+            manifest.unlink()
+            manifest.symlink_to(external_manifest)
+
+            with self.assertRaisesRegex(ValueError, "must be a regular"):
                 build_glibc_runtime.validate_proot_host_provenance(host)
 
     def test_rejects_modified_proot_host_binary(self) -> None:
@@ -149,6 +162,11 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
             with (
                 patch.object(build_glibc_runtime, "require_build_host"),
                 patch.object(
+                    build_glibc_runtime,
+                    "validate_proot_host_provenance",
+                    wraps=build_glibc_runtime.validate_proot_host_provenance,
+                ) as validate_provenance,
+                patch.object(
                     build_glibc_runtime.package_runtime,
                     "validate_android_proot_host_payload",
                     side_effect=ValueError("unresolved Android PRoot host dependency"),
@@ -158,8 +176,8 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unresolved Android PRoot host dependency"):
                     build_glibc_runtime.build(args)
 
+            validate_provenance.assert_called_once_with(host.resolve())
             validate_host.assert_called_once_with(host.resolve())
-            build_glibc_runtime.validate_proot_host_provenance(host)
             install_host.assert_not_called()
             self.assertFalse((work / "backend").exists())
 
