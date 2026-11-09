@@ -691,9 +691,18 @@ def validate_glibc_proot_box64(root: Path) -> None:
     if not backend_root.is_dir():
         raise ValueError("runtime backend root must be a directory")
 
+    # Keep the host directory itself inside the package. Checking only host/lib
+    # would allow a symlinked host root to make validation read external files.
+    host_root = backend_root / "host"
+    try:
+        host_root_real = host_root.resolve(strict=True)
+        host_root_real.relative_to(backend_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot host directory is missing or escapes the backend.") from error
+
     # Reuse the same strict PRoot host checks in the builder's early preflight
     # and in the final runtime ZIP validation.
-    validate_android_proot_host_payload(backend_root / "host")
+    validate_android_proot_host_payload(host_root_real)
 
     rootfs = backend_root / "rootfs"
     try:
