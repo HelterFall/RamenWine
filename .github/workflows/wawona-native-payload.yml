@@ -160,8 +160,13 @@ jobs:
             "ndk;30.0.16248370" \
             "cmake;3.22.1"
           NDK_ROOT="$ANDROID_HOME/ndk/30.0.16248370"
-          READELF="$(find "$NDK_ROOT/toolchains/llvm/prebuilt" -type f -name llvm-readelf -print -quit)"
-          test -n "$READELF"
+          READELF="$(find "$NDK_ROOT/toolchains/llvm/prebuilt" -name llvm-readelf -print -quit)"
+          if [[ -z "$READELF" || ! -x "$READELF" ]]; then
+            echo "::error::Could not find an executable llvm-readelf in the installed Android NDK."
+            find "$NDK_ROOT/toolchains/llvm/prebuilt" -maxdepth 5 -name '*readelf*' -print || true
+            exit 1
+          fi
+          "$READELF" --version
           echo "WAWONA_LLVM_READELF=$READELF" >> "$GITHUB_ENV"
 
       - name: Extract the reviewed native dependency closure and assets
