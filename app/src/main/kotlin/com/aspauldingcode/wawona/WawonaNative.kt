@@ -28,6 +28,25 @@ object WawonaNative {
     external fun nativeShutdown()
     external fun nativeSetDisplayDensity(density: Float)
     external fun nativeSetHostSeatMode(mode: Int)
+    external fun nativeApplySettings(
+        forceServerSideDecorations: Boolean,
+        autoRetinaScaling: Boolean,
+        renderingBackend: Int,
+        respectSafeArea: Boolean,
+        renderMacOSPointer: Boolean,
+        swapCmdAsCtrl: Boolean,
+        universalClipboard: Boolean,
+        colorSyncSupport: Boolean,
+        nestedCompositorsSupport: Boolean,
+        useMetal4ForNested: Boolean,
+        multipleClients: Boolean,
+        waypipeRSSupport: Boolean,
+        enableTCPListener: Boolean,
+        tcpPort: Int,
+        vulkanDriver: String,
+        openglDriver: String,
+        compositorBackend: String
+    )
     external fun nativeApplyHostKeyLevels(ids: IntArray, levels: IntArray)
     external fun nativeReloadHostKeymap()
 
