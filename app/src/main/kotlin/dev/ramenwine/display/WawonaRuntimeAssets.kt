@@ -20,14 +20,27 @@ internal class WawonaRuntimeAssets(context: Context) {
         val xkb = File(rootfs, "usr/share/X11/xkb")
         val fonts = File(rootfs, "usr/share/fonts")
         val weston = File(rootfs, "usr/share/weston")
+        val expectedHashes = loadAssetHashes()
 
-        if (marker.isFile && xkb.isDirectory && fonts.isDirectory) {
+        if (
+            marker.isFile &&
+            marker.readText(Charsets.UTF_8) == WAWONA_REVISION &&
+            xkb.isDirectory &&
+            fonts.isDirectory &&
+            WawonaAssetIntegrity.matches(rootfs, expectedHashes)
+        ) {
             return
         }
 
         copyAssetTree("wawona/xkb", xkb, required = true)
         copyAssetTree("wawona/fonts", fonts, required = true)
         copyAssetTree("wawona/weston", weston, required = false)
+
+        if (!WawonaAssetIntegrity.matches(rootfs, expectedHashes)) {
+            throw IOException(
+                "Wawona support assets failed their SHA-256 integrity check after installation."
+            )
+        }
 
         marker.parentFile?.mkdirs()
         val temporaryMarker = File(marker.parentFile, marker.name + ".tmp")
@@ -44,6 +57,62 @@ internal class WawonaRuntimeAssets(context: Context) {
             temporaryMarker.delete()
             throw IOException("Could not activate Wawona compositor assets.")
         }
+    }
+
+    private fun loadAssetHashes(): Map<String, String> {
+        val provenance = try {
+            appContext.assets.open(PROVENANCE_ASSET_PATH).bufferedReader(Charsets.UTF_8).use {
+                org.json.JSONObject(it.readText())
+            }
+        } catch (error: Exception) {
+            throw IOException("Missing or invalid Wawona asset provenance manifest.", error)
+        }
+        if (provenance.optString("revision") != WAWONA_REVISION) {
+            throw IOException("Wawona asset provenance does not match the pinned revision.")
+        }
+
+        val assets = provenance.optJSONArray("assets")
+            ?: throw IOException("Wawona asset provenance has no asset inventory.")
+        val hashes = provenance.optJSONObject("assetSha256")
+            ?: throw IOException("Wawona asset provenance has no SHA-256 inventory.")
+        if (assets.length() == 0 || hashes.length() != assets.length()) {
+            throw IOException("Wawona asset provenance inventory is empty or inconsistent.")
+        }
+
+        val result = linkedMapOf<String, String>()
+        for (index in 0 until assets.length()) {
+            val path = assets.optString(index, "")
+            val digest = hashes.optString(path, "")
+            if (
+                path.isBlank() ||
+                path in result ||
+                !digest.matches(ASSET_SHA256_PATTERN) ||
+                !isAllowedAssetPath(path)
+            ) {
+                throw IOException("Wawona asset provenance contains an unsafe or invalid entry.")
+            }
+            result[path] = digest
+        }
+        val hashKeys = hashes.keys()
+        while (hashKeys.hasNext()) {
+            if (hashKeys.next() !in result) {
+                throw IOException("Wawona asset SHA-256 inventory contains an unknown path.")
+            }
+        }
+        return result
+    }
+
+    private fun isAllowedAssetPath(path: String): Boolean {
+        if (
+            !path.startsWith("wawona/xkb/") &&
+            !path.startsWith("wawona/fonts/") &&
+            !path.startsWith("wawona/weston/")
+        ) {
+            return false
+        }
+        return !path.contains('\\') &&
+            !path.contains('\u0000') &&
+            path.split('/').all { it.isNotBlank() && it != "." && it != ".." }
     }
 
     private fun copyAssetTree(assetPath: String, destination: File, required: Boolean) {
@@ -136,6 +205,8 @@ internal class WawonaRuntimeAssets(context: Context) {
     private companion object {
         const val ROOTFS_DIRECTORY = "wawona-rootfs"
         const val WAWONA_REVISION = "d298ddd25726fec0977285aa5f57181110c966a6"
+        const val PROVENANCE_ASSET_PATH = "wawona/provenance.json"
+        val ASSET_SHA256_PATTERN = Regex("[0-9a-f]{64}")
         const val MARKER_NAME = ".ramenwine-wawona-assets-" + WAWONA_REVISION
         const val COPY_BUFFER_BYTES = 64 * 1024
         const val MAX_ASSET_FILES = 100_000
