@@ -162,6 +162,8 @@ The intended display endpoint is an Android-host Unix socket supplied by WawonaD
 
 Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
 
+Debug builds expose two separate **Тест Windows + Wayland** actions, one for x86-64 and one for x86. They launch the packaged `wayland-probe-*.exe` files through the same GameLaunchCoordinator, PRoot, Box64, Wine prefix initializer, Wayland socket and fullscreen SurfaceView as an imported game. The probe draws a fullscreen GDI window with `RAMENWINE / WAYLAND OK`; tapping it must change the message to `TOUCH INPUT RECEIVED`. These buttons are diagnostic only and are not added to the player's game library. A successful probe validates the basic Windows-window and touch path, but does not prove compatibility with every visual novel engine.
+
 ## Process lifecycle
 
 The process supervisor:
@@ -182,7 +184,7 @@ The main-library Play action and the immersive game Activity are wired in source
 3. Install the runtime ZIP on an ARM64 phone, then run Box64 and an x86-64 Linux smoke program inside the PRoot guest.
 4. Create a real per-game Wine prefix using Wine 11 wineboot.exe --init; confirm the two registry files and the #arch=win64 marker.
 5. Build and stage the pinned Wawona native payload. Show a real Wayland SHM test-client window on the Android Surface; a ready socket or native running flag alone is insufficient.
-6. Launch an original Win32 GDI test window through PRoot, Box64 and Wine and confirm that its pixels appear directly on the game Surface, without a Windows desktop shell.
+6. In a debug build, launch both bundled x86-64 and x86 Wayland probes from the developer buttons. Confirm that their fullscreen Windows windows render directly on the game Surface, without a Windows desktop shell; tap the screen and confirm the touch message changes.
 7. Verify touch-to-click, pointer movement, keyboard input, resize, exit, pause/resume, Activity recreation and full process cleanup on the device.
 8. Run both 32-bit and 64-bit Windows samples, then test an appropriately licensed visual novel and record its engine, architecture and device configuration.
 No actual Windows EXE launch is claimed until these gates pass.
