@@ -106,6 +106,22 @@ ELF Header:
         )
         package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
 
+    def test_rejects_undefined_jni_symbol_as_a_missing_export(self) -> None:
+        output = "\\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT "
+            f"{'UND' if method == 'nativePrepareShellEnvironment' else '12'} "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(
+                package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS,
+                start=1,
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing required Wawona JNI exports: nativePrepareShellEnvironment",
+        ):
+            package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
+
     def test_rejects_missing_wawona_jni_export_before_packaging(self) -> None:
         output = (
             "  1: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
