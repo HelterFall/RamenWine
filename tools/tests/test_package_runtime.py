@@ -223,7 +223,7 @@ class RuntimePackagerTests(unittest.TestCase):
             host_lib / "libandroid-shmem.so",
             package_runtime.ELF_MACHINE_AARCH64,
         )
-        self._write_elf64(
+        proot_binary = self._write_elf64(
             backend / "host" / "bin" / "proot",
             package_runtime.ELF_MACHINE_AARCH64,
             "/system/bin/linker64",
@@ -244,6 +244,7 @@ class RuntimePackagerTests(unittest.TestCase):
                         "id": package_runtime.PROOT_SIGTERM_PATCH_ID,
                         "file": "packages/proot/build.sh",
                         "recipeSha256": "a" * 64,
+                        "binarySha256": package_runtime.sha256_file(proot_binary),
                     }
                 },
             }),
@@ -385,6 +386,18 @@ class RuntimePackagerTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "required SIGTERM tracee-cleanup patch"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_tampered_proot_binary_against_patch_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            proot_binary = backend / "host" / "bin" / "proot"
+            proot_binary.write_bytes(proot_binary.read_bytes() + b"post-build-change")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "does not match its SIGTERM patch provenance hash",
+            ):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_malformed_recipe_hash_in_proot_patch_provenance(self) -> None:
