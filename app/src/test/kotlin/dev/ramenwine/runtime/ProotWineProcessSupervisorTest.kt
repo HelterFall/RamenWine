@@ -58,112 +58,129 @@ class ProotWineProcessSupervisorTest {
 
     @Test
     fun drainsTerminationOutputBeforeManualStopCallback() = runBlocking {
-        val fixture = ScriptFixture(
-            """
-            import os
-            import signal
-
-            def handle_sigterm(_signal, _frame):
-                os.write(1, b"terminated\n")
-                os._exit(0)
-
-            signal.signal(signal.SIGTERM, handle_sigterm)
-            os.write(1, b"ready\n")
-            signal.pause()
-            """.trimIndent()
+        val fakeProcess = FinalOutputProcess("terminated")
+        val output = CopyOnWriteArrayList<String>()
+        val outputAtExit = AtomicReference<List<String>>(emptyList())
+        val exitCount = AtomicInteger()
+        val exit = CompletableDeferred<Int>()
+        val session = ProotWineProcessSession(
+            process = fakeProcess,
+            onOutput = output::add,
+            onExit = { code ->
+                outputAtExit.set(output.toList())
+                exitCount.incrementAndGet()
+                exit.complete(code)
+            },
+            callbackDispatcher = Dispatchers.Unconfined
         )
-        try {
-            val output = CopyOnWriteArrayList<String>()
-            val outputAtExit = AtomicReference<List<String>>(emptyList())
-            val ready = CountDownLatch(1)
-            val exitCount = AtomicInteger()
-            val exit = CompletableDeferred<Int>()
-            val session = ProotWineProcessSupervisor(Dispatchers.Unconfined).start(
-                command = fixture.command(),
-                onOutput = { line ->
-                    output += line
-                    if (line == "ready") ready.countDown()
-                },
-                onExit = { code ->
-                    outputAtExit.set(output.toList())
-                    exitCount.incrementAndGet()
-                    exit.complete(code)
-                }
-            )
 
-            assertTrue(
-                "The fixture process did not become ready. Output: $output",
-                ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-            )
+        val stopExitCode = session.stop(gracePeriodMillis = 3_000L)
+        val callbackExitCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
 
-            val stopExitCode = session.stop(gracePeriodMillis = 3_000L)
-            val callbackExitCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
-
-            assertEquals("Unexpected process exit. Output: $output", 0, stopExitCode)
-            assertEquals("Unexpected callback exit. Output: $output", 0, callbackExitCode)
-            assertTrue("Final signal output was not drained: $output", output.contains("terminated"))
-            assertTrue(
-                "Exit callback ran before final output was drained.",
-                outputAtExit.get().contains("terminated")
-            )
-            assertEquals(1, exitCount.get())
-            assertFalse(session.isAlive())
-        } finally {
-            fixture.close()
-        }
+        assertEquals(0, stopExitCode)
+        assertEquals(0, callbackExitCode)
+        assertEquals(listOf("terminated"), output.toList())
+        assertEquals(output.toList(), outputAtExit.get())
+        assertEquals(1, exitCount.get())
+        assertEquals(1, fakeProcess.destroyCalls.get())
+        assertFalse(session.isAlive())
     }
 
     @Test
     fun concurrentStopCallsShareOneExitCallback() = runBlocking {
-        val fixture = ScriptFixture(
-            """
-            import os
-            import signal
-
-            def handle_sigterm(_signal, _frame):
-                os.write(1, b"stopping\n")
-                os._exit(0)
-
-            signal.signal(signal.SIGTERM, handle_sigterm)
-            os.write(1, b"ready\n")
-            signal.pause()
-            """.trimIndent()
+        val fakeProcess = FinalOutputProcess("stopping")
+        val output = CopyOnWriteArrayList<String>()
+        val exitCount = AtomicInteger()
+        val exit = CompletableDeferred<Int>()
+        val session = ProotWineProcessSession(
+            process = fakeProcess,
+            onOutput = output::add,
+            onExit = { code ->
+                exitCount.incrementAndGet()
+                exit.complete(code)
+            },
+            callbackDispatcher = Dispatchers.Unconfined
         )
-        try {
-            val output = CopyOnWriteArrayList<String>()
-            val ready = CountDownLatch(1)
-            val exitCount = AtomicInteger()
-            val exit = CompletableDeferred<Int>()
-            val session = ProotWineProcessSupervisor(Dispatchers.Unconfined).start(
-                command = fixture.command(),
-                onOutput = { line ->
-                    output += line
-                    if (line == "ready") ready.countDown()
-                },
-                onExit = { code ->
-                    exitCount.incrementAndGet()
-                    exit.complete(code)
-                }
-            )
 
-            assertTrue(
-                "The fixture process did not become ready. Output: $output",
-                ready.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-            )
+        val stopResults = coroutineScope {
+            val first = async { session.stop(3_000L) }
+            val second = async { session.stop(3_000L) }
+            listOf(first.await(), second.await())
+        }
 
-            val stopResults = coroutineScope {
-                val first = async { session.stop(3_000L) }
-                val second = async { session.stop(3_000L) }
-                listOf(first.await(), second.await())
+        assertEquals(listOf(0, 0), stopResults)
+        assertEquals(0, withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() })
+        assertEquals(1, exitCount.get())
+        assertEquals(1, fakeProcess.destroyCalls.get())
+        assertEquals(listOf("stopping"), output.toList())
+        assertFalse(session.isAlive())
+    }
+
+    private class FinalOutputProcess(
+        finalLine: String
+    ) : Process() {
+        private val input = java.io.PipedInputStream()
+        private val writer = java.io.PipedOutputStream(input)
+        private val exited = CountDownLatch(1)
+        private val terminated = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val outputSink = java.io.ByteArrayOutputStream()
+
+        @Volatile
+        private var code: Int = 0
+
+        val destroyCalls = AtomicInteger()
+
+        init {
+            // Connect before the process session starts its asynchronous reader.
+            // Keeping the pipe open until destroy() lets the test observe the
+            // exact final-output-before-EOF shutdown ordering.
+            finalOutput = finalLine
+        }
+
+        private var finalOutput: String
+
+        override fun getOutputStream(): java.io.OutputStream = outputSink
+
+        override fun getInputStream(): java.io.InputStream = input
+
+        override fun getErrorStream(): java.io.InputStream =
+            java.io.ByteArrayInputStream(byteArrayOf())
+
+        override fun waitFor(): Int {
+            exited.await()
+            return code
+        }
+
+        override fun waitFor(timeout: Long, unit: TimeUnit): Boolean =
+            exited.await(timeout, unit)
+
+        override fun exitValue(): Int {
+            if (isAlive) throw IllegalThreadStateException("Process is still running.")
+            return code
+        }
+
+        override fun isAlive(): Boolean = exited.count > 0L
+
+        override fun destroy() {
+            destroyCalls.incrementAndGet()
+            finish(0)
+        }
+
+        override fun destroyForcibly(): Process {
+            finish(137)
+            return this
+        }
+
+        private fun finish(exitCode: Int) {
+            if (!terminated.compareAndSet(false, true)) return
+            code = exitCode
+            try {
+                writer.write((finalOutput + "\n").toByteArray(Charsets.UTF_8))
+                writer.flush()
+            } finally {
+                writer.close()
+                exited.countDown()
             }
-
-            assertEquals(listOf(0, 0), stopResults)
-            assertEquals(0, withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() })
-            assertEquals(1, exitCount.get())
-            assertTrue(output.contains("stopping"))
-            assertFalse(session.isAlive())
-        } finally {
-            fixture.close()
         }
     }
 
