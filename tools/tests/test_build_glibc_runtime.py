@@ -127,6 +127,10 @@ class BuildGlibcRuntimeTests(unittest.TestCase):
         self.assertIn("--without-x", build_glibc_runtime.WINE_CONFIGURE_FLAGS)
         self.assertIn("libwine:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
         self.assertIn("coreutils:arm64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("libwayland-client0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("libwayland-cursor0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("libxkbcommon0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
+        self.assertIn("libxkbregistry0:amd64", build_glibc_runtime.RUNTIME_PACKAGES)
 
 
 if __name__ == "__main__":
