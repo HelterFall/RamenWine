@@ -37,6 +37,7 @@ import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
+import dev.ramenwine.inspection.MainExecutableSelector
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
@@ -59,6 +60,7 @@ fun RamenWineApp() {
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
     var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
+    var automaticExecutablePath by remember { mutableStateOf<String?>(null) }
     var importedGames by remember { mutableStateOf(libraryStore.list()) }
     var scanning by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
@@ -108,6 +110,7 @@ fun RamenWineApp() {
             selectedFolder = uri
             scanResult = null
             selectedExecutable = null
+            automaticExecutablePath = null
             scanError = null
             importError = null
             importNotice = null
@@ -122,8 +125,24 @@ fun RamenWineApp() {
             scanning = true
             scope.launch {
                 try {
-                    scanResult = withContext(Dispatchers.IO) {
+                    val result = withContext(Dispatchers.IO) {
                         GameFolderScanner(context.applicationContext).scan(uri)
+                    }
+                    scanResult = result
+                    val suggestedPath = MainExecutableSelector.select(
+                        candidates = result.executableCandidates.mapNotNull { candidate ->
+                            val inspection = candidate.peInspection ?: return@mapNotNull null
+                            MainExecutableSelector.Hint(
+                                relativePath = candidate.relativePath,
+                                architecture = inspection.architecture,
+                                isValidPe = inspection.isValidPe
+                            )
+                        },
+                        folderName = result.folderName
+                    )
+                    automaticExecutablePath = suggestedPath
+                    selectedExecutable = result.executableCandidates.firstOrNull {
+                        it.relativePath == suggestedPath
                     }
                 } catch (error: Exception) {
                     scanError = error.message ?: error.javaClass.simpleName
@@ -287,6 +306,7 @@ fun RamenWineApp() {
                         selectedExecutable = selectedExecutable,
                         onSelectExecutable = {
                             selectedExecutable = it
+                            automaticExecutablePath = null
                             importError = null
                             importNotice = null
                         }
@@ -296,6 +316,7 @@ fun RamenWineApp() {
                 selectedExecutable?.let { candidate ->
                     SelectedExecutableCard(
                         candidate = candidate,
+                        automaticallySelected = automaticExecutablePath == candidate.relativePath,
                         importing = importing,
                         onImport = ::startImport
                     )
@@ -439,6 +460,7 @@ private fun RuntimeStatusCard(
 @Composable
 private fun SelectedExecutableCard(
     candidate: ExecutableCandidate,
+    automaticallySelected: Boolean,
     importing: Boolean,
     onImport: () -> Unit
 ) {
@@ -454,7 +476,11 @@ private fun SelectedExecutableCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
+            Text(
+                if (automaticallySelected) "Главный файл игры найден автоматически"
+                else "Главный EXE выбран",
+                fontWeight = FontWeight.Bold
+            )
             Text(candidate.relativePath)
             Text(
                 text = "Архитектура: " +
@@ -496,6 +522,11 @@ private fun ScanResultCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("Результат сканирования", fontWeight = FontWeight.Bold)
+            Text(
+                "Проверила папку и нашла исполняемые файлы. Если главный файл определён уверенно, он уже выбран.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Text("Папка: " + result.folderName)
             Text("Просмотрено файлов: " + result.visitedFiles)
             Text("Найдено EXE: " + result.executableCandidates.size)

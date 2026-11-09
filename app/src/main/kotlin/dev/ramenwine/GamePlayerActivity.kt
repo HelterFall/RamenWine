@@ -131,6 +131,13 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
             WawonaDisplayBackend(applicationContext)
         )
         showStatus("Ожидание игрового экрана…")
+        // Surface callbacks can arrive before the library/runtime checks finish.
+        // Start now if Android already created the Surface.
+        currentSurface?.takeIf { it.isValid }?.let { surface ->
+            if (currentWidth > 0 && currentHeight > 0) {
+                startGame(surface, currentWidth, currentHeight)
+            }
+        }
     }
 
     override fun onSurfaceChanged(surface: Surface, widthPx: Int, heightPx: Int) {
