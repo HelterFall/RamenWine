@@ -224,6 +224,7 @@ object ProotWineCommandBuilder {
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
             add("/usr/bin/env")
+            add("-i")
             guestEnvironment.forEach { (name, value) -> add("$name=$value") }
             add("/usr/bin/box64")
             when (request.operation) {

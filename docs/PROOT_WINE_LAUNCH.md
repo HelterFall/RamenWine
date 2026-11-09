@@ -76,7 +76,7 @@ The environment is deliberately split into two layers:
 - Android/PRoot host environment: `LD_LIBRARY_PATH=<backend>/host/lib` for Bionic PRoot dependencies and `PROOT_TMP_DIR=<app-private host cache path>`. These are passed to the PRoot process by `ProcessBuilder`.
 - ARM64 Linux guest environment: set by the guest `/usr/bin/env` immediately before Box64. It includes `LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu`, `BOX64_LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix`, `WINEDLLPATH` for the packaged Wine driver directories, `WINEPREFIX`, `HOME`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `WINEARCH=win64`, `LANG`, `LC_ALL`, `PATH` and `BOX64_NOBANNER=1`.
 
-The guest `env` invocation replaces the inherited Android/Bionic `LD_LIBRARY_PATH` with ARM64 glibc paths before starting Box64. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.
+The guest `env -i` invocation discards the entire inherited environment before applying only the explicit ARM64 glibc, Box64, Wine, Wayland and locale variables. This prevents Android/Bionic paths and unrelated host settings from leaking into Wine or the game process. This matches the launch layering used by [Winlator WB64's guest launcher](https://github.com/winebox64/winlator-wb64/blob/main/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java), which runs guest `env` and then `box64` under PRoot. The host-only `PROOT_TMP_DIR` remains outside that guest environment.
 
 The Android app does not grant INTERNET permission in this scaffold. The game process inherits the app UID and Android sandbox; PRoot is not root and the command does not use PRoot's fake-root option.
 
@@ -99,6 +99,7 @@ proot
   --bind=<Wayland socket dir>:/run/user/<uid>
   --pwd=/games/<id>
   /usr/bin/env
+  -i
   HOME=/home/ramen
   WINEPREFIX=/prefixes/<id>
   LD_LIBRARY_PATH=/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu
@@ -118,7 +119,7 @@ PRoot's documented CLI supports the rootfs, bind and initial-working-directory o
 Before the selected EXE starts, GameLaunchCoordinator asks WinePrefixInitializer to prepare the game's private prefix. If neither \`system.reg\` nor \`user.reg\` exists, it builds a separate PRoot command:
 
 \`\`\`text
-/usr/bin/env <guest environment assignments> /usr/bin/box64 /usr/bin/wineboot --init
+/usr/bin/env -i <guest environment assignments> /usr/bin/box64 /usr/bin/wineboot --init
 \`\`\`
 
 The initializer serializes concurrent requests, tags output with \`[wineboot]\`, and waits up to five minutes. A non-zero exit, timeout, or cancellation prevents the game EXE from starting and attempts to stop the bootstrap process. A successful exit is accepted only when both \`system.reg\` and \`user.reg\` exist. If exactly one registry file exists, the prefix is treated as partial and fails closed rather than being overwritten automatically.

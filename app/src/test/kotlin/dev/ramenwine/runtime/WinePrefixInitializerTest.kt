@@ -100,6 +100,7 @@ class WinePrefixInitializerTest {
         private val displayDirectory = File(cacheDirectory, "display").apply { mkdirs() }
 
         init {
+            executable(rootfs, "usr/bin/env")
             executable(rootfs, "usr/bin/box64")
             executable(rootfs, "usr/bin/wine")
             executable(rootfs, "usr/bin/wineboot")

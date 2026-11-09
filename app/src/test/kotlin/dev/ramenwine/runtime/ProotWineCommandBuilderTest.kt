@@ -31,7 +31,8 @@ class ProotWineCommandBuilderTest {
             assertFalse(command.environment.containsKey("WINEARCH"))
             val envIndex = command.arguments.indexOf("/usr/bin/env")
             assertTrue(envIndex >= 0)
-            val guestEnvironment = command.arguments.drop(envIndex + 1)
+            assertEquals("-i", command.arguments[envIndex + 1])
+            val guestEnvironment = command.arguments.drop(envIndex + 2)
                 .takeWhile { it.contains("=") }
                 .associate { it.substringBefore("=") to it.substringAfter("=") }
             assertEquals(
@@ -71,7 +72,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "home/ramen").isDirectory)
             assertTrue(File(fixture.rootfs, "run/user/10123").isDirectory)
-            assertEquals("/prefixes/" + fixture.gameId, command.environment["WINEPREFIX"])
+            assertEquals("/prefixes/" + fixture.gameId, guestEnvironment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
@@ -97,8 +98,9 @@ class ProotWineCommandBuilderTest {
             assertFalse(command.arguments.contains("/usr/bin/wine"))
             val envIndex = command.arguments.indexOf("/usr/bin/env")
             assertTrue(envIndex >= 0)
+            assertEquals("-i", command.arguments[envIndex + 1])
             assertTrue(
-                command.arguments.drop(envIndex + 1)
+                command.arguments.drop(envIndex + 2)
                     .contains("WINEPREFIX=/prefixes/" + fixture.gameId)
             )
         } finally {
