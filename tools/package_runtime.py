@@ -478,7 +478,13 @@ def validate_box64_x64_library_bundle(
     loader misses wrong-ABI or escaping libraries that would fail much later.
     """
     root_real = rootfs.resolve(strict=True)
-    directory = rootfs.joinpath(*PurePosixPath(relative_directory).parts)
+    guest_directory_path = PurePosixPath(relative_directory)
+    if not guest_directory_path.is_absolute() or ".." in guest_directory_path.parts:
+        raise ValueError("Box64 x86-64 library directory must be a safe absolute guest path.")
+    # PurePosixPath.parts includes "/" as its first item for an absolute guest
+    # path. Passing that item to pathlib.joinpath would reset the path to the
+    # Android/Linux host's real /usr/lib instead of staying inside rootfs.
+    directory = rootfs.joinpath(*guest_directory_path.parts[1:])
     try:
         real_directory = directory.resolve(strict=True)
         real_directory.relative_to(root_real)
@@ -494,7 +500,7 @@ def validate_box64_x64_library_bundle(
         "libgcc_s.so.1",
         "libunwind.so.8",
     )
-    guest_directory = "/" + PurePosixPath(relative_directory).as_posix()
+    guest_directory = guest_directory_path.as_posix()
     for name in required_libraries:
         library = resolve_guest_file(rootfs, guest_directory + "/" + name)
         try:
@@ -614,7 +620,12 @@ def validate_wine_pe_directory(
 ) -> int:
     """Require a complete Wine PE directory and validate every executable image's ABI."""
     root_real = rootfs.resolve(strict=True)
-    directory = rootfs.joinpath(*PurePosixPath(relative_directory).parts)
+    guest_directory_path = PurePosixPath(relative_directory)
+    if not guest_directory_path.is_absolute() or ".." in guest_directory_path.parts:
+        raise ValueError(
+            f"{label} PE directory must be a safe absolute guest path: {relative_directory}"
+        )
+    directory = rootfs.joinpath(*guest_directory_path.parts[1:])
     try:
         real_directory = directory.resolve(strict=True)
         real_directory.relative_to(root_real)
