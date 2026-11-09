@@ -35,7 +35,7 @@ internal class RuntimeOutputBuffer(
         // A single line may exceed the total limit only if the constructor
         // configured a smaller maxCharacters than maxLineCharacters; take()
         // above prevents that case.
-        lines.addLast(line)
+        lines.add(line)
         retainedCharacters += line.length
     }
 
