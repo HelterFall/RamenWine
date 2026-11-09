@@ -1,33 +1,10 @@
-name: Build pinned Wawona Android payload
+name: Package final RamenWine APK (manual, end-of-project only)
 
+# Deliberately manual-only. During runtime development we validate components
+# independently; the installable APK is assembled once the novel launch path
+# is complete and verified.
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/wawona-shm-smoke]
-    paths:
-      - ".github/workflows/wawona-native-payload.yml"
-      - "app/build.gradle.kts"
-      - "app/src/debug/**"
-      - "app/src/main/kotlin/dev/ramenwine/ui/**"
-      - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
-      - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
-      - "tools/package_wawona_apk.py"
-      - "tools/tests/test_package_wawona_apk.py"
-      - "tools/tests/test_package_runtime.py"
-      - "docs/WAWONA_INTEGRATION.md"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/wawona-native-payload.yml"
-      - "app/build.gradle.kts"
-      - "app/src/debug/**"
-      - "app/src/main/kotlin/dev/ramenwine/ui/**"
-      - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
-      - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
-      - "tools/package_wawona_apk.py"
-      - "tools/tests/test_package_wawona_apk.py"
-      - "tools/tests/test_package_runtime.py"
-      - "docs/WAWONA_INTEGRATION.md"
 
 concurrency:
   group: ramenwine-wawona-payload-${{ github.ref }}
