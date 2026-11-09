@@ -166,11 +166,18 @@ internal interface WawonaInputSessionLease {
     val inputLeaseToken: Any
 }
 
+/** Optional in-process diagnostic client provided by the pinned Wawona build. */
+internal interface WawonaSmokeTestSession {
+    fun startWestonSimpleShm(): Boolean
+    fun stopWestonSimpleShm()
+    fun isWestonSimpleShmRunning(): Boolean
+}
+
 private class WawonaGameDisplaySession(
     private val surface: Surface,
     override val endpoint: WaylandDisplayEndpoint,
     override val inputLeaseToken: Any
-) : GameDisplaySession, WawonaInputSessionLease {
+) : GameDisplaySession, WawonaInputSessionLease, WawonaSmokeTestSession {
     private var closed = false
 
     override fun resize(widthPx: Int, heightPx: Int) {
@@ -182,11 +189,37 @@ private class WawonaGameDisplaySession(
         }
     }
 
+    override fun startWestonSimpleShm(): Boolean {
+        var started = false
+        WawonaProcessSessionGuard.withLease(inputLeaseToken) {
+            check(!closed) { "The Wawona display session is already closed." }
+            started = WawonaNative.nativeRunWestonSimpleSHM()
+        }
+        return started
+    }
+
+    override fun stopWestonSimpleShm() {
+        WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
+            if (!closed) WawonaNative.nativeStopWestonSimpleSHM()
+        }
+    }
+
+    override fun isWestonSimpleShmRunning(): Boolean {
+        var running = false
+        WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
+            running = !closed && WawonaNative.nativeIsWestonSimpleSHMRunning()
+        }
+        return running
+    }
+
     override fun close() {
         WawonaProcessSessionGuard.closeLease(inputLeaseToken) {
             if (closed) return@closeLease
             closed = true
             try {
+                // Stop the optional SHM diagnostic client before tearing down
+                // its host surface and process-global compositor.
+                WawonaNative.nativeStopWestonSimpleSHM()
                 // Upstream explicitly separates surface teardown from core
                 // shutdown. Destroy the Vulkan surface first, then stop Rust.
                 WawonaNative.nativeDestroySurface(surface)
