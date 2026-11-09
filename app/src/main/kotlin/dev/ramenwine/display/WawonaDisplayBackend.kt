@@ -46,12 +46,16 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                 // Upstream JNI sets WAWONA_FILES_DIR, XDG_RUNTIME_DIR and
                 // related process environment variables in its native code.
                 WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.canonicalPath)
+                // Match upstream MainActivity: dump the Android host keymap
+                // before creating the core, then commit it after nativeInit.
+                applyHostKeymap()
 
                 nativeInitializationAttempted = true
                 WawonaNative.nativeInit(runtimeDirectory.parentFile!!.absolutePath)
                 if (!WawonaNative.nativeIsCompositorReady()) {
                     throw IOException("Wawona Wayland compositor did not start.")
                 }
+                WawonaNative.nativeReloadHostKeymap()
 
                 val socket = File(runtimeDirectory, WAYLAND_SOCKET_NAME)
                 WawonaRuntimePaths.verifyLiveSocket(socket)
@@ -60,7 +64,6 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                     appContext.resources.displayMetrics.density
                 )
                 WawonaNative.nativeSetHostSeatMode(0) // Multi-touch seat mode.
-                applyHostKeymap()
 
                 WawonaNative.nativeSetSurface(surface)
                 // Mirror WawonaSettings' clean-install defaults so the host
@@ -142,7 +145,6 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
 
         if (ids.isNotEmpty()) {
             WawonaNative.nativeApplyHostKeyLevels(ids.toIntArray(), levels.toIntArray())
-            WawonaNative.nativeReloadHostKeymap()
         }
     }
 
