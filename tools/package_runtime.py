@@ -482,6 +482,42 @@ def validate_glibc_proot_box64(root: Path) -> None:
     if not host_library_directory.is_dir():
         raise ValueError("PRoot host library directory is missing.")
 
+    try:
+        host_library_root = host_library_directory.resolve(strict=True)
+        host_library_root.relative_to(backend_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("PRoot host library directory is missing or escapes the backend.") from error
+
+    host_shared_libraries = [
+        path for path in sorted(host_library_directory.iterdir(), key=lambda item: item.name)
+        if path.name.startswith("lib") and ".so" in path.name
+    ]
+    if not host_shared_libraries:
+        raise ValueError("PRoot host shared-library payload is empty.")
+
+    for library_path in host_shared_libraries:
+        try:
+            library_real = library_path.resolve(strict=True)
+            library_real.relative_to(host_library_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"PRoot host shared library is missing or escapes host/lib: {library_path.name}"
+            ) from error
+        require_elf64(
+            library_real,
+            "PRoot host shared library " + library_path.name,
+            ELF_MACHINE_AARCH64,
+        )
+
+    for required_library in ("libtalloc.so.2", "libandroid-shmem.so"):
+        try:
+            resolve_host_library = (host_library_directory / required_library).resolve(strict=True)
+            resolve_host_library.relative_to(host_library_root)
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f"required PRoot host library is missing or escapes host/lib: {required_library}"
+            ) from error
+
     proot_path = backend_root / "host" / "bin" / "proot"
     try:
         proot_real = proot_path.resolve(strict=True)
@@ -506,8 +542,13 @@ def validate_glibc_proot_box64(root: Path) -> None:
     require_elf64(proot_loader_real, "PRoot ELF loader", ELF_MACHINE_AARCH64)
 
     rootfs = backend_root / "rootfs"
+    try:
+        rootfs = rootfs.resolve(strict=True)
+        rootfs.relative_to(backend_root)
+    except (OSError, ValueError) as error:
+        raise ValueError("ARM64 Linux/glibc rootfs directory is missing or escapes the backend.") from error
     if not rootfs.is_dir():
-        raise ValueError("ARM64 Linux/glibc rootfs directory is missing.")
+        raise ValueError("ARM64 Linux/glibc rootfs directory is not a directory.")
 
     arm64_loader = resolve_guest_file(rootfs, "/lib/ld-linux-aarch64.so.1")
     require_elf64(arm64_loader, "ARM64 glibc loader", ELF_MACHINE_AARCH64)

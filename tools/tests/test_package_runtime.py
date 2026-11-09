@@ -167,7 +167,17 @@ class RuntimePackagerTests(unittest.TestCase):
 
     def _make_glibc_backend(self, root: Path) -> Path:
         backend = root / "backend"
-        (backend / "host" / "lib").mkdir(parents=True)
+        host_lib = backend / "host" / "lib"
+        host_lib.mkdir(parents=True)
+        talloc_real = self._write_elf64(
+            host_lib / "libtalloc.so.2.5.0",
+            package_runtime.ELF_MACHINE_AARCH64,
+        )
+        (host_lib / "libtalloc.so.2").symlink_to(talloc_real.name)
+        self._write_elf64(
+            host_lib / "libandroid-shmem.so",
+            package_runtime.ELF_MACHINE_AARCH64,
+        )
         self._write_elf64(
             backend / "host" / "bin" / "proot",
             package_runtime.ELF_MACHINE_AARCH64,
@@ -343,6 +353,24 @@ class RuntimePackagerTests(unittest.TestCase):
             (backend / "rootfs" / "usr" / "share" / "X11" / "xkb"
              / "rules" / "evdev").unlink()
             with self.assertRaisesRegex(ValueError, "required guest path is missing"):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_runtime_missing_proot_host_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            (backend / "host" / "lib" / "libandroid-shmem.so").unlink()
+            with self.assertRaisesRegex(
+                ValueError,
+                "required PRoot host library is missing",
+            ):
+                package_runtime.validate_glibc_proot_box64(backend)
+
+    def test_rejects_wrong_architecture_for_proot_host_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = self._make_glibc_backend(Path(temporary))
+            library = backend / "host" / "lib" / "libandroid-shmem.so"
+            self._write_elf64(library, package_runtime.ELF_MACHINE_X86_64)
+            with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
                 package_runtime.validate_glibc_proot_box64(backend)
 
     def test_rejects_runtime_missing_box64_x64_emulation_library(self) -> None:
