@@ -95,7 +95,10 @@ def collect_native_closure(
     """Return only the root libraries and their APK-resident NEEDED closure."""
     by_name: dict[str, str] = {}
     for filename in apk_libraries:
-        if PurePosixPath(filename).name != filename or not filename.endswith(".so"):
+        if (
+            PurePosixPath(filename).name != filename
+            or not (filename.endswith(".so") or ".so." in filename)
+        ):
             raise ValueError(f"invalid native library filename: {filename!r}")
         folded = filename.casefold()
         if folded in by_name:
@@ -180,7 +183,7 @@ def apk_native_libraries(archive: zipfile.ZipFile) -> dict[str, bytes]:
         if not relative.startswith(APK_LIBRARY_ROOT):
             raise ValueError(f"native entry escaped ABI directory: {info.filename}")
         filename = relative[len(APK_LIBRARY_ROOT):]
-        if "/" in filename or not filename.endswith(".so"):
+        if "/" in filename or not (filename.endswith(".so") or ".so." in filename):
             continue
         folded = filename.casefold()
         if folded in seen:
