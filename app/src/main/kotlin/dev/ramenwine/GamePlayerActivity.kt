@@ -42,6 +42,8 @@ import kotlinx.coroutines.withContext
 class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     companion object {
         const val EXTRA_GAME_ID = "dev.ramenwine.extra.GAME_ID"
+        private const val EXIT_DIAGNOSTIC_LINES = 10
+        private const val STARTUP_DIAGNOSTIC_LINES = 8
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -52,6 +54,8 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
     private lateinit var statusView: TextView
     private lateinit var game: ImportedGame
     private lateinit var coordinator: GameLaunchCoordinator
+
+    private val runtimeOutput = RuntimeOutputBuffer()
 
     private var currentSurface: Surface? = null
     private var currentWidth = 0
@@ -189,6 +193,7 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
 
     private fun startGame(surface: Surface, widthPx: Int, heightPx: Int) {
         val requestedGeneration = ++generation
+        runtimeOutput.clear()
         showStatus("Запускаю новеллу…")
 
         launchJob = uiScope.launch {
@@ -199,10 +204,14 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
                         surface = surface,
                         widthPx = widthPx,
                         heightPx = heightPx,
-                        onOutput = { /* Runtime diagnostics remain off the game surface. */ },
+                        onOutput = runtimeOutput::append,
                         onExit = { exitCode ->
+                            // The supervisor drains merged stdout/stderr before
+                            // invoking onExit, so this snapshot includes Wine's
+                            // final loader and Wayland diagnostics.
+                            val recentOutput = runtimeOutput.snapshot(EXIT_DIAGNOSTIC_LINES)
                             mainHandler.post {
-                                handleGameExit(exitCode)
+                                handleGameExit(exitCode, recentOutput)
                             }
                         }
                     )
@@ -244,9 +253,12 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
                 throw cancelled
             } catch (error: Throwable) {
                 if (requestedGeneration == generation && !closing && !isDestroyed) {
+                    val recentOutput = runtimeOutput.snapshot(STARTUP_DIAGNOSTIC_LINES)
+                    val diagnosticText = if (recentOutput.isEmpty()) "" else
+                        "\n\n" + recentOutput.joinToString("\n")
                     showStatus(
                         "Не удалось запустить новеллу: " +
-                            (error.message ?: error.javaClass.simpleName)
+                            (error.message ?: error.javaClass.simpleName) + diagnosticText
                     )
                 }
             } finally {
@@ -257,17 +269,18 @@ class GamePlayerActivity : ComponentActivity(), WawonaSurfaceView.Callbacks {
         }
     }
 
-    private fun handleGameExit(exitCode: Int) {
+    private fun handleGameExit(exitCode: Int, recentOutput: List<String>) {
         if (closing || isFinishing || isDestroyed) return
         surfaceView.bindSession(null)
         launchSession = null
-        showStatus(
-            if (exitCode == 0) {
-                "Новелла завершилась."
-            } else {
-                "Новелла закрылась (код $exitCode)."
-            }
-        )
+        val message = if (exitCode == 0) {
+            "Новелла завершилась."
+        } else {
+            val diagnosticText = if (recentOutput.isEmpty()) "" else
+                "\n\n" + recentOutput.joinToString("\n")
+            "Новелла закрылась (код $exitCode)." + diagnosticText
+        }
+        showStatus(message)
     }
 
     private fun requestExit() {
