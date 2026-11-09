@@ -153,6 +153,24 @@ class ProotHostAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "wrong ELF machine"):
             assemble_proot_host.stage_host_payload(self.extracted, self.output, {})
 
+    def test_host_dependency_failure_leaves_no_partial_output(self) -> None:
+        self.output.mkdir()
+        with patch.object(
+            assemble_proot_host.package_runtime,
+            "validate_android_proot_host_payload",
+            side_effect=ValueError("unresolved Android PRoot host dependency"),
+        ) as validate_host:
+            with self.assertRaisesRegex(ValueError, "unresolved Android PRoot host dependency"):
+                assemble_proot_host.stage_host_payload(
+                    self.extracted,
+                    self.output,
+                    {"test": {"version": "fixture"}},
+                )
+
+        validate_host.assert_called_once()
+        self.assertEqual([], list(self.output.iterdir()))
+        self.assertEqual([], list(self.root.glob(".out.staging-*")))
+
     def test_refuses_to_overwrite_nonempty_output(self) -> None:
         self.output.mkdir()
         (self.output / "keep.txt").write_text("leave unchanged", encoding="utf-8")

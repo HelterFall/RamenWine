@@ -154,94 +154,118 @@ def stage_host_payload(
     if missing:
         raise ValueError(f"missing extracted Termux packages: {', '.join(missing)}")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if any(output_dir.iterdir()):
+    output_dir = output_dir.absolute()
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    if output_dir.is_symlink():
+        raise ValueError(f"host payload output directory must not be a symlink: {output_dir}")
+    if output_dir.exists() and (
+        not output_dir.is_dir() or any(output_dir.iterdir())
+    ):
         raise ValueError(f"host payload output directory must be empty: {output_dir}")
 
-    prefixes = {
-        name: package_prefix(root, name)
-        for name, root in extracted_roots.items()
-    }
+    # Build beside the destination and rename only after every ELF/dependency
+    # check and provenance write succeeds. A failed assembly leaves no partial
+    # artifact that would block a clean retry.
+    staging = Path(tempfile.mkdtemp(
+        prefix="." + output_dir.name + ".staging-",
+        dir=output_dir.parent,
+    ))
+    try:
+        prefixes = {
+            name: package_prefix(root, name)
+            for name, root in extracted_roots.items()
+        }
 
-    proot_source = prefixes["proot"] / "bin" / "proot"
-    loader_source = prefixes["proot"] / "libexec" / "proot" / "loader"
-    host_bin = output_dir / "host" / "bin"
-    host_loader = output_dir / "host" / "libexec" / "proot"
-    host_lib = output_dir / "host" / "lib"
+        proot_source = prefixes["proot"] / "bin" / "proot"
+        loader_source = prefixes["proot"] / "libexec" / "proot" / "loader"
+        host_bin = staging / "host" / "bin"
+        host_loader = staging / "host" / "libexec" / "proot"
+        host_lib = staging / "host" / "lib"
 
-    safe_copy_regular_or_relative_symlink(
-        proot_source, host_bin / "proot", prefixes["proot"]
-    )
-    safe_copy_regular_or_relative_symlink(
-        loader_source, host_loader / "loader", prefixes["proot"]
-    )
+        safe_copy_regular_or_relative_symlink(
+            proot_source, host_bin / "proot", prefixes["proot"]
+        )
+        safe_copy_regular_or_relative_symlink(
+            loader_source, host_loader / "loader", prefixes["proot"]
+        )
 
-    copied_libraries: set[str] = set()
-    for prefix in prefixes.values():
-        source_lib = prefix / "lib"
-        if not source_lib.is_dir():
-            continue
-        for source in sorted(source_lib.iterdir(), key=lambda item: item.name):
-            if not source.name.startswith("lib") or ".so" not in source.name:
+        copied_libraries: set[str] = set()
+        for prefix in prefixes.values():
+            source_lib = prefix / "lib"
+            if not source_lib.is_dir():
                 continue
-            destination = host_lib / source.name
-            if destination.exists() or destination.is_symlink():
-                raise ValueError(f"duplicate shared-library payload entry: {source.name}")
-            safe_copy_regular_or_relative_symlink(source, destination, prefix)
-            copied_libraries.add(source.name)
+            for source in sorted(source_lib.iterdir(), key=lambda item: item.name):
+                if not source.name.startswith("lib") or ".so" not in source.name:
+                    continue
+                destination = host_lib / source.name
+                if destination.exists() or destination.is_symlink():
+                    raise ValueError(f"duplicate shared-library payload entry: {source.name}")
+                safe_copy_regular_or_relative_symlink(source, destination, prefix)
+                copied_libraries.add(source.name)
 
-    if not any(name.startswith("libtalloc.so") for name in copied_libraries):
-        raise ValueError("Termux libtalloc package did not provide a shared library")
-    if not any(name.startswith("libandroid-shmem.so") for name in copied_libraries):
-        raise ValueError("Termux libandroid-shmem package did not provide a shared library")
+        if not any(name.startswith("libtalloc.so") for name in copied_libraries):
+            raise ValueError("Termux libtalloc package did not provide a shared library")
+        if not any(name.startswith("libandroid-shmem.so") for name in copied_libraries):
+            raise ValueError("Termux libandroid-shmem package did not provide a shared library")
 
-    staged_proot = host_bin / "proot"
-    staged_loader = host_loader / "loader"
-    package_runtime.require_executable(staged_proot, "PRoot host executable")
-    package_runtime.require_elf64(
-        staged_proot,
-        "PRoot host executable",
-        package_runtime.ELF_MACHINE_AARCH64,
-        "/system/bin/linker64",
-    )
-    package_runtime.require_executable(staged_loader, "PRoot ELF loader")
-    package_runtime.require_elf64(
-        staged_loader,
-        "PRoot ELF loader",
-        package_runtime.ELF_MACHINE_AARCH64,
-    )
-
-    for name in sorted(copied_libraries):
+        staged_host = staging / "host"
+        staged_proot = staged_host / "bin" / "proot"
+        staged_loader = staged_host / "libexec" / "proot" / "loader"
+        package_runtime.require_executable(staged_proot, "PRoot host executable")
         package_runtime.require_elf64(
-            (host_lib / name).resolve(strict=True),
-            f"PRoot host shared library {name}",
+            staged_proot,
+            "PRoot host executable",
+            package_runtime.ELF_MACHINE_AARCH64,
+            "/system/bin/linker64",
+        )
+        package_runtime.require_executable(staged_loader, "PRoot ELF loader")
+        package_runtime.require_elf64(
+            staged_loader,
+            "PRoot ELF loader",
             package_runtime.ELF_MACHINE_AARCH64,
         )
 
-    metadata = {
-        "formatVersion": 1,
-        "target": "android-bionic-arm64",
-        "termuxPackagesCommit": TERMUX_PACKAGES_COMMIT,
-        "androidNdkVersion": TERMUX_NDK_VERSION,
-        "androidNdkArchiveSha256": TERMUX_NDK_ARCHIVE_SHA256,
-        "androidSdkCommandLineToolsRevision": TERMUX_SDK_COMMANDLINE_TOOLS_REVISION,
-        "androidSdkCommandLineToolsSha256": TERMUX_SDK_COMMANDLINE_TOOLS_SHA256,
-        "androidBuildToolsVersion": TERMUX_ANDROID_BUILD_TOOLS_VERSION,
-        "packageSources": provenance,
-        "files": {
-            "proot": "host/bin/proot",
-            "loader": "host/libexec/proot/loader",
-            "libraries": [f"host/lib/{name}" for name in sorted(copied_libraries)],
-        },
-    }
-    provenance_path = output_dir / "host" / "PROVENANCE.json"
-    provenance_path.parent.mkdir(parents=True, exist_ok=True)
-    provenance_path.write_text(
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return output_dir / "host"
+        for name in sorted(copied_libraries):
+            package_runtime.require_elf64(
+                (staged_host / "lib" / name).resolve(strict=True),
+                f"PRoot host shared library {name}",
+                package_runtime.ELF_MACHINE_AARCH64,
+            )
 
+        # Validate the real DT_NEEDED closure at the point this host package is
+        # created, not only later when a full Wine guest build consumes it.
+        package_runtime.validate_android_proot_host_payload(staged_host)
+
+        metadata = {
+            "formatVersion": 1,
+            "target": "android-bionic-arm64",
+            "termuxPackagesCommit": TERMUX_PACKAGES_COMMIT,
+            "androidNdkVersion": TERMUX_NDK_VERSION,
+            "androidNdkArchiveSha256": TERMUX_NDK_ARCHIVE_SHA256,
+            "androidSdkCommandLineToolsRevision": TERMUX_SDK_COMMANDLINE_TOOLS_REVISION,
+            "androidSdkCommandLineToolsSha256": TERMUX_SDK_COMMANDLINE_TOOLS_SHA256,
+            "androidBuildToolsVersion": TERMUX_ANDROID_BUILD_TOOLS_VERSION,
+            "packageSources": provenance,
+            "files": {
+                "proot": "host/bin/proot",
+                "loader": "host/libexec/proot/loader",
+                "libraries": [f"host/lib/{name}" for name in sorted(copied_libraries)],
+            },
+        }
+        provenance_path = staged_host / "PROVENANCE.json"
+        provenance_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        if output_dir.exists():
+            output_dir.rmdir()
+        os.replace(staging, output_dir)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    return output_dir / "host"
 
 def assemble(packages_dir: Path, output_dir: Path) -> Path:
     packages = find_required_debs(packages_dir)
