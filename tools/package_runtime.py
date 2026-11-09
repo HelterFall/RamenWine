@@ -676,6 +676,20 @@ def validate_glibc_proot_box64(root: Path) -> None:
     )
     require_pe_i386(wayland_i386_pe, "Wine 32-bit Wayland PE driver")
 
+    wine_pe_root = "/usr/lib/x86_64-linux-gnu/wine"
+    validate_wine_pe_directory(
+        rootfs,
+        wine_pe_root + "/x86_64-windows",
+        PE_MACHINE_AMD64,
+        "Wine x86-64",
+    )
+    validate_wine_pe_directory(
+        rootfs,
+        wine_pe_root + "/i386-windows",
+        PE_MACHINE_I386,
+        "Wine i386 WoW64",
+    )
+
     for library_name in (
         "libwayland-client.so.0",
         "libwayland-cursor.so.0",
