@@ -362,7 +362,7 @@ class WinePrefixInitializerTest {
                     if any(item not in sys.argv for item in required):
                         print("invalid Wayland registry command", flush=True)
                         sys.exit(10)
-                    if "$fixtureScript" == "wayland-config-exit-9":
+                    if "$mode" == "wayland-config-exit-9":
                         print("Wayland registry command failed", flush=True)
                         sys.exit(9)
                     config_counter = prefix / "wayland-config-count"
@@ -376,7 +376,7 @@ class WinePrefixInitializerTest {
                 counter = prefix / "wineboot-count"
                 count = int(counter.read_text() if counter.exists() else "0") + 1
                 counter.write_text(str(count))
-                arch = "win32" if "$fixtureScript" == "create-prefix-win32" else "win64"
+                arch = "win32" if "$mode" == "create-prefix-win32" else "win64"
                 registry = f"WINE REGISTRY Version 2\n#arch={arch}\n"
                 (prefix / "system.reg").write_text(registry)
                 (prefix / "user.reg").write_text(registry)
