@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -13,25 +14,41 @@ import package_runtime
 
 
 class RuntimePackagerTests(unittest.TestCase):
+    def write_elf64(self, path: Path, machine: int) -> None:
+        header = bytearray(64)
+        header[:4] = b"\x7fELF"
+        header[4:7] = bytes((2, 1, 1))
+        struct.pack_into("<H", header, 18, machine)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(header)
+        path.chmod(0o755)
+
+    def write_pe32_plus_amd64(self, path: Path) -> None:
+        header = bytearray(256)
+        header[:2] = b"MZ"
+        struct.pack_into("<I", header, 0x3C, 0x80)
+        header[0x80:0x84] = b"PE\x00\x00"
+        struct.pack_into("<H", header, 0x84, 0x8664)
+        struct.pack_into("<H", header, 0x98, 0x20B)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(header)
+
     def create_glibc_runtime(self, root: Path) -> None:
-        for relative in (
-            "host/bin/proot",
-            "rootfs/usr/bin/env",
-            "rootfs/usr/bin/box64",
-            "rootfs/usr/bin/wine",
+        for relative, machine in (
+            ("host/bin/proot", 183),
+            ("rootfs/usr/bin/env", 183),
+            ("rootfs/usr/bin/box64", 183),
+            ("rootfs/usr/bin/wine", 62),
         ):
-            executable = root / relative
-            executable.parent.mkdir(parents=True, exist_ok=True)
-            executable.write_bytes(b"test executable")
-            executable.chmod(0o755)
+            self.write_elf64(root / relative, machine)
 
         host_library = root / "host/lib/libproot.so"
         host_library.parent.mkdir(parents=True, exist_ok=True)
         host_library.write_bytes(b"host library")
 
-        wineboot = root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
-        wineboot.parent.mkdir(parents=True, exist_ok=True)
-        wineboot.write_bytes(b"wineboot")
+        self.write_pe32_plus_amd64(
+            root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
+        )
 
     def test_creates_manifest_and_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -102,6 +119,19 @@ class RuntimePackagerTests(unittest.TestCase):
                 package_runtime.resolve_symlink_inside(root, link, r"..\outside")
             with self.assertRaises(ValueError):
                 package_runtime.resolve_symlink_inside(root, link, "bad\x00target")
+
+
+    def test_glibc_manifest_rejects_arm64_wine_loader(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            self.write_elf64(root / "rootfs/usr/bin/wine", 183)
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "x86-64 Wine loader"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
 
     def test_glibc_manifest_requires_launch_components(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

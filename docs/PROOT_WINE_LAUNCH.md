@@ -22,6 +22,20 @@ The Wine build must include and load a compatible Wayland driver for the Windows
 
 The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/box64` and `rootfs/usr/bin/wine`, a readable `wineboot.exe` at one of the supported paths, and the `host/lib` payload directory. Symlink chains are followed when checking required launch files.
 
+The binary ABI is also checked from the actual headers:
+
+| Path | Required format |
+|---|---|
+| `host/bin/proot` | 64-bit little-endian AArch64 ELF (Android/Bionic host) |
+| `rootfs/usr/bin/env` | 64-bit little-endian AArch64 ELF (guest glibc) |
+| `rootfs/usr/bin/box64` | 64-bit little-endian AArch64 ELF |
+| `rootfs/usr/bin/wine` | 64-bit little-endian x86-64 ELF (launched through Box64) |
+| `wineboot.exe` | AMD64 PE32+ |
+
+This selects the x86-64 Wine WOW64 route under Box64. Box64's Wine guide documents the x86-64 WOW64 build as capable of running both 32-bit and 64-bit Windows programs without Box32; Wine 11.0 marks the new WoW64 mode fully supported and uses one `wine` loader rather than separate `wine64` binaries. See [Box64 Wine guidance](https://github.com/deepin-community/box64/blob/master/docs/WINE.md) and the [Wine 11.0 release announcement](https://list.winehq.org/hyperkitty/list/wine-announce%40list.winehq.org/thread/MXULWEMXQ5C24UEJ2STHPIUHNOZ7AZPQ/).
+
+The Python packager validates these headers before creating a ZIP. The Android inventory repeats the header checks after extraction. They reject architecture mismatches but still do not execute binaries or verify runtime linking.
+
 ## Host/guest path mapping
 
 | Host path | Guest path | Purpose |
