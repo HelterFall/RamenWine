@@ -45,6 +45,7 @@ including a failed launch.
 
 The helper's microphone endpoint is not enabled. Output audio requires no
 microphone permission.
+The runtime assembly script also inspects the final LUG Wine `winepulse.so` import table and requires `PsCreateSystemThread`, the upstream DirectAudio probe for the system-thread `mmdevapi` ABI used by this driver. This check is against the actual packaged Wine binary, not only the upstream source header used by the CI build.
 
 ## Runtime packaging and licensing
 

@@ -37,7 +37,7 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
-for command in curl sha256sum unzip tar docker readelf python3 readlink; do
+for command in curl sha256sum unzip tar docker readelf nm python3 readlink; do
   require_command "$command"
 done
 
@@ -132,6 +132,26 @@ done < <(find "$WINE_DIR" \( -type f -o -type l \) \( -name wine64 -o -name wine
   fail "Could not find an x86-64 ELF Wine launcher (expected bin/wine64)."
 
 WINE_ROOT="$(cd "$(dirname "$WINE_ELF")/.." && pwd)"
+
+# The final LUG binary must use the same mmdevapi system-thread table as
+# the DirectAudio driver built in the audio job. Upstream DirectAudio uses
+# this exact winepulse.so import as its runtime ABI probe.
+WINEPULSE_UNIX=""
+while IFS= read -r candidate; do
+  [[ -n "$candidate" ]] || continue
+  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  if readelf -h "$resolved_candidate" 2>/dev/null | \
+      grep -q 'Advanced Micro Devices X86-64'; then
+    WINEPULSE_UNIX="$resolved_candidate"
+    break
+  fi
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name winepulse.so -print)
+
+[[ -n "$WINEPULSE_UNIX" ]] || \
+  fail "LUG Wine is missing its x86-64 winepulse.so ABI probe."
+nm -D --undefined-only "$WINEPULSE_UNIX" | grep -q 'PsCreateSystemThread' || \
+  fail "LUG Wine mmdevapi ABI does not match the DirectAudio system-thread build."
 WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 [[ "$WINE_ELF_RELATIVE" != "$WINE_ELF" ]] || \
   fail "Wine launcher is outside its expected distribution directory."

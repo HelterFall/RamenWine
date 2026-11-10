@@ -38,6 +38,7 @@
 
 - The runtime bundle has a dedicated DirectAudio build job pinned to source revision `52aedbf8ddd42874a5bbd21df20e1046367f442e` and Wine `wine-11.20`.
 - The Wine `mmdevapi/unixlib.h` header is verified against the upstream system-thread ABI prefix `0de9fde40d091d82` before compilation. The driver is built for x86-64 glibc, with matching x86-64 and i386 PE modules; the Android relay is a separate ARM64 Bionic API-28 executable.
+- Runtime assembly also inspects the final LUG Wine `winepulse.so` import table and requires `PsCreateSystemThread`, verifying the actual packaged Wine binary uses the same system-thread ABI rather than relying only on the upstream source header.
 - The runtime packager checks the helper's AArch64 ELF identity, both PE architectures and the x86-64 Unix library. It also rejects a Wine-side driver that links directly to Bionic AAudio.
 - At launch, the app starts the helper under its own Android UID, waits for its Unix socket, sets `WINEDLLPATH` and the relay socket for the guest, then enables `HKCU\\Software\\Wine\\Drivers\\Audio=directaudio` in that game's prefix. The helper is stopped when the process/display session ends.
 - The helper does not enable microphone capture. Its output path uses Android AAudio and the same app-private runtime directory already bind-mounted into the guest.
