@@ -226,25 +226,16 @@ class WawonaSurfaceView(
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
             val before = beforeLength.coerceIn(0, MAX_DELETE_REPEAT)
             val after = afterLength.coerceIn(0, MAX_DELETE_REPEAT)
+            // Wawona forwards this as a Wayland text-input-v3 delete request.
+            // Do not synthesize Backspace/Delete as well: that would delete
+            // the same characters twice in clients handling both paths.
             WawonaNative.nativeDeleteSurroundingText(before, after)
-
-            val timestamp = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
-            repeat(before) {
-                WawonaNative.nativeInjectKey(KEY_BACKSPACE, true, timestamp)
-                WawonaNative.nativeInjectKey(KEY_BACKSPACE, false, timestamp)
-            }
-            repeat(after) {
-                WawonaNative.nativeInjectKey(KEY_DELETE, true, timestamp)
-                WawonaNative.nativeInjectKey(KEY_DELETE, false, timestamp)
-            }
 
             super.deleteSurroundingText(before, after)
             return true
         }
 
         private companion object {
-            const val KEY_BACKSPACE = 14
-            const val KEY_DELETE = 111
             const val MAX_DELETE_REPEAT = 4096
         }
     }
