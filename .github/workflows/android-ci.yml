@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  prepare-runtime:
+    name: Prepare offline Wine runtime
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -60,16 +61,61 @@ jobs:
           chmod +x tools/prepare_prebuilt_runtime.sh
           tools/prepare_prebuilt_runtime.sh
 
-      - name: Install Nix for the pinned Wawona Android build
-        uses: cachix/install-nix-action@v31.11.3
+      - name: Validate offline runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNTIME_ZIP="app/src/main/assets/runtime/ramenwine-runtime.zip"
+          test -s "$RUNTIME_ZIP"
+          unzip -t "$RUNTIME_ZIP"
+          unzip -Z1 "$RUNTIME_ZIP" | grep -Fx "runtime-manifest.json"
+
+      - name: Upload offline runtime package
+        uses: actions/upload-artifact@v4
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          extra_nix_config: |
+          name: ramenwine-offline-runtime
+          path: app/src/main/assets/runtime/ramenwine-runtime.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  android:
+    name: Build Android APK with Wawona
+    needs: prepare-runtime
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      NIXPKGS_ALLOW_UNFREE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download offline Wine runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: ramenwine-offline-runtime
+          path: app/src/main/assets/runtime
+
+      # Match the pinned upstream Wawona Android producer: its Android
+      # cross-build is supported on macOS and uses relaxed Nix sandboxing.
+      - name: Install Determinate Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          determinate: true
+          extra-conf: |
+            sandbox = relaxed
+            allow-import-from-derivation = true
             max-jobs = auto
-            cores = 4
+            cores = 0
+
+      - name: Configure FlakeHub binary cache
+        uses: DeterminateSystems/flakehub-cache-action@v3
 
       - name: Build and import pinned Wawona Android bundle
-        run: tools/build_wawona_android.sh
+        run: |
+          chmod +x tools/build_wawona_android.sh
+          tools/build_wawona_android.sh
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -94,7 +140,7 @@ jobs:
       - name: Run runtime path regression tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Build debug APK with prebuilt runtime
+      - name: Build debug APK with prebuilt runtime and Wawona
         run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Confirm APK contains the prebuilt runtime payload
@@ -107,8 +153,6 @@ jobs:
           test -s "$APK"
           unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
 
-          # Info-ZIP validates a named archive file; it does not accept an
-          # archive streamed to stdin via "unzip -t -".
           unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
           test -s "$RUNTIME_ZIP"
           unzip -t "$RUNTIME_ZIP"
