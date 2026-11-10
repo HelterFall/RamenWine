@@ -17,13 +17,22 @@ class ProotWineCommandBuilderTest {
 
             assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
+            assertTrue(command.arguments.contains("/usr/bin/env"))
             assertTrue(command.arguments.contains("/usr/bin/box64"))
             assertTrue(command.arguments.contains("/usr/bin/wine"))
             assertTrue(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
-            assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
+            assertTrue(command.environment.containsKey("PROOT_TMP_DIR"))
+            assertFalse(command.environment.containsKey("XDG_RUNTIME_DIR"))
+            assertFalse(command.environment.containsKey("WINEPREFIX"))
+            assertEquals("/run/user/10123", command.guestEnvironment["XDG_RUNTIME_DIR"])
+            assertEquals("wayland-0", command.guestEnvironment["WAYLAND_DISPLAY"])
+            assertEquals("/prefixes/" + fixture.gameId, command.guestEnvironment["WINEPREFIX"])
+            assertTrue(command.guestEnvironment["LD_LIBRARY_PATH"]!!.contains("aarch64-linux-gnu"))
+            assertTrue(command.guestEnvironment["BOX64_LD_LIBRARY_PATH"]!!.contains("x86_64-linux-gnu"))
+            assertTrue(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
@@ -38,13 +47,18 @@ class ProotWineCommandBuilderTest {
                     "--bind=" + fixture.displayDirectory.absolutePath + ":/run/user/10123"
                 )
             )
-            assertEquals("/run/user/10123", command.environment["XDG_RUNTIME_DIR"])
-            assertEquals("wayland-0", command.environment["WAYLAND_DISPLAY"])
+            assertTrue(command.arguments.contains("XDG_RUNTIME_DIR=/run/user/10123"))
+            assertTrue(command.arguments.contains("WAYLAND_DISPLAY=wayland-0"))
+            assertTrue(command.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
+            assertTrue(
+                command.arguments.indexOf("/usr/bin/env") <
+                    command.arguments.indexOf("/usr/bin/box64")
+            )
             assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "home/ramen").isDirectory)
             assertTrue(File(fixture.rootfs, "run/user/10123").isDirectory)
-            assertEquals("/prefixes/" + fixture.gameId, command.environment["WINEPREFIX"])
+            assertEquals("/prefixes/" + fixture.gameId, command.guestEnvironment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
@@ -133,6 +147,7 @@ class ProotWineCommandBuilderTest {
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
 

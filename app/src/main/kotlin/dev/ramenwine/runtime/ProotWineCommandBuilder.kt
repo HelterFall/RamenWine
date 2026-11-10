@@ -23,7 +23,10 @@ data class ProotWineCommand(
     val prootExecutable: File,
     val arguments: List<String>,
     val hostWorkingDirectory: File,
+    /** Environment used by the Android-host PRoot process only. */
     val environment: Map<String, String>,
+    /** Clean Linux-rootfs environment applied by the guest /usr/bin/env. */
+    val guestEnvironment: Map<String, String>,
     val unsetEnvironment: Set<String>,
     val guestExecutablePath: String,
     val guestRuntimeDirectory: String
@@ -67,6 +70,7 @@ object ProotWineCommandBuilder {
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
+        executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
 
@@ -147,20 +151,40 @@ object ProotWineCommandBuilder {
             add("--bind=" + tempDirectory.absolutePath + ":" + guestTempDirectory)
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
+
+            // PRoot itself runs on Android and needs the Bionic host library
+            // path. Do not reuse it for Box64/Wine inside the glibc rootfs.
+            // The guest env binary strips host-only values and installs a
+            // separate guest environment without invoking a shell.
+            add("/usr/bin/env")
+            HOST_ONLY_ENVIRONMENT_KEYS.forEach { name ->
+                add("-u")
+                add(name)
+            }
+            guestEnvironment.forEach { (name, value) ->
+                add("$name=$value")
+            }
             add("/usr/bin/box64")
             add("/usr/bin/wine")
             add(guestExecutable)
         }
 
         val environment = linkedMapOf(
+            "LD_LIBRARY_PATH" to hostLibraryDirectory.canonicalPath,
+            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
+        )
+
+        val guestEnvironment = linkedMapOf(
             "HOME" to guestHomeDirectory,
             "WINEPREFIX" to guestPrefixDirectory,
             "WINEDEBUG" to "err+all",
             "WAYLAND_DISPLAY" to request.display.socketName,
             "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
             "TMPDIR" to guestTempDirectory,
-            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
-            "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
+            "LD_LIBRARY_PATH" to
+                "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/lib:/usr/lib",
+            "BOX64_LD_LIBRARY_PATH" to
+                "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib:/usr/lib",
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/usr/local/bin:/usr/bin:/bin",
@@ -172,17 +196,8 @@ object ProotWineCommandBuilder {
             arguments = arguments,
             hostWorkingDirectory = backendRoot,
             environment = environment,
-            unsetEnvironment = setOf(
-                "DISPLAY",
-                "WAYLAND_SOCKET",
-                "LD_PRELOAD",
-                "ANDROID_ROOT",
-                "ANDROID_DATA",
-                "BOOTCLASSPATH",
-                "ANDROID_ART_ROOT",
-                "ANDROID_I18N_ROOT",
-                "ANDROID_TZDATA_ROOT"
-            ),
+            guestEnvironment = guestEnvironment,
+            unsetEnvironment = HOST_ONLY_ENVIRONMENT_KEYS,
             guestExecutablePath = guestExecutable,
             guestRuntimeDirectory = guestRuntimeDirectory
         )
@@ -261,6 +276,33 @@ object ProotWineCommandBuilder {
     }
 
     private const val MAX_UNIX_SOCKET_PATH_BYTES = 108
+
+    // These values must not leak from Android into the glibc/Wine guest.
+    // LD_LIBRARY_PATH and PROOT_TMP_DIR are reset for the guest by /usr/bin/env
+    // but remain available to the host PRoot process.
+    private val HOST_ONLY_ENVIRONMENT_KEYS = setOf(
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "WAYLAND_SOCKET",
+        "XDG_RUNTIME_DIR",
+        "HOME",
+        "TMPDIR",
+        "PROOT_TMP_DIR",
+        "LD_LIBRARY_PATH",
+        "PATH",
+        "WINEPREFIX",
+        "WINEDEBUG",
+        "BOX64_LD_LIBRARY_PATH",
+        "BOX64_NOBANNER",
+        "LD_PRELOAD",
+        "ANDROID_ROOT",
+        "ANDROID_DATA",
+        "BOOTCLASSPATH",
+        "ANDROID_ART_ROOT",
+        "ANDROID_I18N_ROOT",
+        "ANDROID_TZDATA_ROOT"
+    )
+
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
     private val LOCALE_PATTERN = Regex("[A-Za-z0-9_.@-]{1,64}")

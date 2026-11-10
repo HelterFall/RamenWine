@@ -37,13 +37,20 @@ The builder requires:
 - a valid imported-game UUID and relative directory games/<id>;
 - a safe selected EXE path contained in the imported game directory;
 - host/bin/proot and host/lib;
+- rootfs/usr/bin/env, used to create a clean guest environment;
+- the ARM64 glibc and x86-64 library directories expected by the guest environment;
 - rootfs/usr/bin/box64 and rootfs/usr/bin/wine, both executable;
 - an app-private Wayland runtime directory containing the selected socket;
 - a socket path below the Android AF_UNIX sun_path limit.
 
-The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory, followed by /usr/bin/box64 /usr/bin/wine <game-exe>.
+The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
 
-The environment includes HOME, WINEPREFIX, WINEDEBUG, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, PROOT_TMP_DIR, LANG, LC_ALL, PATH, BOX64_NOBANNER and LD_LIBRARY_PATH pointing to backend/host/lib. Android-only inherited environment variables and DISPLAY/WAYLAND_SOCKET/LD_PRELOAD are removed as defined by the builder.
+The two environments are deliberately separate:
+
+- **Android host / PRoot:** LD_LIBRARY_PATH points to backend/host/lib so the Android/Bionic PRoot executable can resolve its host libraries. PROOT_TMP_DIR points to the app-private PRoot temporary directory.
+- **Linux guest / Box64 / Wine:** HOME, WINEPREFIX, WINEDEBUG, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, LANG, LC_ALL and PATH are guest paths. LD_LIBRARY_PATH points to ARM64 glibc directories inside the rootfs; BOX64_LD_LIBRARY_PATH points to x86-64 library directories inside the rootfs. BOX64_NOBANNER is set to 1.
+
+This split matters: Box64 uses BOX64_LD_LIBRARY_PATH to find x86-64 shared libraries, while ordinary LD_LIBRARY_PATH is used for the guest's native ARM64/glibc libraries. The Android host library path must not be reused as Wine's guest library path. See the [Box64 environment-variable reference](https://github.com/ptitSeb/box64/blob/main/docs/USAGE.md) and [PRoot-Distro guest-environment documentation](https://github.com/termux/proot-distro#guest-environment) for the corresponding environment model.
 
 The command does not use PRoot fake-root mode. The guest process inherits the app's ordinary Android UID and sandbox.
 
