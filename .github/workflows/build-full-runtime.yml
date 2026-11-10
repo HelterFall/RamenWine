@@ -1,7 +1,6 @@
 name: Build complete Windows runtime (PRoot + Box64 + Wine 11)
 
-# This is a heavyweight build and runs only for deliberate runtime-builder
-# changes on the feature branch or an explicit workflow_dispatch.
+# Heavy runtime builds are isolated from the normal Android CI workflow.
 on:
   push:
     branches:
@@ -14,50 +13,27 @@ on:
       - "tools/build_glibc_runtime.py"
       - "tools/package_runtime.py"
       - "tools/wayland_probe.c"
-      - "tools/tests/test_build_full_runtime.py"
-      - "tools/tests/test_build_proot_host.py"
-      - "tools/tests/test_assemble_proot_host.py"
-      - "tools/tests/test_build_glibc_runtime.py"
-      - "tools/tests/test_package_runtime.py"
   workflow_dispatch:
-    inputs:
-      jobs:
-        description: "Parallel compiler jobs (2 is the safe default)"
-        required: true
-        default: "2"
-        type: string
-      publish_prerelease:
-        description: "Publish a versioned GitHub prerelease after all checks pass"
-        required: true
-        default: false
-        type: boolean
 
 concurrency:
   group: ramenwine-full-runtime-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-runtime:
     name: Build and validate ARM64 Wine runtime
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
-    env:
-      RUNTIME_JOBS: ${{ github.event.inputs.jobs || '2' }}
-      RUNTIME_VERSION: ubuntu24.04.5-wine11.0-box64-v0.4.4-${{ github.sha }}
-      RUNTIME_WORK: ${{ runner.temp }}/ramenwine-full-runtime
-      RUNTIME_ZIP: ${{ runner.temp }}/ramenwine-runtime.zip
-      GH_TOKEN: ${{ github.token }}
-
+    timeout-minutes: 30
     steps:
       - name: Checkout RamenWine
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Verify build host and Docker/FUSE prerequisites
+      - name: Check Ubuntu, Docker and FUSE
         run: |
           set -euxo pipefail
           . /etc/os-release
@@ -66,14 +42,13 @@ jobs:
           test "$(uname -m)" = x86_64
           command -v docker
           command -v dpkg-deb
-          test -c /dev/fuse
           docker info
-          python3 --version
+          ls -l /dev/fuse
+          test -c /dev/fuse
           df -h
-          printf 'Runtime version: %s\n' "$RUNTIME_VERSION"
-          printf 'Compiler jobs: %s\n' "$RUNTIME_JOBS"
+          python3 --version
 
-      - name: Run runtime builder regression tests
+      - name: Run runtime builder unit tests
         run: |
           set -euxo pipefail
           python3 -m unittest \
@@ -82,123 +57,3 @@ jobs:
             tools.tests.test_assemble_proot_host \
             tools.tests.test_build_glibc_runtime \
             tools.tests.test_package_runtime -v
-
-      - name: Build Android PRoot host and Ubuntu/Box64/Wine 11 guest
-        run: |
-          set -euxo pipefail
-          python3 tools/build_full_runtime.py \
-            --work-dir "$RUNTIME_WORK" \
-            --output "$RUNTIME_ZIP" \
-            --version "$RUNTIME_VERSION" \
-            --jobs "$RUNTIME_JOBS"
-
-      - name: Verify runtime archive and produce release metadata
-        id: runtime
-        run: |
-          set -euo pipefail
-          test -s "$RUNTIME_ZIP"
-          python3 - "$RUNTIME_ZIP" "$RUNTIME_VERSION" "$GITHUB_SHA" <<'PY'
-          import hashlib
-          import json
-          import pathlib
-          import sys
-          import zipfile
-
-          archive = pathlib.Path(sys.argv[1])
-          version = sys.argv[2]
-          source_sha = sys.argv[3]
-          digest = hashlib.sha256()
-          with archive.open("rb") as stream:
-              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                  digest.update(chunk)
-          sha256 = digest.hexdigest()
-          manifest = {
-              "schemaVersion": 1,
-              "backendId": "glibc-proot-box64",
-              "hostAbi": "arm64-v8a",
-              "runtimeVersion": version,
-              "sha256": sha256,
-              "packageBytes": archive.stat().st_size,
-              "sourceCommit": source_sha,
-              "format": "RamenWine runtime-manifest.json + payload/",
-              "deviceValidation": "not-yet-validated-on-physical-Android-device",
-          }
-          with zipfile.ZipFile(archive) as package:
-              names = set(package.namelist())
-              if "runtime-manifest.json" not in names:
-                  raise SystemExit("Runtime ZIP is missing runtime-manifest.json")
-              if not any(name.startswith("payload/") for name in names):
-                  raise SystemExit("Runtime ZIP is missing payload/")
-              embedded = json.loads(package.read("runtime-manifest.json"))
-              if embedded.get("backendId") != "glibc-proot-box64":
-                  raise SystemExit("Runtime ZIP backend ID does not match.")
-              if embedded.get("runtimeVersion") != version:
-                  raise SystemExit("Runtime ZIP version does not match the build.")
-              if embedded.get("hostAbi") != "arm64-v8a":
-                  raise SystemExit("Runtime ZIP is not ARM64 Android.")
-          archive.with_suffix(".zip.sha256").write_text(
-              f"{sha256}  {archive.name}\n", encoding="ascii"
-          )
-          pathlib.Path("runtime-release.json").write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-              encoding="utf-8"
-          )
-          print("Runtime package bytes:", archive.stat().st_size)
-          print("Runtime package SHA-256:", sha256)
-          PY
-          echo "sha256=$(cut -d' ' -f1 "$RUNTIME_ZIP.sha256")" >> "$GITHUB_OUTPUT"
-          echo "size=$(stat -c '%s' "$RUNTIME_ZIP")" >> "$GITHUB_OUTPUT"
-
-      - name: Upload validated runtime build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ramenwine-full-runtime-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/ramenwine-runtime.zip
-            ${{ runner.temp }}/ramenwine-runtime.zip.sha256
-            runtime-release.json
-            ${{ runner.temp }}/ramenwine-full-runtime/glibc-runtime-build/backend/BUILD-PROVENANCE.json
-            ${{ runner.temp }}/ramenwine-full-runtime/proot-artifact/host/PROVENANCE.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-
-      - name: Publish immutable prerelease for app-managed provisioning
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_prerelease == 'true' }}
-        env:
-          RUNTIME_TAG: runtime-preview-${{ github.sha }}
-        run: |
-          set -euo pipefail
-          if gh release view "$RUNTIME_TAG" >/dev/null 2>&1; then
-            gh release upload "$RUNTIME_TAG" \
-              "$RUNTIME_ZIP" \
-              "$RUNTIME_ZIP.sha256" \
-              runtime-release.json \
-              --clobber
-          else
-            gh release create "$RUNTIME_TAG" \
-              "$RUNTIME_ZIP" \
-              "$RUNTIME_ZIP.sha256" \
-              runtime-release.json \
-              --target "$GITHUB_SHA" \
-              --title "RamenWine runtime preview ${GITHUB_SHA:0:12}" \
-              --notes "Automatically assembled ARM64 PRoot + Ubuntu/glibc + Box64 + Wine 11 WoW64 runtime. Static ELF/PE/dependency validation passed. Physical Android device validation is still required before general release." \
-              --prerelease
-          fi
-          echo "Published: https://github.com/HelterFall/RamenWine/releases/tag/$RUNTIME_TAG"
-
-      - name: Record build result
-        if: always()
-        run: |
-          {
-            echo "### RamenWine runtime build"
-            echo "- Source commit: `$GITHUB_SHA`"
-            echo "- Runtime version: `$RUNTIME_VERSION`"
-            echo "- Build workspace: `$RUNTIME_WORK`"
-            if [ -s "$RUNTIME_ZIP" ]; then
-              echo "- ZIP bytes: $(stat -c '%s' "$RUNTIME_ZIP")"
-              sha256sum "$RUNTIME_ZIP"
-            else
-              echo "- Runtime ZIP was not produced."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
