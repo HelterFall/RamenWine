@@ -141,7 +141,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/toolchains/${LLVM_MINGW}/bin:$PATH"
           mapfile -t TARGETS < <(
-            grep -oE "dlls/winedirectaudio\\.drv/([A-Za-z0-9_-]+-windows/winedirectaudio\\.drv|winedirectaudio\\.so)" \
+            grep -oE "dlls/winedirectaudio\.drv/([A-Za-z0-9_-]+-windows/winedirectaudio\.drv|winedirectaudio\.so)" \
               Makefile | sort -u
           )
           printf '%s\n' "${TARGETS[@]}"
@@ -205,7 +205,7 @@ jobs:
             -laaudio -llog -pthread
           "$TC/llvm-strip" --strip-all "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay"
           "$TC/llvm-readelf" -d "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay" | \
-            grep -q 'libaaudio\\.so'
+            grep -Fq 'libaaudio.so'
 
       - name: Collect and verify the Wine driver pair
         working-directory: wine
