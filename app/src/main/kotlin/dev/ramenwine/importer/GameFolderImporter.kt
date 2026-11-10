@@ -14,6 +14,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.UUID
@@ -35,6 +36,7 @@ class GameFolderImporter(private val context: Context) {
         treeUri: Uri,
         gameTitle: String,
         selectedExecutableRelativePath: String,
+        selectedExecutableUri: Uri,
         onProgress: ((ImportProgress) -> Unit)? = null
     ): ImportedGame {
         val executablePath = SafeGamePath.normalizeRelativePath(
@@ -51,6 +53,10 @@ class GameFolderImporter(private val context: Context) {
         if (!root.isDirectory) {
             throw IOException("The selected document is not a folder.")
         }
+
+        // Reject unsupported EXE architectures before allocating space or copying
+        // the potentially very large game folder into app-private storage.
+        verifySelectedExecutable(selectedExecutableUri)
 
         val gamesRoot = File(context.filesDir, "games")
         if (!gamesRoot.exists() && !gamesRoot.mkdirs()) {
@@ -218,14 +224,7 @@ class GameFolderImporter(private val context: Context) {
             }
 
             val peInspection = FileInputStream(selectedExecutable).use { input ->
-                val prefix = ByteArray(PE_HEADER_READ_BYTES)
-                var total = 0
-                while (total < prefix.size) {
-                    val read = input.read(prefix, total, prefix.size - total)
-                    if (read <= 0) break
-                    total += read
-                }
-                PeHeaderInspector.inspect(prefix.copyOf(total))
+                PeHeaderInspector.inspect(input.readPrefix(PE_HEADER_READ_BYTES))
             }
 
             if (peInspection?.isValidPe != true) {
@@ -268,6 +267,38 @@ class GameFolderImporter(private val context: Context) {
             stagingDirectory.deleteRecursively()
             throw error
         }
+    }
+
+    private fun verifySelectedExecutable(uri: Uri) {
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw IOException("Could not open the selected EXE for architecture inspection.")
+        val inspection = input.use {
+            PeHeaderInspector.inspect(it.readPrefix(PE_HEADER_READ_BYTES))
+        }
+
+        if (inspection?.isValidPe != true) {
+            throw IOException("The selected .exe does not contain a valid Windows PE header.")
+        }
+        if (
+            inspection.architecture != PeArchitecture.X86 &&
+            inspection.architecture != PeArchitecture.X86_64
+        ) {
+            throw IOException(
+                "This runtime supports Windows x86 and x86-64 EXE files only. " +
+                    "The selected EXE is " + inspection.architecture.displayName + "."
+            )
+        }
+    }
+
+    private fun InputStream.readPrefix(maxBytes: Int): ByteArray {
+        val prefix = ByteArray(maxBytes)
+        var total = 0
+        while (total < prefix.size) {
+            val read = read(prefix, total, prefix.size - total)
+            if (read <= 0) break
+            total += read
+        }
+        return prefix.copyOf(total)
     }
 
     private fun ensureFreeSpace(nextChunkBytes: Long) {
