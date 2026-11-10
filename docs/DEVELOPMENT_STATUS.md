@@ -12,7 +12,7 @@
 - Bounded PE header inspection for x86, x86-64, ARM32, ARM64 and ARM64EC COFF machine values.
 - Explicit selection of the intended game EXE candidate.
 - Streamed copy of the selected game folder into app-private storage, with staging cleanup on failure/cancellation and live progress.
-- Import guardrails: maximum 32 directory levels, 100,000 entries, 64 GiB total bytes and 128 MiB free-space reserve.
+- Import guardrails: maximum 32 directory levels and 100,000 entries, with a 128 MiB free-space reserve checked while copying. There is no fixed total game-size ceiling; available app-private phone storage is the practical limit.
 - App-private JSON library metadata, atomically replaced and validated on load.
 - Runtime backend inventory for Bionic ARM64EC/FEX, Bionic x64/Box64 and glibc/PRoot/Box64 package families.
 - Offline runtime ZIP installer with bounded streaming extraction, SHA-256 payload checks, executable flags, safe path/symlink validation, staged activation and rollback after failed post-install inventory.
