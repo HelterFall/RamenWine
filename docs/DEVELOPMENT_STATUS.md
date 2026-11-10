@@ -111,3 +111,11 @@ The last explicitly documented successful Android build/test/lint run passed on 
 - Keep runtime packages offline-capable and per-game profiles isolated.
 
 See README.md, Android Runtime Backends, Android Display Backend and PRoot Wine Launch for the current design contracts.
+
+## Game import and per-game storage
+
+- Folder enumeration now queries Android `DocumentsContract` directly so a failed/null DocumentsProvider listing is an error, not a silently empty folder.
+- Scan/import limits are aligned; incomplete scans and unsafe/unsupported entries block import rather than produce partial copies.
+- Each game's imported files, Wine prefix, Wine HOME and temporary directories are measured and can be removed together from the library. The shared runtime is retained.
+- Startup cleanup removes abandoned import staging directories and per-game orphan data left by interrupted operations.
+- See [GAME_IMPORT_AND_STORAGE.md](GAME_IMPORT_AND_STORAGE.md) for the exact storage layout and user cleanup behavior.

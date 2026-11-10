@@ -242,3 +242,8 @@ The Android host scaffold currently includes:
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md) and [PRoot Wine Launch](docs/PROOT_WINE_LAUNCH.md).
 
 Wawona is the selected display/compositor. RamenWine pins the official Wawona v26.8.12 Android release (source commit 75ffe2982bd7d99b29b7e743c4f70a9becf61f86) and downloads its prebuilt APK from the upstream GitHub Releases page. The downloader verifies the official asset SHA-256 (f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570) before extracting every ARM64 native library plus XKB/font/Weston support assets and generating a provenance manifest. No Nix installation or Wawona source compilation is involved. The resulting native libraries are packaged as Android jniLibs so the platform loader can load them and Wawona can resolve its sibling libraries; supporting files and the manifest are packaged under assets/wawona. The project pins the exact JNI method set used by the release and checks those exports during import. This confirms package identity and structure only; actual compositor and game startup still require a device test.
+
+
+## Game import and storage
+
+Import failure handling, private storage locations, save-data paths and in-app cleanup are documented in [Game import and storage](docs/GAME_IMPORT_AND_STORAGE.md).
