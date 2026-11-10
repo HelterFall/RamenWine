@@ -23,7 +23,7 @@
 - Wawona native-library inventory, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
 - A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
 - A pinned Wawona APK importer and Nix build script that stage all arm64-v8a native libraries plus XKB/font/Weston assets and generate a SHA-256 provenance manifest.
-- GameSessionCoordinator to order compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
+- A Compose Surface host and initial per-game display/Play flow that only enables launch after the native Surface is attached and the compositor socket is ready.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
 ## Current Android user flow
@@ -36,11 +36,11 @@
 6. Save game metadata in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
 
-The UI does not expose a Play action. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
+The UI now exposes an initial per-game flow: prepare the Wawona display, attach its Surface, then request a Windows EXE launch. The flow fails closed when the native Wawona package or a compatible PRoot/Wine runtime is absent. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
 
 ## Runtime launch scaffolding
 
-The current glibc/PRoot path has two code components:
+The current glibc/PRoot path has a command builder and process supervisor, coordinated by GameSessionCoordinator:
 
 - ProotWineCommandBuilder checks the imported game ID and EXE path, validates the runtime rootfs and host PRoot executable, requires Box64 and the unified Wine 11 loader at rootfs/usr/bin/wine, prepares bind mount targets and constructs the environment/argument vector.
 - ProotWineProcessSupervisor starts that command without a shell, streams diagnostics and waits for the PRoot process. It is not yet connected to the Compose UI or a GameSession coordinator.
@@ -49,11 +49,11 @@ The builder requires a Wayland socket before it will create a command. It maps t
 
 ## Display backend decision
 
-Wawona is the current upstream display/compositor candidate. The upstream repository is MIT-licensed at its root and uses a shared Rust Wayland core with a Kotlin Android host, JNI and native Android presentation. The reviewed upstream snapshot is Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (Cargo package version 26.11.2).
+Wawona is the selected upstream display/compositor. The upstream repository root is MIT-licensed and uses a shared Rust Wayland core with a Kotlin Android host, JNI and native Android presentation. The reviewed upstream snapshot is Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (Cargo package version 26.11.2).
 
-Wawona is not a drop-in Gradle library: its Android directory builds a full application, and its native output is assembled through a Nix/NDK dependency graph. The upstream Android host demonstrates the required Surface/JNI lifecycle and creates XDG_RUNTIME_DIR below the app cache directory. RamenWine currently contains only WawonaAssetIntegrity.kt and its tests; there is no Wawona native library, compositor host, asset extraction pipeline or Wayland socket producer in this repository.
+RamenWine now contains a narrow JNI wrapper, native-library inventory, pinned APK provenance reader, XKB/font/Weston asset installer, Android host-keymap bridge, WawonaDisplayBackend, SurfaceView/Compose host and GameSessionCoordinator. The source-to-bundle recipe is tools/build_wawona_android.sh; it builds the pinned upstream revision with Nix and stages native libraries/assets locally. Generated binary files are intentionally Git-ignored and are not present in a clean checkout until that script is run.
 
-The root MIT license does not make every transitive native dependency MIT. Before distribution, pin the upstream revision and review the licenses/notices of every component actually linked or bundled.
+The upstream root MIT license does not make every transitive native dependency MIT. Before distribution, review the notices/licenses of every actual linked or bundled component.
 
 ## What is not implemented or validated yet
 
@@ -61,8 +61,8 @@ The root MIT license does not make every transitive native dependency MIT. Befor
 - No glibc rootfs is built or installed by the app.
 - No pinned signing key or signed runtime release metadata exists. SHA-256 in a ZIP detects payload mismatch; it does not authenticate the publisher.
 - No real Windows EXE has been launched by RamenWine.
-- The PRoot command builder and process supervisor are not wired to the app's Play/session UI and have not been validated on a physical device.
-- No Wawona compositor is linked or loaded; no in-process Wayland server or Android display socket is created by RamenWine.
+- The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
+- The generated Wawona native libraries are not present in a clean checkout until tools/build_wawona_android.sh is run; therefore no in-process Wayland server or Android display socket is running in the current APK.
 - No Android game surface is attached to Wine; no per-game Wine prefix is initialized with wineboot.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No production input, IME, audio, save-management, pause/resume or child-process lifecycle bridge exists.
@@ -84,11 +84,11 @@ The last explicitly documented successful Android build/test/lint run passed on 
 
 ## Next engineering steps
 
-1. Run tools/build_wawona_android.sh on a Nix-capable build host to build and stage the pinned Wawona Android native libraries and support assets.
-2. Verify native loading, compositor readiness and the actual app-private Wayland socket on an Android device.
-3. Add a GameSession coordinator that owns the Wawona display session and PRoot/Wine process lifecycle.
-4. Connect the Wawona socket endpoint to ProotWineCommandBuilder and start an original Win32 GDI test application only after both compositor and surface are ready.
-5. Verify pause/resume, surface recreation, IME/input and complete process teardown on a physical ARM64 device.
+1. Run tools/build_wawona_android.sh on a Nix-capable build host and build the RamenWine APK with the generated Wawona native bundle.
+2. Install a matching offline glibc + PRoot + Box64 + Wine runtime ZIP; add first-time Wine prefix initialization if required by the package.
+3. Verify native loading, compositor readiness and the actual app-private Wayland socket on a physical ARM64 Android device.
+4. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
+5. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.
 6. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.
 
 ## Engineering rules

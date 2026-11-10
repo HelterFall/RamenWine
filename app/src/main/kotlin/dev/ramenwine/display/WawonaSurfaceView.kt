@@ -2,6 +2,7 @@ package dev.ramenwine.display
 
 import android.content.Context
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 
@@ -13,7 +14,8 @@ import android.view.SurfaceView
  */
 class WawonaSurfaceView(
     context: Context,
-    private val session: DisplaySession
+    private val session: DisplaySession,
+    private val onSurfaceStateChanged: (Boolean) -> Unit = {}
 ) : SurfaceView(context), SurfaceHolder.Callback {
     init {
         holder.addCallback(this)
@@ -33,6 +35,7 @@ class WawonaSurfaceView(
             height = targetHeight,
             density = resources.displayMetrics.density
         )
+        onSurfaceStateChanged(true)
         requestFocus()
     }
 
@@ -47,10 +50,21 @@ class WawonaSurfaceView(
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         session.detachSurface(holder.surface)
+        onSurfaceStateChanged(false)
     }
 
-    override fun onTouchEvent(event: android.view.MotionEvent): Boolean =
-        session.dispatchTouchEvent(event)
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        val handled = session.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return handled || super.onTouchEvent(event)
+    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         session.dispatchKeyEvent(event) || super.onKeyDown(keyCode, event)

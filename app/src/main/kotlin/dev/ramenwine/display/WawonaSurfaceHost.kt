@@ -3,6 +3,7 @@ package dev.ramenwine.display
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -14,10 +15,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 @Composable
 fun WawonaSurfaceHost(
     session: DisplaySession,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSurfaceStateChanged: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val view = remember(session, context) { WawonaSurfaceView(context, session) }
+    val currentSurfaceStateChanged = rememberUpdatedState(onSurfaceStateChanged)
+    val view = remember(session, context) {
+        WawonaSurfaceView(context, session) { attached ->
+            currentSurfaceStateChanged.value(attached)
+        }
+    }
 
     DisposableEffect(view, session) {
         onDispose {
@@ -25,6 +32,7 @@ fun WawonaSurfaceHost(
             if (surface.isValid) {
                 session.detachSurface(surface)
             }
+            currentSurfaceStateChanged.value(false)
             view.holder.removeCallback(view)
         }
     }

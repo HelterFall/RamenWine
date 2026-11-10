@@ -232,12 +232,12 @@ The Android host scaffold currently includes:
 - offline runtime ZIP installation with SHA-256 payload verification, staged activation, symlink/path checks and rollback;
 - a Python runtime package builder and automated Python/JVM tests;
 - a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
-- a Wawona display adapter, native JNI contract wrapper, XKB/font/Weston asset bootstrap and Android SurfaceView host;
-- a game-session coordinator that gates PRoot/Wine launch on a live compositor and attached Surface;
+- a Wawona display adapter, native JNI contract wrapper, XKB/font/Weston asset bootstrap, Android SurfaceView and Compose host;
+- a game-session coordinator and initial per-game Compose flow that gate PRoot/Wine launch on a live compositor and attached Surface;
 - Wawona support-asset integrity verification, full native-library inventory, pinned APK import/build scripts, JNI bootstrap, SurfaceView host and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
-**Wine/Box64/FEX/PRoot binaries are not bundled, and imported games cannot be launched from the Android UI yet.** The command builder requires an existing Wayland socket, and no Wawona compositor is integrated to provide it. The process supervisor is not wired to a Play action and has not been validated against a physical device or complete Wine child-process teardown. Runtime file checks are not proof of execution. No game EXE is run during scanning or import.
+**Wine/Box64/FEX/PRoot binaries are not bundled, so a real Windows game launch is not yet available.** The UI now has an initial per-game flow: inspect Wawona bundle availability, start the compositor, attach the Android Surface, then build and start the PRoot/Wine command. Until the locally generated Wawona native bundle and a compatible runtime ZIP are installed, the UI displays the missing prerequisites and does not claim success. The flow has not been validated on a physical device or against the complete Wine child-process tree. Runtime file checks are not proof of execution. No game EXE is run during scanning or import.
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md) and [PRoot Wine Launch](docs/PROOT_WINE_LAUNCH.md).
 

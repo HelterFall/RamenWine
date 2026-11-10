@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.ramenwine.display.DisplaySession
+import dev.ramenwine.display.WawonaDisplayBackend
+import dev.ramenwine.display.WawonaSurfaceHost
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
@@ -37,6 +41,8 @@ import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
+import dev.ramenwine.runtime.GameSession
+import dev.ramenwine.runtime.GameSessionCoordinator
 import dev.ramenwine.runtime.NativeRuntime
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
@@ -71,6 +77,21 @@ fun RamenWineApp() {
     var runtimePackageError by remember { mutableStateOf<String?>(null) }
     var runtimePackageNotice by remember { mutableStateOf<String?>(null) }
     val nativeDiagnostic = remember { NativeRuntime.diagnostic() }
+
+    val displayBackend = remember(context.applicationContext) {
+        WawonaDisplayBackend(context.applicationContext)
+    }
+    val gameSessionCoordinator = remember(context.filesDir) {
+        GameSessionCoordinator(context.applicationContext, displayBackend)
+    }
+    var selectedDisplayGame by remember { mutableStateOf<ImportedGame?>(null) }
+    var activeDisplaySession by remember { mutableStateOf<DisplaySession?>(null) }
+    var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
+    var surfaceReady by remember { mutableStateOf(false) }
+    var preparingGame by remember { mutableStateOf(false) }
+    var gameLaunchError by remember { mutableStateOf<String?>(null) }
+    var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
+    var processOutput by remember { mutableStateOf("") }
 
     val runtimePackagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -161,6 +182,107 @@ fun RamenWineApp() {
                 importError = error.message ?: error.javaClass.simpleName
             } finally {
                 importing = false
+            }
+        }
+    }
+
+    fun prepareGame(game: ImportedGame) {
+        if (preparingGame || activeDisplaySession != null ||
+            activeGameSession?.isRunning == true
+        ) return
+
+        gameLaunchError = null
+        gameLaunchNotice = null
+        processOutput = ""
+
+        val availability = displayBackend.availability()
+        if (!availability.available) {
+            gameLaunchError = availability.detail +
+                if (availability.missingLibraries.isNotEmpty()) {
+                    " Missing: " + availability.missingLibraries.joinToString()
+                } else {
+                    ""
+                }
+            return
+        }
+
+        preparingGame = true
+        try {
+            activeDisplaySession = gameSessionCoordinator.openDisplay()
+            selectedDisplayGame = game
+            surfaceReady = false
+            gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
+        } catch (error: Exception) {
+            gameLaunchError = error.message ?: error.javaClass.simpleName
+        } finally {
+            preparingGame = false
+        }
+    }
+
+    fun launchSelectedGame() {
+        val game = selectedDisplayGame ?: return
+        if (!surfaceReady || preparingGame) return
+
+        preparingGame = true
+        gameLaunchError = null
+        gameLaunchNotice = "Проверяю runtime и запускаю Windows EXE…"
+        scope.launch {
+            try {
+                val launched = gameSessionCoordinator.launchGame(
+                    game = game,
+                    onOutput = { line ->
+                        processOutput = (processOutput + line + "\\n").takeLast(8_000)
+                    },
+                    onExit = { exitCode ->
+                        activeGameSession = null
+                        activeDisplaySession = null
+                        selectedDisplayGame = null
+                        surfaceReady = false
+                        preparingGame = false
+                        gameLaunchNotice = "Windows-процесс завершился (код $exitCode)."
+                    }
+                )
+                if (launched.isRunning) {
+                    activeGameSession = launched
+                    gameLaunchNotice = "Процесс игры запущен. Диагностика доступна ниже."
+                } else {
+                    activeGameSession = null
+                    activeDisplaySession = null
+                    selectedDisplayGame = null
+                    surfaceReady = false
+                    gameLaunchNotice = "Процесс завершился до подтверждения запуска."
+                }
+            } catch (error: Exception) {
+                gameLaunchError = error.message ?: error.javaClass.simpleName
+                runCatching { gameSessionCoordinator.closeDisplay() }
+                activeGameSession = null
+                activeDisplaySession = null
+                selectedDisplayGame = null
+                surfaceReady = false
+            } finally {
+                preparingGame = false
+            }
+        }
+    }
+
+    fun stopSelectedGame() {
+        scope.launch {
+            preparingGame = true
+            try {
+                val running = activeGameSession
+                if (running != null) {
+                    running.stop()
+                } else {
+                    gameSessionCoordinator.closeDisplay()
+                }
+            } catch (error: Exception) {
+                gameLaunchError = error.message ?: error.javaClass.simpleName
+            } finally {
+                activeGameSession = null
+                activeDisplaySession = null
+                selectedDisplayGame = null
+                surfaceReady = false
+                preparingGame = false
             }
         }
     }
@@ -308,8 +430,8 @@ fun RamenWineApp() {
                 }
 
                 Text(
-                    text = "Текущий этап не запускает EXE. Сначала игра безопасно импортируется, " +
-                        "затем подключим и проверим Windows runtime.",
+                    text = "Запуск разрешается только после подключения Wawona Surface и проверки " +
+                        "локального PRoot/Wine runtime. Отсутствующие компоненты блокируют запуск.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -520,7 +642,12 @@ private fun ExecutableRow(
 }
 
 @Composable
-private fun LibraryCard(games: List<ImportedGame>) {
+private fun LibraryCard(
+    games: List<ImportedGame>,
+    canPrepareGame: Boolean,
+    preparingGame: Boolean,
+    onPrepareGame: (ImportedGame) -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -537,10 +664,17 @@ private fun LibraryCard(games: List<ImportedGame>) {
                     )
                     Text(
                         text = formatFileSize(game.totalBytes) +
-                            " · runtime пока не подключён",
+                            " · запуск через Windows runtime",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
+                    Button(
+                        onClick = { onPrepareGame(game) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = canPrepareGame
+                    ) {
+                        Text(if (preparingGame) "Подготовка…" else "Открыть игровой экран")
+                    }
                 }
                 HorizontalDivider()
             }

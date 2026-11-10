@@ -61,6 +61,7 @@ Implemented:
 - WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
 - WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and releases Vulkan presentation resources even when no Surface was attached.
 - WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
+- WawonaSurfaceHost embeds the view in Compose; surface attach/detach state is delivered back to the UI.
 - WawonaSurfaceHost embeds that SurfaceView in Compose and detaches the native Surface when the composable leaves the UI.
 - GameSessionCoordinator starts PRoot/Wine only after the compositor socket and Android Surface are ready, then tears down display resources when the game process exits.
 - JVM tests cover the expected native-library inventory.
@@ -69,8 +70,8 @@ Not implemented:
 - The generated Wawona native bundle is not currently present in this repository checkout, so availability() reports missing libraries/manifest and start() fails closed until the staging script has been run.
 - No reproducible Wawona Nix/NDK build output has been staged into jniLibs for the current checkout.
 - The pinned APK importer and runtime support-asset installer now exist; the generated provenance manifest and local assets are ignored by Git and must be created on the build host.
-- The Wawona adapter, SurfaceView and GameSessionCoordinator are not yet called by the Compose UI.
-- No actual Wayland client or Wine process has connected to the socket through RamenWine.
+- The Compose UI now offers a per-game prepare-display and launch flow, and shows Wawona/runtime errors rather than simulating a successful launch.
+- No actual Wayland client or Wine process has connected to the socket through RamenWine; the Compose flow and JNI/display lifecycle have not been exercised on a device.
 - Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
 - No physical-device Vulkan presentation or pause/resume test has been completed.
 
