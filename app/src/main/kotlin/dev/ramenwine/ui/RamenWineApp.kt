@@ -772,8 +772,9 @@ private fun SelectedExecutableCard(
     onImport: () -> Unit
 ) {
     val isValidPe = candidate.peInspection?.isValidPe == true
-    val isSupportedArchitecture = candidate.peInspection?.architecture in
-        setOf(PeArchitecture.X86, PeArchitecture.X86_64)
+    val architecture = candidate.peInspection?.architecture
+    val isSupportedArchitecture =
+        architecture == PeArchitecture.X86 || architecture == PeArchitecture.X86_64
 
     Card(
         modifier = Modifier.fillMaxWidth(),
