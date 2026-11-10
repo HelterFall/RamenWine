@@ -248,6 +248,11 @@ class WinePrefixInitializerTest {
             regular(rootfs, "usr/lib/box64-x86_64-linux-gnu/libgcc_s.so.1")
             regular(rootfs, "usr/lib/box64-x86_64-linux-gnu/libunwind.so.8")
             executable(rootfs, "usr/bin/wine")
+            executable(rootfs, "usr/bin/wineserver")
+            executable(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
+            )
             regular(
                 rootfs,
                 "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
