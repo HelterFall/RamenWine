@@ -344,7 +344,7 @@ def validate_backend_payload(
         path
         for path in (set(files_by_path) | set(links_by_path))
         if path.startswith("rootfs/opt/ramenwine-wine/")
-        and path.rsplit("/", 1)[-1] == "winewayland.drv.so"
+        and path.rsplit("/", 1)[-1] in {"winewayland.so", "winewayland.drv.so"}
     )
     wayland_drivers = [
         resolve_manifest_file(path, files_by_path, links_by_path)
@@ -356,7 +356,7 @@ def validate_backend_payload(
     ]
     if not valid_wayland_drivers:
         raise ValueError(
-            "runtime is missing an x86-64 Wine Wayland driver (winewayland.drv.so)"
+            "runtime is missing the x86-64 Wine Wayland Unix library (winewayland.so)"
         )
 
     if runtime_root is not None:

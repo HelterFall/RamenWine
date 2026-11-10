@@ -73,7 +73,7 @@ class RuntimePackagerTests(unittest.TestCase):
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
         )
         self.write_elf64(
-            root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so",
+            root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so",
             62,
         )
 
@@ -182,7 +182,7 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "root"
             self.create_glibc_runtime(root)
-            (root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so").unlink()
+            (root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so").unlink()
 
             files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
             with self.assertRaisesRegex(ValueError, "Wine Wayland driver"):
@@ -195,7 +195,7 @@ class RuntimePackagerTests(unittest.TestCase):
             root = Path(temporary) / "root"
             self.create_glibc_runtime(root)
             self.write_elf64(
-                root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so",
+                root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so",
                 183,
             )
 

@@ -39,10 +39,10 @@ internal object RuntimePackageRequirements {
 
         val waylandDriverPaths = (files.keys + links.keys).filter { path ->
             path.startsWith(WINE_ROOT_PREFIX) &&
-                path.endsWith("/winewayland.drv.so")
+                (path.endsWith("/winewayland.so") || path.endsWith("/winewayland.drv.so"))
         }
         if (waylandDriverPaths.none { resolveManifestFile(it, files, links) != null }) {
-            errors += "Missing Wine Wayland display driver (winewayland.drv.so)."
+            errors += "Missing Wine Wayland Unix library (winewayland.so)."
         }
 
         return errors

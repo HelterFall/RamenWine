@@ -52,11 +52,11 @@ internal object RuntimeBinaryValidator {
         val wineRoot = resolveInside(backendRoot, WINE_ROOT_PATH)
         val waylandDrivers = wineRoot
             ?.walkTopDown()
-            ?.filter { it.name == WINE_WAYLAND_DRIVER_NAME && it.isFile && it.canRead() }
+            ?.filter { it.name in WINE_WAYLAND_DRIVER_NAMES && it.isFile && it.canRead() }
             ?.toList()
             .orEmpty()
         if (waylandDrivers.isEmpty()) {
-            errors += "Wine Wayland display driver is missing: $WINE_WAYLAND_DRIVER_NAME"
+            errors += "Wine Wayland Unix library is missing (winewayland.so)."
         } else if (waylandDrivers.none {
                 readElfIdentity(it) == ElfIdentity(
                     ELF_CLASS_64,
@@ -140,7 +140,7 @@ internal object RuntimeBinaryValidator {
     }
 
     private const val WINE_ROOT_PATH = "rootfs/opt/ramenwine-wine"
-    private const val WINE_WAYLAND_DRIVER_NAME = "winewayland.drv.so"
+    private val WINE_WAYLAND_DRIVER_NAMES = setOf("winewayland.so", "winewayland.drv.so")
     private const val ELF_HEADER_MIN_BYTES = 20L
     private const val ELF_CLASS_64 = 2
     private const val ELF_DATA_LITTLE_ENDIAN = 1

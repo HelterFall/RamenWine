@@ -152,10 +152,10 @@ while IFS= read -r candidate; do
     WINE_WAYLAND_DRIVER="$candidate"
     break
   fi
-done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name winewayland.drv.so -print)
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) \( -name winewayland.so -o -name winewayland.drv.so \) -print)
 
 [[ -n "$WINE_WAYLAND_DRIVER" ]] || \
-  fail "LUG Wine Wine archive does not contain an x86-64 winewayland.drv.so required by Wawona."
+  fail "LUG Wine archive does not contain an x86-64 Wine Wayland Unix library (winewayland.so) required by Wawona."
 
 [[ -n "$WINEBOOT_FILE" ]] || \
   fail "LUG Wine archive does not contain an AMD64 PE32+ wineboot.exe."
