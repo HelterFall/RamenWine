@@ -20,7 +20,7 @@
 - PRoot/Wine command builder that validates paths and runtime executables, prepares per-game directories and creates an argument-vector without a shell.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
-- Wawona native-library inventory, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
+- Wawona native-library inventory that verifies every manifest-listed arm64-v8a shared object and SHA-256 directly inside the installed APK, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
 - A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
 - A pinned Wawona APK importer and Nix build script that stage all arm64-v8a native libraries plus XKB/font/Weston assets and generate a SHA-256 provenance manifest.
 - A Compose Surface host and initial per-game display/Play flow that only enables launch after the native Surface is attached and the compositor socket is ready.

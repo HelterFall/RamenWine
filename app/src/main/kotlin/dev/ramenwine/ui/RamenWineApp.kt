@@ -231,7 +231,7 @@ fun RamenWineApp() {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
                     onOutput = { line ->
-                        processOutput = (processOutput + line + "\\n").takeLast(8_000)
+                        processOutput = (processOutput + line + "\n").takeLast(8_000)
                     },
                     onExit = { exitCode ->
                         activeGameSession = null

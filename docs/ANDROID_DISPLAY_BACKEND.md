@@ -52,7 +52,7 @@ Implemented:
 - ProotWineCommandBuilder accepts a WaylandDisplayEndpoint, checks that the supplied socket path exists, checks the Unix socket path length and binds the host runtime directory into the guest at /run/user/<uid>.
 - ProotWineProcessSupervisor starts the PRoot argument vector and forwards merged stdout/stderr.
 - WawonaAssetIntegrity maps selected APK-relative xkb/font/Weston asset paths into an app-private support tree and checks their SHA-256 hashes.
-- WawonaLibraryInventory checks for the three native library files used by the pinned upstream Android host: libEGL_angle.so, libGLESv2_angle.so and libwawona.so.
+- WawonaLibraryInventory checks the complete native-library closure from the provenance manifest by inspecting lib/arm64-v8a entries inside ApplicationInfo.sourceDir and comparing SHA-256 hashes. This avoids assuming that non-legacy JNI packaging extracts .so files to nativeLibraryDir.
 - WawonaNative declares the minimal upstream JNI method set using the exact upstream package/class symbol name and loads libraries in the upstream order.
 - WawonaPackageManifestReader validates the pinned source revision and complete native-library/asset inventories.
 - WawonaSupportAssetInstaller extracts XKB, fonts and Weston data to filesDir/wawona-rootfs with size limits, staging/rollback and SHA-256 verification.

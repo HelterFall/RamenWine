@@ -234,7 +234,7 @@ The Android host scaffold currently includes:
 - a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
 - a Wawona display adapter, native JNI contract wrapper, XKB/font/Weston asset bootstrap, Android SurfaceView and Compose host;
 - a game-session coordinator and per-game Compose flow that gate PRoot/Wine launch on a live compositor and attached Surface;
-- Wawona support-asset integrity verification, full native-library inventory, pinned APK import/build scripts, JNI bootstrap, SurfaceView host and JVM tests;
+- Wawona support-asset integrity verification, full APK-native-library SHA-256 inventory, pinned APK import/build scripts, JNI bootstrap, SurfaceView host and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
 **Wine/Box64/FEX/PRoot binaries are not bundled, so a real Windows game launch is not yet available.** The UI now has an initial per-game flow: inspect Wawona bundle availability, start the compositor, attach the Android Surface, then build and start the PRoot/Wine command. Until the locally generated Wawona native bundle and a compatible runtime ZIP are installed, the UI displays the missing prerequisites and does not claim success. The flow has not been validated on a physical device or against the complete Wine child-process tree. Runtime file checks are not proof of execution. No game EXE is run during scanning or import.

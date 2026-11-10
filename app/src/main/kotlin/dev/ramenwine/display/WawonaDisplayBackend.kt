@@ -32,11 +32,11 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         val manifest = runCatching {
             WawonaPackageManifestReader.read(appContext)
         }.getOrNull()
-        val libraryDirectory = File(appContext.applicationInfo.nativeLibraryDir)
+        val apkFile = File(appContext.applicationInfo.sourceDir)
         val missing = if (manifest == null) {
             WawonaLibraryInventory.requiredFileNames + WawonaPackageManifestReader.ASSET_PATH
         } else {
-            WawonaLibraryInventory.missingFiles(libraryDirectory, manifest.nativeLibraries)
+            WawonaLibraryInventory.missingFromApk(apkFile, manifest.nativeLibraries)
         }
         return if (missing.isEmpty() && manifest != null) {
             DisplayBackendAvailability(
