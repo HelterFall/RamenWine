@@ -162,10 +162,13 @@ Expected archive layout:
 ```text
 runtime-manifest.json
 payload/
-  bin/
-    wine
-  lib/
-    ...
+  host/
+    bin/proot
+  rootfs/
+    usr/bin/env
+    usr/bin/box64
+    usr/bin/wine
+    usr/lib/...
 ```
 
 Example manifest:
@@ -179,6 +182,11 @@ Example manifest:
   "files": [
     {
       "path": "host/bin/proot",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
+      "path": "rootfs/usr/bin/env",
       "sha256": "REPLACE_WITH_64_HEX_SHA256",
       "executable": true
     },
@@ -270,7 +278,8 @@ Before emitting a glibc/PRoot runtime ZIP, \`tools/package_runtime.py\` now call
 ELF64 program headers and dynamic tables without executing guest binaries. It
 checks each guest ELF's interpreter, architecture and direct \`DT_NEEDED\`
 libraries, using the binary's RPATH/RUNPATH plus the matching ARM64 or x86-64
-library directories.
+library directories. A same-named library only satisfies the dependency when
+its ELF machine type also matches the requesting binary.
 
 For investigation without packaging:
 

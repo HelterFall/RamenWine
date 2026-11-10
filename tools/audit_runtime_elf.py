@@ -274,20 +274,43 @@ def _library_directories(root: Path, info: ElfInfo) -> list[Path]:
     return directories
 
 
-def _dependency_exists(root: Path, info: ElfInfo, soname: str) -> bool:
+def _dependency_candidates(root: Path, info: ElfInfo, soname: str) -> list[Path]:
     if soname == "linux-vdso.so.1":
-        return True
+        return []
 
     if "/" in soname:
         candidate = Path(soname)
         if candidate.is_absolute():
-            return _inside(root, root / candidate.as_posix().lstrip("/")) is not None
-        return _inside(root, info.path.parent / candidate) is not None
+            return [root / candidate.as_posix().lstrip("/")]
+        return [info.path.parent / candidate]
 
-    return any(
-        _inside(root, directory / soname) is not None
-        for directory in _library_directories(root, info)
-    )
+    return [directory / soname for directory in _library_directories(root, info)]
+
+
+def _dependency_status(root: Path, info: ElfInfo, soname: str) -> str:
+    if soname == "linux-vdso.so.1":
+        return "ok"
+
+    saw_wrong_architecture = False
+    for candidate in _dependency_candidates(root, info, soname):
+        resolved = _inside(root, candidate)
+        if resolved is None:
+            continue
+        try:
+            library_info = read_elf(resolved)
+        except ElfAuditError:
+            continue
+        if library_info is None:
+            continue
+        if library_info.machine == info.machine:
+            return "ok"
+        saw_wrong_architecture = True
+
+    return "wrong-architecture" if saw_wrong_architecture else "missing"
+
+
+def _dependency_exists(root: Path, info: ElfInfo, soname: str) -> bool:
+    return _dependency_status(root, info, soname) == "ok"
 
 
 def audit_rootfs(rootfs: Path) -> dict:
@@ -373,11 +396,18 @@ def audit_rootfs(rootfs: Path) -> dict:
                         })
 
         for soname in info.needed:
-            if not _dependency_exists(root, info, soname):
+            dependency_status = _dependency_status(root, info, soname)
+            if dependency_status == "missing":
                 issues.append({
                     "kind": "missing-library",
                     "file": relative,
                     "detail": soname,
+                })
+            elif dependency_status == "wrong-architecture":
+                issues.append({
+                    "kind": "library-architecture",
+                    "file": relative,
+                    "detail": f"{soname} does not match {_architecture(info.machine)}",
                 })
 
     return {

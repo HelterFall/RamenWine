@@ -76,6 +76,26 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 audit_runtime_elf._dependency_exists(rootfs, info, "libdummy.so")
             )
 
+
+    def test_rejects_library_with_wrong_elf_machine(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            executable = rootfs / "usr/bin/wine"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(dynamic_elf64(62, "libwine-dependency.so.1"))
+
+            library = rootfs / "usr/lib/x86_64-linux-gnu/libwine-dependency.so.1"
+            library.parent.mkdir(parents=True)
+            library.write_bytes(dynamic_elf64(183, "libwrong-arch-transitive.so"))
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertTrue(any(
+                issue["kind"] == "library-architecture" and
+                "libwine-dependency.so.1" in issue["detail"]
+                for issue in report["issues"]
+            ))
+
     def test_resolves_dependencies_from_matching_architecture_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"
