@@ -104,6 +104,45 @@ class RuntimeLayoutTest {
         }
     }
 
+
+    @Test
+    fun glibcBackendIsIncompleteWithoutWinebootOrHostLibraries() {
+        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
+        try {
+            val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
+            val backendRoot = File(
+                root,
+                "runtime/current/backends/" + backend.directoryName
+            )
+            listOf(
+                "host/bin/proot",
+                "rootfs/usr/bin/env",
+                "rootfs/usr/bin/box64",
+                "rootfs/usr/bin/wine"
+            ).forEach { relative ->
+                val executable = File(backendRoot, relative)
+                executable.parentFile?.mkdirs()
+                executable.writeText("test executable")
+                executable.setExecutable(true)
+            }
+            writeManifest(
+                root = root,
+                backend = backend,
+                requiredFiles = "host/bin/proot,rootfs/usr/bin/env,rootfs/usr/bin/box64,rootfs/usr/bin/wine",
+                executableFiles = "host/bin/proot,rootfs/usr/bin/env,rootfs/usr/bin/box64,rootfs/usr/bin/wine"
+            )
+
+            val result = RuntimeLayout.inspect(root)
+            val inspection = result.backends.first { it.backend == backend }
+
+            assertEquals(RuntimeState.INCOMPLETE, inspection.state)
+            assertTrue(inspection.missingItems.any { it.contains("wineboot") })
+            assertTrue(inspection.missingItems.any { it.contains("host/lib") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun writeManifest(
         root: File,
         backend: RuntimeBackendId,

@@ -20,6 +20,8 @@ This document describes the first Windows-process launch route using the glibc r
 
 The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
 
+The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/box64` and `rootfs/usr/bin/wine`, a readable `wineboot.exe` at one of the supported paths, and the `host/lib` payload directory. Symlink chains are followed when checking required launch files.
+
 ## Host/guest path mapping
 
 | Host path | Guest path | Purpose |
@@ -62,7 +64,7 @@ The command does not use PRoot fake-root mode. The guest process inherits the ap
 
 The host socket is supplied by a display backend. The builder only checks the socket path before constructing the command; it does not start or verify the compositor protocol handshake. The planned Wawona Android runtime directory is <cacheDir>/wawona-runtime, subject to the actual socket name published by the integrated backend.
 
-Without an in-process compositor and a reachable Wayland socket, a launch command cannot be built. RamenWine currently has no Play action wired to this command path.
+Without an in-process compositor and a reachable Wayland socket, a launch command cannot be built. The Compose per-game flow is wired through GameSessionCoordinator, but the native Wawona bundle is generated locally and the full launch path is not yet validated on a device.
 
 ## Process supervisor
 
@@ -85,3 +87,8 @@ Imported games are untrusted. Scanning and import do not execute game code. Runt
 7. Verify touch, keyboard, IME, resize, pause/resume, exit and complete child-process teardown.
 
 No actual Windows EXE launch is claimed until these gates pass on a physical Android device.
+## Runtime symlink rules
+
+Runtime package paths are relative to the backend package. Within \`rootfs/\`, an absolute Linux symlink target such as \`/usr/bin/env\` is interpreted relative to the guest root filesystem and rewritten as a safe relative link during installation. It must remain inside \`rootfs/\`; it cannot cross into the Android-host \`host/\` payload. Absolute symlinks in \`host/\` are rejected because they would address Android's filesystem rather than the app-private runtime package. Relative host links must remain inside \`host/\`.
+
+The package builder and Android installer apply the same domain rules. The post-install inventory independently checks the required PRoot, guest env, Box64, Wine, wineboot and host-library paths. These checks catch a structurally incomplete package; they do not replace native execution and graphics smoke tests.

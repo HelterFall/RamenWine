@@ -16,7 +16,9 @@
 - App-private JSON library metadata, atomically replaced and validated on load.
 - Runtime backend inventory for Bionic ARM64EC/FEX, Bionic x64/Box64 and glibc/PRoot/Box64 package families.
 - Offline runtime ZIP installer with bounded streaming extraction, SHA-256 payload checks, executable flags, safe path/symlink validation, staged activation and rollback after failed post-install inventory.
-- Python runtime package builder with manifest, hashes, executable flags and symlink metadata.
+- Backend-aware glibc/PRoot package contract: verifies the PRoot host executable, guest env, Box64, Wine, wineboot and host-library payload both before extraction and in the installed runtime inventory.
+- Rootfs-aware absolute symlink handling: Linux absolute links inside rootfs resolve from the guest root, remain confined to rootfs and are rewritten as app-private relative links; absolute host-payload links are rejected.
+- Python runtime package builder with manifest, hashes, executable flags, symlink metadata and glibc/PRoot launch-prerequisite validation.
 - PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, prepares per-game directories and creates an argument-vector without a shell.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.
@@ -49,7 +51,7 @@ The current glibc/PRoot path has a command builder and process supervisor, coord
 - ProotWineCommandBuilder checks the imported game ID and EXE path, validates the runtime rootfs and host PRoot executable, requires Box64 and the unified Wine 11 loader at rootfs/usr/bin/wine, prepares bind mount targets and constructs the environment/argument vector.
 - ProotWineProcessSupervisor starts that command without a shell, streams diagnostics and waits for the PRoot process. GameSessionCoordinator connects it to the Compose per-game launch flow and owns display/process teardown.
 
-The builder requires a Wayland socket before it will create a command. It maps the supplied host runtime directory to /run/user/<uid> inside the rootfs. Per-game prefix/home/temp directories are prepared. WinePrefixManager now runs wineboot.exe -i or -u through Box64/Wine before the game starts and writes a version marker only after the registry files exist. This is source-level implementation and has not yet been validated with a real Wine package or on a device. Child-process-tree supervision remains unproven.
+The builder requires a Wayland socket before it will create a command. It maps the supplied host runtime directory to /run/user/<uid> inside the rootfs. Per-game prefix/home/temp directories are prepared. WinePrefixManager now runs wineboot.exe -i or -u through Box64/Wine before the game starts and writes a version marker only after the registry files exist. The package parser and installed inventory now reject a glibc/PRoot package missing those launch prerequisites. This is source-level implementation and has not yet been validated with a real Wine package or on a device. Child-process-tree supervision remains unproven.
 
 ## Display backend decision
 
@@ -89,7 +91,7 @@ The last explicitly documented successful Android build/test/lint run passed on 
 ## Next engineering steps
 
 1. Run tools/build_wawona_android.sh on a Nix-capable build host and build the RamenWine APK with the generated Wawona native bundle.
-2. Install a matching offline glibc + PRoot + Box64 + Wine runtime ZIP; add first-time Wine prefix initialization if required by the package.
+2. Build and install a matching glibc + PRoot + Box64 + Wine runtime ZIP that satisfies the package contract; the package builder only packages already-built binaries and does not produce them.
 3. Verify native loading, compositor readiness and the actual app-private Wayland socket on a physical ARM64 Android device.
 4. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
 5. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.

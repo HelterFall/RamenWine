@@ -13,7 +13,7 @@ class RuntimeLayoutSymlinkTest {
         try {
             val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
             val backendRoot = backendRoot(root, backend)
-            createExecutable(backendRoot)
+            createGlibcContract(backendRoot)
 
             val realLibrary = File(backendRoot, "lib/libwine.so.1")
             realLibrary.parentFile?.mkdirs()
@@ -47,7 +47,7 @@ class RuntimeLayoutSymlinkTest {
         try {
             val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
             val backendRoot = backendRoot(root, backend)
-            createExecutable(backendRoot)
+            createGlibcContract(backendRoot)
 
             File(backendRoot, "proc").mkdirs()
             val devDirectory = File(backendRoot, "dev")
@@ -81,7 +81,7 @@ class RuntimeLayoutSymlinkTest {
         try {
             val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
             val backendRoot = backendRoot(root, backend)
-            createExecutable(backendRoot)
+            createGlibcContract(backendRoot)
 
             val outside = File(root, "outside-secret.txt")
             outside.writeText("outside")
@@ -113,11 +113,26 @@ class RuntimeLayoutSymlinkTest {
     private fun backendRoot(root: File, backend: RuntimeBackendId): File =
         File(root, "runtime/current/backends/" + backend.directoryName).apply { mkdirs() }
 
-    private fun createExecutable(backendRoot: File) {
-        val executable = File(backendRoot, "bin/wine")
-        executable.parentFile?.mkdirs()
-        executable.writeText("test executable")
-        executable.setExecutable(true)
+    private fun createGlibcContract(backendRoot: File) {
+        listOf(
+            "host/bin/proot",
+            "rootfs/usr/bin/env",
+            "rootfs/usr/bin/box64",
+            "rootfs/usr/bin/wine"
+        ).forEach { relative ->
+            val executable = File(backendRoot, relative)
+            executable.parentFile?.mkdirs()
+            executable.writeText("test executable")
+            executable.setExecutable(true)
+        }
+
+        val hostLibrary = File(backendRoot, "host/lib/libproot.so")
+        hostLibrary.parentFile?.mkdirs()
+        hostLibrary.writeText("test library")
+
+        val wineboot = File(backendRoot, "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe")
+        wineboot.parentFile?.mkdirs()
+        wineboot.writeText("test wineboot")
     }
 
     private fun writeManifest(
