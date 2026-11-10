@@ -1,5 +1,7 @@
 package dev.ramenwine.inspection
 
+import java.io.ByteArrayInputStream
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -21,6 +23,18 @@ class PeHeaderInspectorTest {
         val result = PeHeaderInspector.inspect(peFixture(machine = 0x8664))
         assertNotNull(result)
         assertEquals(PeArchitecture.X86_64, result!!.architecture)
+    }
+
+    @Test
+    fun inspectsPeHeaderBeyondSixtyFourKilobytesWithoutReadingWholeFile() {
+        val bytes = peFixture(machine = 0x8664, peOffset = 96 * 1024)
+        val result = ByteArrayInputStream(bytes).use { input ->
+            PeHeaderInspector.inspect(input)
+        }
+
+        assertNotNull(result)
+        assertTrue(result!!.isValidPe)
+        assertEquals(PeArchitecture.X86_64, result.architecture)
     }
 
     @Test
