@@ -61,6 +61,7 @@ Implemented:
 - WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
 - WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and releases Vulkan presentation resources even when no Surface was attached.
 - WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
+- WawonaSurfaceHost embeds that SurfaceView in Compose and detaches the native Surface when the composable leaves the UI.
 - GameSessionCoordinator starts PRoot/Wine only after the compositor socket and Android Surface are ready, then tears down display resources when the game process exits.
 - JVM tests cover the expected native-library inventory.
 

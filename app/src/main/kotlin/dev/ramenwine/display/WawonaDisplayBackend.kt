@@ -83,10 +83,15 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 )
             }
 
-            if (!runtimeDirectory.exists() && !runtimeDirectory.mkdirs()) {
-                throw DisplayBackendUnavailableException(
-                    "Could not create the app-private Wawona runtime directory."
-                )
+            if (runtimeDirectory.exists()) {
+                if (!runtimeDirectory.isDirectory) {
+                    throw DisplayBackendUnavailableException(
+                        "The app-private Wawona runtime path is not a directory."
+                    )
+                }
+                // XDG_RUNTIME_DIR must be private. Let nativeInit create a new
+                // directory with mode 0700; tighten an existing one explicitly.
+                Os.chmod(runtimeDirectory.absolutePath, 448)
             }
 
             val manifest = WawonaPackageManifestReader.read(appContext)
