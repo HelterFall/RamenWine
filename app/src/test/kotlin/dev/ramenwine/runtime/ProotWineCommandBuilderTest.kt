@@ -211,9 +211,11 @@ class ProotWineCommandBuilderTest {
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
-        File(backendRoot, "runtime.properties").writeText(
-            "backendId=glibc-proot-box64\nhostAbi=arm64-v8a\nruntimeVersion=fixture-runtime-1\n"
-        )
+        val runtimeProperties = File(backendRoot, "runtime.properties").apply {
+            writeText(
+                "backendId=glibc-proot-box64\nhostAbi=arm64-v8a\nruntimeVersion=fixture-runtime-1\n"
+            )
+        }
         val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
