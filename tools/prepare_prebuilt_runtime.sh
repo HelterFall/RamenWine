@@ -18,10 +18,12 @@ OUTPUT_ZIP="${ASSET_DIR}/ramenwine-runtime.zip"
 PROOT_URL="https://github.com/ahmed-alnassif/proot/releases/download/v26.10.08-a179d3e/proot-aarch64.zip"
 PROOT_SHA256="d621d71fb68bf07accbada37ffc4208cf4a963eed70916ee68f848cbd9555cc3"
 
-# Kron4ek publishes Linux x86-64 Wine, not Android ARM64 Wine.
-# The new WoW64 build runs under the ARM64 Box64 guest.
-WINE_URL="https://github.com/Kron4ek/Wine-Builds/releases/download/11.21/wine-11.21-amd64-wow64.tar.xz"
-WINE_SHA256="33f3c5b56b1deb8f6725539ea006f27b5d781b3b4ae6a8a1f492d8af4fb9dc83"
+# Prebuilt x86-64 WoW64 Wine with its native Wayland driver.
+# This release uses the non-staging LUG Wine/TkG Wayland preset:
+# _NOLIB32=wow64 and _wayland_driver=true. It runs under ARM64 Box64.
+WINE_ARCHIVE_NAME="lug-wine-tkg-experimental-wayland-git-11.20-2.tar.gz"
+WINE_URL="https://github.com/starcitizen-lug/lug-wine-experimental/releases/download/11.20-2/${WINE_ARCHIVE_NAME}"
+WINE_SHA256="f20505464d0b54f685ba1862f99895f357fc44b9b3367562e8926ddb924e5136"
 
 BOX64_DEBIAN_VERSION="0.3.4+dfsg-1"
 
@@ -65,7 +67,7 @@ fetch_pinned() {
 }
 
 fetch_pinned "$PROOT_URL" "$DOWNLOAD_DIR/proot-aarch64.zip" "$PROOT_SHA256"
-fetch_pinned "$WINE_URL" "$DOWNLOAD_DIR/wine-11.21-amd64-wow64.tar.xz" "$WINE_SHA256"
+fetch_pinned "$WINE_URL" "$DOWNLOAD_DIR/$WINE_ARCHIVE_NAME" "$WINE_SHA256"
 
 # PRoot is an Android/Bionic AArch64 executable from a prebuilt release.
 rm -rf "$PROOT_DIR"
@@ -109,10 +111,10 @@ fi
 readelf -h "$ROOTFS/usr/bin/box64" | grep -q 'AArch64' || \
   fail "Debian Box64 package is not an AArch64 ELF binary."
 
-# Extract the prebuilt Kron4ek WoW64 archive into a stable guest path.
+# Extract the published LUG Wine/TkG WoW64 + Wayland distribution.
 rm -rf "$WINE_DIR"
 mkdir -p "$WINE_DIR"
-tar --extract --xz --file "$DOWNLOAD_DIR/wine-11.21-amd64-wow64.tar.xz" \
+tar --extract --gzip --file "$DOWNLOAD_DIR/$WINE_ARCHIVE_NAME" \
   --directory "$WINE_DIR"
 
 WINE_ELF=""
@@ -135,6 +137,9 @@ WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 
 # WoW64 distributions include both i386 and x86-64 PE tools. Select by
 # the actual PE machine and optional-header magic, not nondeterministic find order.
+WINEBOOT_FILE="$(python3 "$ROOT_DIR/tools/select_wineboot.py" "$WINE_ROOT")" || \
+  fail "Wine distribution does not contain an AMD64 PE32+ wineboot.exe."
+
 # Wawona is the only display server in this app. Without Wine's native
 # Wayland driver, an EXE may start successfully but never create a visible
 # window, so fail the package build instead of shipping a silent runtime.
@@ -150,43 +155,43 @@ while IFS= read -r candidate; do
 done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name winewayland.drv.so -print)
 
 [[ -n "$WINE_WAYLAND_DRIVER" ]] || \
-  fail "Kron4ek Wine archive does not contain an x86-64 winewayland.drv.so required by Wawona."
+  fail "LUG Wine Wine archive does not contain an x86-64 winewayland.drv.so required by Wawona."
 
 [[ -n "$WINEBOOT_FILE" ]] || \
-  fail "Kron4ek archive does not contain an AMD64 PE32+ wineboot.exe."
+  fail "LUG Wine archive does not contain an AMD64 PE32+ wineboot.exe."
 WINEBOOT_RELATIVE="${WINEBOOT_FILE#"$WINE_ROOT"/}"
 [[ "$WINEBOOT_RELATIVE" != "$WINEBOOT_FILE" ]] || \
   fail "wineboot.exe is outside the Wine distribution directory."
 
-mkdir -p "$ROOTFS/opt/kron4ek-wine"
-cp -a "$WINE_ROOT/." "$ROOTFS/opt/kron4ek-wine/"
+mkdir -p "$ROOTFS/opt/ramenwine-wine"
+cp -a "$WINE_ROOT/." "$ROOTFS/opt/ramenwine-wine/"
 
 # The app's runtime contract expects rootfs/usr/bin/wine to resolve to
 # an x86-64 ELF. Keep the upstream Wine directory layout intact.
 mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/lib/wine/x86_64-windows"
-ln -sfn "/opt/kron4ek-wine/${WINE_ELF_RELATIVE}" "$ROOTFS/usr/bin/wine"
-ln -sfn "/opt/kron4ek-wine/${WINEBOOT_RELATIVE}" \
+ln -sfn "/opt/ramenwine-wine/${WINE_ELF_RELATIVE}" "$ROOTFS/usr/bin/wine"
+ln -sfn "/opt/ramenwine-wine/${WINEBOOT_RELATIVE}" \
   "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe"
 
 # Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
 # host-side readlink -f on /usr/bin/wine: it would resolve /opt against the
 # GitHub runner instead of $ROOTFS.
-GUEST_WINE_LAUNCHER="$ROOTFS/opt/kron4ek-wine/${WINE_ELF_RELATIVE}"
+GUEST_WINE_LAUNCHER="$ROOTFS/opt/ramenwine-wine/${WINE_ELF_RELATIVE}"
 [[ -f "$GUEST_WINE_LAUNCHER" ]] || \
-  fail "The copied Kron4ek Wine launcher is missing from the guest rootfs."
-[[ "$(readlink "$ROOTFS/usr/bin/wine")" == "/opt/kron4ek-wine/${WINE_ELF_RELATIVE}" ]] || \
+  fail "The copied LUG Wine Wine launcher is missing from the guest rootfs."
+[[ "$(readlink "$ROOTFS/usr/bin/wine")" == "/opt/ramenwine-wine/${WINE_ELF_RELATIVE}" ]] || \
   fail "The guest Wine launcher link does not match the selected distribution file."
 readelf -h "$GUEST_WINE_LAUNCHER" | \
   grep -q 'Advanced Micro Devices X86-64' || \
-  fail "The selected Kron4ek Wine launcher is not x86-64."
+  fail "The selected LUG Wine Wine launcher is not x86-64."
 
 # Verify Wineboot's AMD64 PE32+ header before making the APK payload.
 # As with /usr/bin/wine above, resolve this guest-absolute symlink manually:
 # host-side Python must read the real file below $ROOTFS, not /opt on the runner.
-GUEST_WINEBOOT="$ROOTFS/opt/kron4ek-wine/${WINEBOOT_RELATIVE}"
+GUEST_WINEBOOT="$ROOTFS/opt/ramenwine-wine/${WINEBOOT_RELATIVE}"
 [[ -f "$GUEST_WINEBOOT" ]] || \
-  fail "The copied Kron4ek wineboot.exe is missing from the guest rootfs."
-[[ "$(readlink "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe")" == "/opt/kron4ek-wine/${WINEBOOT_RELATIVE}" ]] || \
+  fail "The copied LUG Wine wineboot.exe is missing from the guest rootfs."
+[[ "$(readlink "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe")" == "/opt/ramenwine-wine/${WINEBOOT_RELATIVE}" ]] || \
   fail "The guest wineboot.exe link does not match the selected distribution file."
 python3 - "$GUEST_WINEBOOT" <<'PY'
 import pathlib
@@ -213,7 +218,7 @@ PY
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.21" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"

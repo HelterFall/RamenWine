@@ -38,13 +38,13 @@ MAX_STRING_TABLE_BYTES = 64 * 1024 * 1024
 # ordinary Win32/Win64 process startup. Keep their unresolved dependencies
 # visible as warnings instead of making the complete Wine package unusable.
 OPTIONAL_MODULE_DEPENDENCIES = {
-    "opt/kron4ek-wine/x86_64-unix/sane.so": {
+    "opt/ramenwine-wine/x86_64-unix/sane.so": {
         "libsane.so.1": "optional scanner integration",
     },
-    "opt/kron4ek-wine/x86_64-unix/wpcap.so": {
+    "opt/ramenwine-wine/x86_64-unix/wpcap.so": {
         "libpcap.so.1": "optional packet-capture integration",
     },
-    "opt/kron4ek-wine/x86_64-unix/winedmo.so": {
+    "opt/ramenwine-wine/x86_64-unix/winedmo.so": {
         "libavutil.so.56": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavformat.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavcodec.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",

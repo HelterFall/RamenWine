@@ -343,7 +343,7 @@ def validate_backend_payload(
     wayland_driver_paths = sorted(
         path
         for path in (set(files_by_path) | set(links_by_path))
-        if path.startswith("rootfs/opt/kron4ek-wine/")
+        if path.startswith("rootfs/opt/ramenwine-wine/")
         and path.rsplit("/", 1)[-1] == "winewayland.drv.so"
     )
     wayland_drivers = [

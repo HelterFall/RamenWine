@@ -53,7 +53,7 @@ class WawonaNativeContractTest {
             "nativePreeditText", String::class.java, Int::class.javaPrimitiveType,
             Int::class.javaPrimitiveType
         ).parameterCount)
-        assertEquals(2, WawonaNative::class.java.getDeclaredMethod(
+        assertEquals(1, WawonaNative::class.java.getDeclaredMethod(
             "nativeGetTextInputContentType", IntArray::class.java
         ).parameterCount)
     }
