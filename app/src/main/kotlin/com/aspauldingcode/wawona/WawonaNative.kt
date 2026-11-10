@@ -41,4 +41,12 @@ object WawonaNative {
     external fun nativePointerButton(buttonCode: Int, state: Int, timestampMs: Int)
     external fun nativePointerLeave(timestampMs: Int)
     external fun nativeKeyEvent(keyCode: Int, state: Int, timestampMs: Int)
+
+    // Wayland text-input-v3 bridge used by Android's software keyboard.
+    external fun nativeCommitText(text: String)
+    external fun nativePreeditText(text: String, cursorBegin: Int, cursorEnd: Int)
+    external fun nativeDeleteSurroundingText(beforeLength: Int, afterLength: Int)
+    external fun nativeInjectKey(linuxKeycode: Int, pressed: Boolean, timestampMs: Int)
+    external fun nativeTextEntryWanted(): Boolean
+    external fun nativeGetTextInputContentType(outHintPurpose: IntArray)
 }

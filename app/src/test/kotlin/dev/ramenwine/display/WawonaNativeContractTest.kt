@@ -29,7 +29,13 @@ class WawonaNativeContractTest {
                 "nativePointerMotion",
                 "nativePointerButton",
                 "nativePointerLeave",
-                "nativeKeyEvent"
+                "nativeKeyEvent",
+                "nativeCommitText",
+                "nativePreeditText",
+                "nativeDeleteSurroundingText",
+                "nativeInjectKey",
+                "nativeTextEntryWanted",
+                "nativeGetTextInputContentType"
             ),
             nativeMethods
         )
@@ -40,5 +46,15 @@ class WawonaNativeContractTest {
         assertFalse("nativeApplyHostKeyLevels" in nativeMethods)
         assertFalse("nativeReloadHostKeymap" in nativeMethods)
         assertFalse("nativeTouchDown" in nativeMethods)
+        assertEquals(1, WawonaNative::class.java.getDeclaredMethod(
+            "nativeCommitText", String::class.java
+        ).parameterCount)
+        assertEquals(3, WawonaNative::class.java.getDeclaredMethod(
+            "nativePreeditText", String::class.java, Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType
+        ).parameterCount)
+        assertEquals(2, WawonaNative::class.java.getDeclaredMethod(
+            "nativeGetTextInputContentType", IntArray::class.java
+        ).parameterCount)
     }
 }
