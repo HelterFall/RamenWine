@@ -139,7 +139,7 @@ internal object RuntimeBinaryValidator {
         return file.takeIf { it.path.startsWith(prefix) }
     }
 
-    private const val WINE_ROOT_PATH = "rootfs/opt/kron4ek-wine"
+    private const val WINE_ROOT_PATH = "rootfs/opt/ramenwine-wine"
     private const val WINE_WAYLAND_DRIVER_NAME = "winewayland.drv.so"
     private const val ELF_HEADER_MIN_BYTES = 20L
     private const val ELF_CLASS_64 = 2

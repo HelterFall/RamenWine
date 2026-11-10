@@ -138,5 +138,5 @@ internal object RuntimePackageRequirements {
     }
 
     private const val MAX_SYMLINK_HOPS = 40
-    private const val WINE_ROOT_PREFIX = "rootfs/opt/kron4ek-wine/"
+    private const val WINE_ROOT_PREFIX = "rootfs/opt/ramenwine-wine/"
 }
