@@ -3,6 +3,7 @@ package dev.ramenwine.runtime
 import android.content.Context
 import android.os.Looper
 import android.os.Process
+import java.io.IOException
 import dev.ramenwine.display.DisplayBackend
 import dev.ramenwine.display.DisplaySession
 import dev.ramenwine.library.ImportedGame
@@ -29,6 +30,8 @@ class GameSessionCoordinator(
 
     private var displaySession: DisplaySession? = null
     private var processSession: ProotWineProcessSession? = null
+    private var audioRelaySession: DirectAudioRelaySession? = null
+    private var audioRelayDisplay: DisplaySession? = null
     private var launchInProgress = false
     private var displayPreparationInProgress = false
 
@@ -80,6 +83,14 @@ class GameSessionCoordinator(
 
         launchInProgress = true
         try {
+            val relay = withContext(Dispatchers.IO) {
+                DirectAudioRelaySupervisor(appContext.filesDir).start(
+                    display.endpoint.hostRuntimeDirectory
+                )
+            }
+            audioRelaySession = relay
+            audioRelayDisplay = display
+
             val request = ProotWineLaunchRequest(
                 filesDirectory = appContext.filesDir,
                 cacheDirectory = appContext.cacheDir,
@@ -96,6 +107,18 @@ class GameSessionCoordinator(
                 gameCommand = command,
                 onOutput = onOutput
             )
+
+            val audioDriverExitCode = processSupervisor.runToCompletion(
+                command = ProotWineCommandBuilder.buildAudioDriverSelectionCommand(command),
+                onOutput = onOutput,
+                timeoutMillis = AUDIO_DRIVER_SETUP_TIMEOUT_MILLIS
+            )
+            if (audioDriverExitCode != 0) {
+                throw IOException(
+                    "Wine could not enable the Android audio driver " +
+                        "(reg.exe exit code $audioDriverExitCode)."
+                )
+            }
 
             val process = processSupervisor.start(
                 command = command,
@@ -137,17 +160,25 @@ class GameSessionCoordinator(
             "Stop the running game session before closing its display."
         }
         val current = displaySession ?: return
-        displaySession = null
-        current.stop()
+        closeDisplayIfCurrent(current)
     }
 
     private fun closeDisplayIfCurrent(expected: DisplaySession) {
         checkMainThread()
         if (displaySession !== expected) return
+        if (audioRelayDisplay === expected) {
+            audioRelaySession?.stop()
+            audioRelaySession = null
+            audioRelayDisplay = null
+        }
         displaySession = null
         processSession = null
         // Process exit must still be delivered if native teardown reports an error.
         runCatching { expected.stop() }
+    }
+
+    private companion object {
+        const val AUDIO_DRIVER_SETUP_TIMEOUT_MILLIS = 30_000L
     }
 
     private fun checkMainThread() {

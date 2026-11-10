@@ -19,6 +19,8 @@ class ProotWineCommandBuilderTest {
             assertEquals("fixture-runtime-1", command.runtimeVersion)
             assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LANG"])
             assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LC_ALL"])
+            assertEquals("/opt/ramenwine-audio/lib/wine", command.guestEnvironment["WINEDLLPATH"])
+            assertEquals("/run/user/10123/directaudio-relay.sock", command.guestEnvironment["BANNER_AUDIO_DIRECT_RELAY"])
             assertEquals(
                 fixture.rootfs.canonicalFile,
                 command.guestRootfsDirectory
@@ -76,6 +78,8 @@ class ProotWineCommandBuilderTest {
             assertEquals("/prefixes/" + fixture.gameId, command.guestEnvironment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
+            assertTrue(command.unsetEnvironment.contains("WINEDLLPATH"))
+            assertTrue(command.unsetEnvironment.contains("BANNER_AUDIO_DIRECT_RELAY"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
         } finally {
             fixture.cleanup()
@@ -109,6 +113,26 @@ class ProotWineCommandBuilderTest {
             }.exceptionOrNull()
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("locale"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsWineRegistryCommandThatSelectsDirectAudio() {
+        val fixture = Fixture()
+        try {
+            val command = ProotWineCommandBuilder.buildAudioDriverSelectionCommand(
+                ProotWineCommandBuilder.build(fixture.request())
+            )
+            assertEquals("reg.exe", command.guestExecutablePath)
+            assertEquals("directaudio", command.arguments[command.arguments.lastIndex - 1])
+            assertTrue(command.arguments.contains("HKCU\\Software\\Wine\\Drivers"))
+            assertTrue(command.arguments.contains("/v"))
+            assertTrue(command.arguments.contains("Audio"))
+            assertTrue(command.arguments.contains("/d"))
+            assertTrue(command.arguments.contains("directaudio"))
+            assertTrue(command.arguments.contains("/f"))
         } finally {
             fixture.cleanup()
         }
@@ -277,6 +301,7 @@ class ProotWineCommandBuilderTest {
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
+        val audioRelay = executable(backendRoot, "host/bin/directaudio-relay")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val runtimeProperties = File(backendRoot, "runtime.properties").apply {
             writeText(
@@ -287,6 +312,9 @@ class ProotWineCommandBuilderTest {
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
+        val audioUnix = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
+        val audioPe64 = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
+        val audioPe32 = executable(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {

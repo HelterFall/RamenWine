@@ -15,7 +15,260 @@ permissions:
   contents: read
 
 jobs:
+  directaudio:
+    name: Build ABI-matched DirectAudio driver and Android relay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      LLVM_MINGW: llvm-mingw-20250920-ucrt-ubuntu-22.04-x86_64
+      DIRECTAUDIO_REVISION: 52aedbf8ddd42874a5bbd21df20e1046367f442e
+      WINE_UNIXLIB_SHA_PREFIX: 0de9fde40d091d82
+
+    steps:
+      - name: Checkout Wine 11.20 source
+        uses: actions/checkout@v4
+        with:
+          repository: wine-mirror/wine
+          ref: 7298a818b79446bae153b8d5aa27235ab3703bf9
+          path: wine
+
+      - name: Checkout pinned DirectAudio source
+        uses: actions/checkout@v4
+        with:
+          repository: The412Banner/directaudio
+          ref: 52aedbf8ddd42874a5bbd21df20e1046367f442e
+          path: directaudio
+
+      - name: Verify Wine mmdevapi ABI and overlay relay driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(sha256sum wine/dlls/mmdevapi/unixlib.h | cut -c1-64)"
+          echo "Wine 11.20 mmdevapi/unixlib.h: $SHA"
+          test "${SHA:0:16}" = "$WINE_UNIXLIB_SHA_PREFIX"
+          grep -q 'create_unix_thread' wine/dlls/mmdevapi/unixlib.h
+          ! grep -q 'struct timer_loop_params' wine/dlls/mmdevapi/unixlib.h
+          mkdir -p wine/dlls/winedirectaudio.drv
+          cp directaudio/directaudio.c directaudio/da_relay_proto.h \
+             directaudio/da_aaudio_compat.h wine/dlls/winedirectaudio.drv/
+          cp directaudio/Makefile.relay.in \
+             wine/dlls/winedirectaudio.drv/Makefile.in
+          sed -i \
+            's|^EXTRADEFS = -DDA_RELAY$|EXTRADEFS = -DDA_RELAY -DWINE_MMDEVAPI_SYSTEM_THREADS|' \
+            wine/dlls/winedirectaudio.drv/Makefile.in
+          grep -q 'WINE_CONFIG_MAKEFILE(dlls/winedirectaudio.drv)' wine/configure.ac || \
+            sed -i \
+              's|^WINE_CONFIG_MAKEFILE(dlls/winepulse.drv)$|WINE_CONFIG_MAKEFILE(dlls/winedirectaudio.drv)\nWINE_CONFIG_MAKEFILE(dlls/winepulse.drv)|' \
+              wine/configure.ac
+          grep '^EXTRADEFS' wine/dlls/winedirectaudio.drv/Makefile.in
+
+      - name: Install Wine build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git wget curl unzip flex bison gettext autoconf \
+            pkg-config ccache file
+
+      - name: Cache LLVM MinGW
+        id: llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchains/${{ env.LLVM_MINGW }}
+          key: ramenwine-llvm-mingw-20250920
+
+      - name: Install LLVM MinGW
+        if: steps.llvm-mingw.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/toolchains"
+          cd "$HOME/toolchains"
+          wget -q "https://github.com/bylaws/llvm-mingw/releases/download/20250920/${LLVM_MINGW}.tar.xz"
+          tar -xf "${LLVM_MINGW}.tar.xz"
+
+      - name: Generate Wine build files
+        working-directory: wine
+        run: |
+          set -euo pipefail
+          python3 dlls/winevulkan/make_vulkan -x vk.xml -X video.xml
+          tools/make_specfiles || true
+          tools/make_requests
+          autoreconf -f
+
+      - name: Build native Wine tools
+        working-directory: wine
+        run: |
+          set -euo pipefail
+          mkdir -p wine-tools
+          cd wine-tools
+          ../configure --enable-win64 --without-x --without-freetype \
+            --without-gstreamer --without-vulkan --without-wayland \
+            --without-mingw --disable-tests
+          make -j"$(nproc)" __tooldeps__ nls/all
+
+      - name: Configure only the x86-64 glibc driver and x86 PE modules
+        working-directory: wine
+        shell: bash
+        run: |
+          set -eo pipefail
+          export PATH="$HOME/toolchains/${LLVM_MINGW}/bin:$PATH"
+          export CCACHE_DIR="$HOME/.ccache"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 2G >/dev/null || true
+          export CC="ccache gcc"
+          export CFLAGS="-g0 -O2"
+          ./configure \
+            --build=x86_64-linux-gnu --host=x86_64-linux-gnu \
+            --with-wine-tools=wine-tools \
+            --enable-archs=x86_64,i386 \
+            --with-mingw=clang \
+            --enable-win64 --disable-win16 --disable-tests \
+            --without-alsa --without-capi --without-coreaudio --without-cups \
+            --without-dbus --without-ffmpeg --without-fontconfig --without-freetype \
+            --without-gcrypt --without-gettext --with-gettextpo=no --without-gphoto \
+            --without-gnutls --without-gssapi --without-gstreamer --without-inotify \
+            --without-krb5 --without-netapi --without-opencl --without-opengl \
+            --without-oss --without-pcap --without-pcsclite --without-pulse \
+            --without-sane --without-sdl --without-udev --without-unwind \
+            --without-usb --without-v4l2 --without-vulkan --without-wayland \
+            --without-xcomposite --without-xcursor --without-xfixes --without-xinerama \
+            --without-xinput --without-xinput2 --without-xrandr --without-xrender \
+            --without-xshape --without-xshm --without-xxf86vm --without-x
+          grep -q 'dlls/winedirectaudio.drv' Makefile
+
+      - name: Build only DirectAudio Wine outputs
+        working-directory: wine
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/toolchains/${LLVM_MINGW}/bin:$PATH"
+          mapfile -t TARGETS < <(
+            grep -oE "dlls/winedirectaudio\\.drv/([A-Za-z0-9_-]+-windows/winedirectaudio\\.drv|winedirectaudio\\.so)" \
+              Makefile | sort -u
+          )
+          printf '%s\n' "${TARGETS[@]}"
+          test "${#TARGETS[@]}" -eq 3
+          make -j"$(nproc)" "${TARGETS[@]}"
+
+      - name: Cache Android NDK
+        id: ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/Android/Sdk/ndk/27.3.13750724
+          key: ramenwine-android-ndk-r27d
+
+      - name: Install Android NDK r27d
+        if: steps.ndk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/Android/Sdk/ndk"
+          cd "$HOME/Android/Sdk/ndk"
+          wget -q https://dl.google.com/android/repository/android-ndk-r27d-linux.zip
+          unzip -q android-ndk-r27d-linux.zip
+          mv android-ndk-r27d 27.3.13750724
+
+      - name: Verify cross-architecture relay protocol layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$GITHUB_WORKSPACE/directaudio/protocol-layout-check.c" <<'EOF'
+          #include <stddef.h>
+          #include "da_relay_proto.h"
+
+          #if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+          #error DirectAudio relay protocol requires little-endian targets
+          #endif
+
+          _Static_assert(sizeof(void *) == 8, "both relay endpoints must be 64-bit");
+          _Static_assert(sizeof(float) == 4, "relay PCM format requires 32-bit float");
+          _Static_assert(sizeof(struct da_ring) == 76, "da_ring layout mismatch");
+          _Static_assert(offsetof(struct da_ring, data) == 76, "da_ring PCM offset mismatch");
+          _Static_assert(sizeof(struct da_hello) == 376, "da_hello layout mismatch");
+          _Static_assert(sizeof(struct da_ack) == 40, "da_ack layout mismatch");
+          _Static_assert(sizeof(struct da_msg) == 8, "da_msg layout mismatch");
+          EOF
+          gcc -std=c11 -Wall -Werror -I "$GITHUB_WORKSPACE/directaudio" \
+            -fsyntax-only "$GITHUB_WORKSPACE/directaudio/protocol-layout-check.c"
+          TC="$HOME/Android/Sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          "$TC/aarch64-linux-android28-clang" -std=c11 -Wall -Werror \
+            -I "$GITHUB_WORKSPACE/directaudio" -fsyntax-only \
+            "$GITHUB_WORKSPACE/directaudio/protocol-layout-check.c"
+
+      - name: Build the Android AAudio relay (API 28, 16 KB-page safe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TC="$HOME/Android/Sdk/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p "$GITHUB_WORKSPACE/out/host/bin"
+          "$TC/aarch64-linux-android28-clang" -O2 -Wall -Wextra \
+            -Wno-unused-parameter -Wno-sign-compare -fPIE -pie \
+            -Wl,-z,max-page-size=16384 -Wl,-z,now \
+            "$GITHUB_WORKSPACE/directaudio/directaudio-relay.c" \
+            -o "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay" \
+            -laaudio -llog -pthread
+          "$TC/llvm-strip" --strip-all "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay"
+          "$TC/llvm-readelf" -d "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay" | \
+            grep -q 'libaaudio\\.so'
+
+      - name: Collect and verify the Wine driver pair
+        working-directory: wine
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/out/rootfs/opt/ramenwine-audio/lib/wine"
+          mkdir -p "$OUT/x86_64-unix" "$OUT/x86_64-windows" "$OUT/i386-windows"
+          PE64="$(find . -type f -path '*/x86_64-windows/winedirectaudio.drv' -print -quit)"
+          PE32="$(find . -type f -path '*/i386-windows/winedirectaudio.drv' -print -quit)"
+          UNIXLIB="$(find . -type f -name winedirectaudio.so -print -quit)"
+          test -n "$PE64" && test -n "$PE32" && test -n "$UNIXLIB"
+          cp "$PE64" "$OUT/x86_64-windows/winedirectaudio.drv"
+          cp "$PE32" "$OUT/i386-windows/winedirectaudio.drv"
+          cp "$UNIXLIB" "$OUT/x86_64-unix/winedirectaudio.so"
+          STRIP="$HOME/toolchains/${LLVM_MINGW}/bin/llvm-strip"
+          "$STRIP" --strip-all "$OUT/x86_64-windows/winedirectaudio.drv" || true
+          "$STRIP" --strip-all "$OUT/i386-windows/winedirectaudio.drv" || true
+          strip --strip-unneeded "$OUT/x86_64-unix/winedirectaudio.so"
+          readelf -h "$OUT/x86_64-unix/winedirectaudio.so" | \
+            grep -q 'Advanced Micro Devices X86-64'
+          readelf -d "$OUT/x86_64-unix/winedirectaudio.so" | grep -q 'libc.so.6'
+          ! readelf -d "$OUT/x86_64-unix/winedirectaudio.so" | grep -qi 'aaudio'
+          nm -D -u "$OUT/x86_64-unix/winedirectaudio.so" | grep -q 'PsCreateSystemThread'
+          file "$OUT/x86_64-windows/winedirectaudio.drv" | grep -q 'PE32+.*x86-64'
+          file "$OUT/i386-windows/winedirectaudio.drv" | grep -q 'PE32.*Intel 80386'
+
+      - name: Include LGPL source and attribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          LICENSE_ROOT="$GITHUB_WORKSPACE/out/host/share/ramenwine/directaudio"
+          mkdir -p "$LICENSE_ROOT/source"
+          cp "$GITHUB_WORKSPACE/directaudio/COPYING" \
+             "$GITHUB_WORKSPACE/directaudio/AUTHORS" \
+             "$GITHUB_WORKSPACE/directaudio/NOTICE" "$LICENSE_ROOT/"
+          cp "$GITHUB_WORKSPACE/directaudio/directaudio.c" \
+             "$GITHUB_WORKSPACE/directaudio/directaudio-relay.c" \
+             "$GITHUB_WORKSPACE/directaudio/da_relay_proto.h" \
+             "$GITHUB_WORKSPACE/directaudio/da_aaudio_compat.h" \
+             "$GITHUB_WORKSPACE/directaudio/Makefile.relay.in" "$LICENSE_ROOT/source/"
+          cat > "$LICENSE_ROOT/BUILD-NOTICE.txt" <<'EOF'
+          DirectAudio by The412Banner (https://github.com/The412Banner/directaudio)
+          Source revision: 52aedbf8ddd42874a5bbd21df20e1046367f442e
+          Wine base: wine-mirror/wine commit 7298a818b79446bae153b8d5aa27235ab3703bf9 (wine-11.20)
+          mmdevapi unixlib.h ABI: system-thread (SHA-256 prefix 0de9fde40d091d82)
+          RamenWine change: built DirectAudio's existing relay target for x86-64 glibc,
+          with matching x86-64 and i386 PE modules. The Android helper is built for
+          arm64-v8a / Android API 28 with 16 KB maximum page alignment.
+          Full LGPL-2.1-or-later terms are in COPYING. The corresponding source
+          files are included in source/.
+          EOF
+
+      - name: Upload pinned DirectAudio runtime bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ramenwine-directaudio-bundle
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
   android:
+    needs: directaudio
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -23,6 +276,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download DirectAudio build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: ramenwine-directaudio-bundle
+          path: build/prebuilt-runtime/directaudio-bundle
 
       - name: Set up Python
         uses: actions/setup-python@v5

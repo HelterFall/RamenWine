@@ -290,6 +290,25 @@ def is_x86_64_pe32_plus(path: Path) -> bool:
     )
 
 
+def is_i386_pe32(path: Path) -> bool:
+    with path.open("rb") as stream:
+        dos_header = stream.read(64)
+        if len(dos_header) < 64 or dos_header[:2] != b"MZ":
+            return False
+        pe_offset = int.from_bytes(dos_header[0x3C:0x40], "little")
+        if pe_offset < 64 or pe_offset > 16 * 1024 * 1024:
+            return False
+        stream.seek(pe_offset)
+        pe_header = stream.read(26)
+
+    return (
+        len(pe_header) == 26 and
+        pe_header[:4] == b"PE\x00\x00" and
+        int.from_bytes(pe_header[4:6], "little") == 0x014C and
+        int.from_bytes(pe_header[24:26], "little") == 0x010B
+    )
+
+
 def validate_backend_payload(
     backend: str,
     files: Iterable[PackageFile],
@@ -322,6 +341,47 @@ def validate_backend_payload(
                 f"{label} must be a 64-bit little-endian ELF with machine "
                 f"{expected_machine}; got {identity!r} at {path}"
             )
+
+    relay = resolve_manifest_file(
+        "host/bin/directaudio-relay", files_by_path, links_by_path
+    )
+    if relay is None:
+        raise ValueError("runtime is missing the Android DirectAudio relay helper")
+    if not relay.executable or read_elf_identity(relay.source_path) != (2, 1, 183):
+        raise ValueError(
+            "DirectAudio Android relay must be an executable AArch64 ELF"
+        )
+    if b"libaaudio.so" not in relay.source_path.read_bytes():
+        raise ValueError(
+            "DirectAudio Android relay must link Android libaaudio.so"
+        )
+
+    audio_unix_path = (
+        "rootfs/opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so"
+    )
+    audio_unix = resolve_manifest_file(audio_unix_path, files_by_path, links_by_path)
+    if audio_unix is None or read_elf_identity(audio_unix.source_path) != (2, 1, 62):
+        raise ValueError(
+            "DirectAudio Wine Unix library must be a 64-bit x86-64 ELF"
+        )
+    if b"libaaudio.so" in audio_unix.source_path.read_bytes():
+        raise ValueError(
+            "DirectAudio Wine Unix library must use the relay, not link Android AAudio"
+        )
+
+    audio_pe64_path = (
+        "rootfs/opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv"
+    )
+    audio_pe64 = resolve_manifest_file(audio_pe64_path, files_by_path, links_by_path)
+    if audio_pe64 is None or not is_x86_64_pe32_plus(audio_pe64.source_path):
+        raise ValueError("DirectAudio 64-bit Wine driver must be an x86-64 PE32+ file")
+
+    audio_pe32_path = (
+        "rootfs/opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv"
+    )
+    audio_pe32 = resolve_manifest_file(audio_pe32_path, files_by_path, links_by_path)
+    if audio_pe32 is None or not is_i386_pe32(audio_pe32.source_path):
+        raise ValueError("DirectAudio 32-bit Wine driver must be an i386 PE32 file")
 
     wineboot_candidates = (
         "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",

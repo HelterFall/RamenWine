@@ -12,6 +12,7 @@ RUNTIME_ROOT="${BUILD_DIR}/glibc-proot-box64"
 ROOTFS="${RUNTIME_ROOT}/rootfs"
 ASSET_DIR="${ROOT_DIR}/app/src/main/assets/runtime"
 OUTPUT_ZIP="${ASSET_DIR}/ramenwine-runtime.zip"
+AUDIO_BUNDLE_DIR="${BUILD_DIR}/directaudio-bundle"
 
 # Prebuilt Android/Bionic ARM64 PRoot built from the Termux PRoot codebase.
 # This release ships a statically linked talloc dependency.
@@ -214,11 +215,39 @@ if int.from_bytes(header[24:26], "little") != 0x20B:
 print("wineboot.exe: AMD64 PE32+")
 PY
 
+# Stage the pinned DirectAudio source-build outputs. These are produced by the
+# same-workflow audio job; no player download or post-install helper is needed.
+AUDIO_RELAY="$AUDIO_BUNDLE_DIR/host/bin/directaudio-relay"
+AUDIO_WINE_ROOT="$AUDIO_BUNDLE_DIR/rootfs/opt/ramenwine-audio/lib/wine"
+[[ -x "$AUDIO_RELAY" ]] || fail "DirectAudio Android relay build artifact is missing."
+for audio_file in \
+  "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" \
+  "$AUDIO_WINE_ROOT/x86_64-windows/winedirectaudio.drv" \
+  "$AUDIO_WINE_ROOT/i386-windows/winedirectaudio.drv"; do
+  [[ -s "$audio_file" ]] || fail "DirectAudio build artifact is missing: $audio_file"
+done
+
+readelf -h "$AUDIO_RELAY" | grep -q 'AArch64' || \
+  fail "DirectAudio Android relay is not an AArch64 ELF."
+readelf -d "$AUDIO_RELAY" | grep -q 'libaaudio.so' || \
+  fail "DirectAudio Android relay does not link Android AAudio."
+readelf -h "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" | \
+  grep -q 'Advanced Micro Devices X86-64' || \
+  fail "DirectAudio Wine Unix library is not an x86-64 ELF."
+! readelf -d "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" | \
+  grep -qi 'libaaudio' || \
+  fail "DirectAudio Wine Unix library must use the Android relay, not Bionic AAudio."
+
+mkdir -p "$ROOTFS/opt/ramenwine-audio/lib/wine" "$RUNTIME_ROOT/host/share/ramenwine"
+cp -a "$AUDIO_WINE_ROOT/." "$ROOTFS/opt/ramenwine-audio/lib/wine/"
+install -m 0755 "$AUDIO_RELAY" "$RUNTIME_ROOT/host/bin/directaudio-relay"
+cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
+
 # Emit the exact package format consumed by RuntimePackageInstaller.
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"

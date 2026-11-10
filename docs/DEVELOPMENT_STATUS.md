@@ -34,6 +34,15 @@
 - The Debian guest package generates the selected UTF-8 locales and bundles Noto CJK fonts, so Japanese/Chinese/Korean glyph coverage does not depend on a user-installed font pack.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
+## Audio backend
+
+- The runtime bundle has a dedicated DirectAudio build job pinned to source revision `52aedbf8ddd42874a5bbd21df20e1046367f442e` and Wine `wine-11.20`.
+- The Wine `mmdevapi/unixlib.h` header is verified against the upstream system-thread ABI prefix `0de9fde40d091d82` before compilation. The driver is built for x86-64 glibc, with matching x86-64 and i386 PE modules; the Android relay is a separate ARM64 Bionic API-28 executable.
+- The runtime packager checks the helper's AArch64 ELF identity, both PE architectures and the x86-64 Unix library. It also rejects a Wine-side driver that links directly to Bionic AAudio.
+- At launch, the app starts the helper under its own Android UID, waits for its Unix socket, sets `WINEDLLPATH` and the relay socket for the guest, then enables `HKCU\\Software\\Wine\\Drivers\\Audio=directaudio` in that game's prefix. The helper is stopped when the process/display session ends.
+- The helper does not enable microphone capture. Its output path uses Android AAudio and the same app-private runtime directory already bind-mounted into the guest.
+- This proves a pinned build and wiring, not device playback; a real Windows audio smoke test is still required.
+
 ## Current Android user flow
 
 1. Choose a game folder.
@@ -77,7 +86,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - Basic Android touch-to-pointer and text-input/IME forwarding are implemented, but still need real-game validation.
-- No Android audio output bridge is integrated yet; the existing ALSA/PulseAudio/OpenAL client libraries do not by themselves send Wine audio to Android.
+- The bundled DirectAudio output bridge is integrated into the runtime and game-session lifecycle; real-device audio playback is not yet verified.
 - Save-management, pause/resume and full child-process-tree lifecycle handling remain incomplete.
 - No physical Android device has been validated by this bootstrap.
 

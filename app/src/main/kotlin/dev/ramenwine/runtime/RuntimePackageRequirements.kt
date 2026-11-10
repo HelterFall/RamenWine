@@ -9,9 +9,15 @@ import java.io.File
 internal object RuntimePackageRequirements {
     private val requiredExecutables = listOf(
         "host/bin/proot",
+        "host/bin/directaudio-relay",
         "rootfs/usr/bin/env",
         "rootfs/usr/bin/box64",
         "rootfs/usr/bin/wine"
+    )
+    private val requiredAudioFiles = listOf(
+        "rootfs/opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so",
+        "rootfs/opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv",
+        "rootfs/opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv"
     )
     private val winebootCandidates = listOf(
         "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",
@@ -30,6 +36,12 @@ internal object RuntimePackageRequirements {
             when {
                 resolved == null -> errors += "Missing required executable: $path"
                 !resolved.executable -> errors += "Required executable is not marked executable: $path"
+            }
+        }
+
+        for (path in requiredAudioFiles) {
+            if (resolveManifestFile(path, files, links) == null) {
+                errors += "Missing DirectAudio runtime file: $path"
             }
         }
 
@@ -58,6 +70,13 @@ internal object RuntimePackageRequirements {
                 file == null -> errors += "Unsafe or missing launch path: $path"
                 !file.isFile -> errors += "Required launch file is missing: $path"
                 !file.canExecute() -> errors += "Required launch file is not executable: $path"
+            }
+        }
+
+        for (path in requiredAudioFiles) {
+            val file = resolveInstalledFile(backendRoot, path)
+            if (file == null || !file.isFile || !file.canRead()) {
+                errors += "Missing or unreadable DirectAudio runtime file: $path"
             }
         }
 

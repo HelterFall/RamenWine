@@ -60,6 +60,16 @@ class RuntimePackagerTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(header)
 
+    def write_pe32_i386(self, path: Path) -> None:
+        header = bytearray(256)
+        header[:2] = b"MZ"
+        struct.pack_into("<I", header, 0x3C, 0x80)
+        header[0x80:0x84] = b"PE\x00\x00"
+        struct.pack_into("<H", header, 0x84, 0x014C)
+        struct.pack_into("<H", header, 0x98, 0x010B)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(header)
+
     def create_glibc_runtime(self, root: Path) -> None:
         for relative, machine in (
             ("host/bin/proot", 183),
@@ -71,6 +81,20 @@ class RuntimePackagerTests(unittest.TestCase):
 
         self.write_pe32_plus_amd64(
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
+        )
+        relay = root / "host/bin/directaudio-relay"
+        self.write_elf64(relay, 183)
+        with relay.open("ab") as stream:
+            stream.write(b"libaaudio.so")
+        self.write_elf64(
+            root / "rootfs/opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so",
+            62,
+        )
+        self.write_pe32_plus_amd64(
+            root / "rootfs/opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv"
+        )
+        self.write_pe32_i386(
+            root / "rootfs/opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv"
         )
         self.write_elf64(
             root / "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so",
@@ -251,6 +275,40 @@ class RuntimePackagerTests(unittest.TestCase):
                     files,
                     symlinks,
                     runtime_root=root,
+                )
+
+    def test_glibc_manifest_rejects_missing_directaudio_32_bit_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            (root / "rootfs/opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv").unlink()
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "i386 PE32"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
+
+    def test_glibc_manifest_rejects_wrong_directaudio_relay_architecture(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            self.write_elf64(root / "host/bin/directaudio-relay", 62)
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "AArch64"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
+
+    def test_glibc_manifest_rejects_relay_without_aaudio_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            relay = root / "host/bin/directaudio-relay"
+            relay.write_bytes(relay.read_bytes().replace(b"libaaudio.so", b"libbroken.so"))
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "libaaudio.so"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
                 )
 
     def test_glibc_manifest_requires_launch_components(self) -> None:

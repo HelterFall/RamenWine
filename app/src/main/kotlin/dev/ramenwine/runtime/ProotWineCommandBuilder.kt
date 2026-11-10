@@ -109,6 +109,10 @@ object ProotWineCommandBuilder {
         executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
+        executableFile(backendRoot, "host/bin/directaudio-relay")
+        requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
+        requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
+        requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
         val gameDirectory = File(filesRoot, request.game.relativeDirectory).canonicalFile
@@ -191,7 +195,10 @@ object ProotWineCommandBuilder {
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/opt/ramenwine-wine/bin:/usr/local/bin:/usr/bin:/bin",
-            "BOX64_NOBANNER" to "1"
+            "BOX64_NOBANNER" to "1",
+            "WINEDLLPATH" to "/opt/ramenwine-audio/lib/wine",
+            "BANNER_AUDIO_DIRECT_RELAY" to
+                guestRuntimeDirectory + "/directaudio-relay.sock"
         )
 
         val arguments = buildList {
@@ -245,6 +252,35 @@ object ProotWineCommandBuilder {
         )
     }
 
+
+    fun buildAudioDriverSelectionCommand(
+        gameCommand: ProotWineCommand
+    ): ProotWineCommand {
+        val relaySocket = gameCommand.guestEnvironment["BANNER_AUDIO_DIRECT_RELAY"]
+            ?: throw IOException("The Android audio relay socket is not configured.")
+        if (!relaySocket.startsWith("/run/user/") ||
+            !relaySocket.endsWith("/directaudio-relay.sock")
+        ) {
+            throw IOException("The Android audio relay socket path is invalid.")
+        }
+
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/box64",
+            "/usr/bin/wine",
+            "reg.exe",
+            "add",
+            "HKCU\\Software\\Wine\\Drivers",
+            "/v",
+            "Audio",
+            "/d",
+            "directaudio",
+            "/f"
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "reg.exe"
+        )
+    }
 
     fun buildWinebootCommand(
         gameCommand: ProotWineCommand,
@@ -333,6 +369,17 @@ object ProotWineCommandBuilder {
         return canonicalChild
     }
 
+    private fun requireRuntimeFile(root: File, relativePath: String): File {
+        val normalized = SafeGamePath.normalizeRelativePath(relativePath)
+            ?: throw IOException("Unsafe runtime file path.")
+        val file = File(root, normalized).canonicalFile
+        requireContained(root, file, "Runtime file")
+        if (!file.isFile || !file.canRead()) {
+            throw IOException("Required runtime file is missing or unreadable: " + relativePath)
+        }
+        return file
+    }
+
     private fun requireDirectory(directory: File, label: String) {
         if (!directory.isDirectory) {
             throw IOException(label + " directory is missing: " + directory.absolutePath)
@@ -367,6 +414,8 @@ object ProotWineCommandBuilder {
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
         "BOX64_NOBANNER",
+        "WINEDLLPATH",
+        "BANNER_AUDIO_DIRECT_RELAY",
         "LD_PRELOAD",
         "ANDROID_ROOT",
         "ANDROID_DATA",

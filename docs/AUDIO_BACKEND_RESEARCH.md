@@ -1,76 +1,80 @@
-# Android audio backend research
+# Android audio backend
 
-## Current state
+## Implemented integration
 
-The Debian guest already contains ALSA, PulseAudio and OpenAL client libraries,
-but RamenWine does not currently provide an Android audio server or an Android
-AAudio/Oboe bridge. Installing a client library alone does not produce sound on
-the phone.
+RamenWine uses the existing **DirectAudio** Wine driver and its Linux/PRoot
+relay mode. It does not implement a new mixer and does not ask the player to
+install a PulseAudio server or a separate helper application.
 
-Do not add a home-grown mixer or a second general-purpose audio server unless
-the upstream options below prove unusable.
+Pinned upstream sources:
 
-## Reusable upstream candidate: DirectAudio
+- DirectAudio: `The412Banner/directaudio` commit
+  `52aedbf8ddd42874a5bbd21df20e1046367f442e`, LGPL-2.1-or-later.
+- Wine base: `wine-mirror/wine` commit
+  `7298a818b79446bae153b8d5aa27235ab3703bf9` (Wine 11.20).
+- ABI assertion: the Wine 11.20 `dlls/mmdevapi/unixlib.h` is the system-thread
+  interface expected by DirectAudio. CI checks its hash prefix
+  `0de9fde40d091d82`, verifies `create_unix_thread` is present and verifies
+  the incompatible `timer_loop_params` interface is absent.
 
-Project: https://github.com/The412Banner/directaudio  
-License: LGPL-2.1-or-later (the source and license notices must accompany any
-distributed derivative).
+## Audio path
 
-DirectAudio is an existing Wine `mmdevapi` audio driver. Its Linux/PRoot relay
-design separates the two C library environments:
+```
+Windows visual novel (WASAPI / DirectSound via Wine mmdevapi)
+   -> x86-64 Wine DirectAudio driver (glibc, inside Debian/PRoot/Box64)
+   -> Unix socket + shared-memory audio ring
+   -> directaudio-relay (ARM64 Android/Bionic, app UID)
+   -> Android AAudio
+   -> Android audio mixer / speaker
+```
 
-- A small ARM64 Android/Bionic helper owns the Android AAudio output stream.
-- The Wine driver runs inside the glibc guest and sends mixed PCM to that helper
-  through a Unix socket plus shared-memory rings.
-- The helper is started by the Android app under the app's UID, before Wine
-  starts, and is stopped with the game session.
-- The relay socket can live in the runtime directory that RamenWine already
-  bind-mounts into the guest as `XDG_RUNTIME_DIR`.
+The relay protocol uses only fixed-width 32-bit fields and float PCM, with no pointers in its shared wire structures. CI compiles protocol-layout static assertions for both x86-64 and Android ARM64 targets, checking little-endian operation and matching structure sizes/PCM offsets before producing the artifacts.
 
-The upstream project supplies the relay helper and a relay-mode driver source.
-This is a much better starting point than writing an audio engine ourselves.
+The Wine-side driver is built for x86-64 glibc and includes both PE modules:
+`x86_64-windows/winedirectaudio.drv` and
+`i386-windows/winedirectaudio.drv`. The ARM64 helper is built separately
+with Android NDK r27d / API 28 and 16 KB maximum page alignment. The Linux
+guest never loads Android's Bionic `libaaudio.so`.
 
-## Why the published driver cannot be copied into RamenWine
+At game launch, RamenWine starts the helper in its own Android process UID,
+waits for its Unix socket, passes `WINEDLLPATH` and
+`BANNER_AUDIO_DIRECT_RELAY` to the guest, and selects Wine's
+`HKCU\\Software\\Wine\\Drivers\\Audio=directaudio` registry setting
+inside the per-game prefix. The helper stops when the game/display session ends,
+including a failed launch.
 
-RamenWine executes an x86-64 glibc Wine loader through Box64. The currently
-published DirectAudio Linux relay driver artifacts are built for an ARM64 Wine
-guest: they contain an AArch64 Unix library and ARM64EC/i386 PE driver pieces.
-They are not loadable as the x86-64 Wine driver pair in our guest.
+The helper's microphone endpoint is not enabled. Output audio requires no
+microphone permission.
 
-The upstream Linux workflow also pins specific Wine `mmdevapi/unixlib.h`
-interfaces. That internal table is not a stable public ABI: the project itself
-documents that a mismatched driver can result in silence rather than a clean
-error. RamenWine uses the LUG Wine/TkG 11.20-2 Wayland build, so the matching
-header and the exact source revision used for that build must be verified before
-building or bundling a driver.
+## Runtime packaging and licensing
 
-## Safe integration sequence
+The DirectAudio job emits an artifact consumed by the normal offline runtime
+packager. The Android player does not download a runtime, driver or helper
+separately. The package includes the relevant upstream source, LGPL-2.1-or-later
+license text, AUTHORS, NOTICE and a build-provenance notice under the app-private
+runtime's `host/share/ramenwine/directaudio` directory.
 
-1. Identify the exact Wine source revision and hash its
-   `dlls/mmdevapi/unixlib.h`.
-2. Build the existing DirectAudio relay-mode Unix library for x86-64 glibc and
-   its matching x86/x64 PE driver modules against that exact Wine source tree.
-3. Verify ELF/PE architecture, direct dependencies, exported/imported symbols and
-   the mmdevapi ABI identity in CI.
-4. Bundle the ARM64 Bionic relay helper and the ABI-matched x86-64 Wine driver
-   files into the app's offline runtime package, including LGPL source/license
-   notices and provenance.
-5. Start the helper as the Android app process, set
-   `BANNER_AUDIO_DIRECT_RELAY` and `WINEDLLPATH`, then set the per-game Wine
-   prefix's `HKCU\\Software\\Wine\\Drivers\\Audio` value to
-   `directaudio` before launching the EXE.
-6. Stop the helper when that game session ends, including launch failures and
-   Android Surface teardown.
+The runtime packager checks:
 
-The above is a build/integration plan, not a claim that audio currently works.
-The driver must remain disabled until the exact LUG Wine ABI has been matched
-and a real Windows audio smoke test has played sound through the Android device.
+- the relay is an executable AArch64 ELF;
+- the Wine Unix library is an x86-64 ELF and does not link to Bionic AAudio;
+- the 64-bit PE driver is AMD64 PE32+;
+- the 32-bit PE driver is i386 PE32.
+
+## What is and is not proven
+
+The build pipeline and launch wiring are implemented in source. A successful
+CI build proves that the binaries compile against the pinned Wine ABI and pass
+the package's static architecture checks. It does **not** prove actual playback
+on a phone. A real Windows audio smoke test is still required to validate the
+full route, then music, voice and sound effects should be tested separately.
 
 ## Upstream references
 
-- DirectAudio project and its Wine compatibility notes:
-  https://github.com/The412Banner/directaudio
-- DirectAudio Linux relay installation and host lifecycle:
+- DirectAudio project: https://github.com/The412Banner/directaudio
+- DirectAudio Linux relay design and runtime lifecycle:
   https://github.com/The412Banner/directaudio/blob/main/docs/linux-relay/INSTALL.md
-- DirectAudio driver's Wine integration notes:
+- DirectAudio integration requirements and driver selection:
   https://github.com/The412Banner/directaudio/blob/main/INTEGRATION.md
+- Wine 11.20 ABI source:
+  https://github.com/wine-mirror/wine/blob/7298a818b79446bae153b8d5aa27235ab3703bf9/dlls/mmdevapi/unixlib.h
