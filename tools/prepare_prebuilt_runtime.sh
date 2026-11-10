@@ -162,7 +162,14 @@ readelf -h "$GUEST_WINE_LAUNCHER" | \
   fail "The selected Kron4ek Wine launcher is not x86-64."
 
 # Verify Wineboot's AMD64 PE32+ header before making the APK payload.
-python3 - "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe" <<'PY'
+# As with /usr/bin/wine above, resolve this guest-absolute symlink manually:
+# host-side Python must read the real file below $ROOTFS, not /opt on the runner.
+GUEST_WINEBOOT="$ROOTFS/opt/kron4ek-wine/${WINEBOOT_RELATIVE}"
+[[ -f "$GUEST_WINEBOOT" ]] || \
+  fail "The copied Kron4ek wineboot.exe is missing from the guest rootfs."
+[[ "$(readlink "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe")" == "/opt/kron4ek-wine/${WINEBOOT_RELATIVE}" ]] || \
+  fail "The guest wineboot.exe link does not match the selected distribution file."
+python3 - "$GUEST_WINEBOOT" <<'PY'
 import pathlib
 import sys
 
