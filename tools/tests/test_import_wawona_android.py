@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import struct
 import sys
 import tempfile
@@ -26,6 +27,24 @@ class WawonaReleaseImporterTests(unittest.TestCase):
         self.assertTrue(import_wawona_android.PINNED_APK_URL.endswith(
             "/v26.8.12/Wawona-26.8.12.apk"
         ))
+
+    def test_jni_symbol_guard_matches_every_native_method_in_the_ramenwine_wrapper(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        wrapper = repository_root / (
+            "app/src/main/kotlin/com/aspauldingcode/wawona/WawonaNative.kt"
+        )
+        declared_methods = set(
+            re.findall(
+                r"\\bexternal\\s+fun\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
+                wrapper.read_text(encoding="utf-8"),
+            )
+        )
+        required_methods = {
+            symbol.rsplit("_", 1)[-1]
+            for symbol in import_wawona_android.REQUIRED_JNI_SYMBOLS
+        }
+        self.assertTrue(declared_methods, "The Wawona Kotlin wrapper declares no JNI methods.")
+        self.assertEqual(declared_methods, required_methods)
 
     def test_accepts_arm64_elf_and_rejects_x86_64(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
