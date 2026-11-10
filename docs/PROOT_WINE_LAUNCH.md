@@ -32,7 +32,7 @@ The glibc package is rejected before extraction unless it contains executable `h
 | cacheDir/wine-tmp/<id> | /tmp | Per-game temporary files |
 | Wawona runtime directory | /run/user/<Android UID> | Wayland socket directory |
 
-The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. It records a private marker only after wineboot exits successfully and system.reg/user.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
+The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. It records a private marker only after wineboot exits successfully and system.reg, user.reg and userdef.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
 
 ## Command and environment
 
@@ -87,6 +87,7 @@ Imported games are untrusted. Scanning and import do not execute game code. Runt
 7. Verify touch, keyboard, IME, resize, pause/resume, exit and complete child-process teardown.
 
 No actual Windows EXE launch is claimed until these gates pass on a physical Android device.
+
 ## Runtime symlink rules
 
 Runtime package paths are relative to the backend package. Within \`rootfs/\`, an absolute Linux symlink target such as \`/usr/bin/env\` is interpreted relative to the guest root filesystem and rewritten as a safe relative link during installation. It must remain inside \`rootfs/\`; it cannot cross into the Android-host \`host/\` payload. Absolute symlinks in \`host/\` are rejected because they would address Android's filesystem rather than the app-private runtime package. Relative host links must remain inside \`host/\`.

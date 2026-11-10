@@ -126,6 +126,11 @@ class RuntimeLayoutSymlinkTest {
             executable.setExecutable(true)
         }
 
+        val legacyExecutable = File(backendRoot, "bin/wine")
+        legacyExecutable.parentFile?.mkdirs()
+        legacyExecutable.writeText("test executable")
+        legacyExecutable.setExecutable(true)
+
         val hostLibrary = File(backendRoot, "host/lib/libproot.so")
         hostLibrary.parentFile?.mkdirs()
         hostLibrary.writeText("test library")
