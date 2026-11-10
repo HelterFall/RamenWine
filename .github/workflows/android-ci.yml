@@ -1,11 +1,18 @@
 name: Android CI · Prebuilt runtime and Wawona APK
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
   workflow_dispatch:
+    inputs:
+      build_android:
+        description: "Also build the Android APK and run the full Android packaging stage."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ramenwine-android-ci-${{ github.ref }}
@@ -268,6 +275,7 @@ jobs:
           retention-days: 14
 
   android:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_android
     needs: directaudio
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
