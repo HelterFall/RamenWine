@@ -158,6 +158,48 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 for issue in report["issues"]
             ))
 
+    def test_optional_wine_integrations_are_reported_as_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            wine_unix = rootfs / "opt/kron4ek-wine/x86_64-unix"
+            wine_unix.mkdir(parents=True)
+            (wine_unix / "sane.so").write_bytes(dynamic_elf64(62, "libsane.so.1"))
+            (wine_unix / "wpcap.so").write_bytes(dynamic_elf64(62, "libpcap.so.1"))
+            (wine_unix / "winedmo.so").write_bytes(dynamic_elf64(62, "libavcodec.so.58"))
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertEqual([], report["issues"])
+            warnings = {
+                (item["file"], item["detail"])
+                for item in report["optionalIssues"]
+            }
+            self.assertEqual(
+                {
+                    ("opt/kron4ek-wine/x86_64-unix/sane.so", "libsane.so.1"),
+                    ("opt/kron4ek-wine/x86_64-unix/wpcap.so", "libpcap.so.1"),
+                    ("opt/kron4ek-wine/x86_64-unix/winedmo.so", "libavcodec.so.58"),
+                },
+                warnings,
+            )
+
+    def test_unlisted_missing_wine_dependency_remains_fatal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            wine_unix = rootfs / "opt/kron4ek-wine/x86_64-unix"
+            wine_unix.mkdir(parents=True)
+            (wine_unix / "winex11.so").write_bytes(
+                dynamic_elf64(62, "librequired-wine-dependency.so")
+            )
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertTrue(any(
+                item["file"] == "opt/kron4ek-wine/x86_64-unix/winex11.so" and
+                item["detail"] == "librequired-wine-dependency.so"
+                for item in report["issues"]
+            ))
+
     def test_rejects_library_with_wrong_elf_machine(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"

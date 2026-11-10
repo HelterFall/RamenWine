@@ -34,6 +34,23 @@ MAX_PROGRAM_HEADERS = 4096
 MAX_DYNAMIC_BYTES = 16 * 1024 * 1024
 MAX_STRING_TABLE_BYTES = 64 * 1024 * 1024
 
+# These are Wine's optional host-integration modules, not requirements for
+# ordinary Win32/Win64 process startup. Keep their unresolved dependencies
+# visible as warnings instead of making the complete Wine package unusable.
+OPTIONAL_MODULE_DEPENDENCIES = {
+    "opt/kron4ek-wine/x86_64-unix/sane.so": {
+        "libsane.so.1": "optional scanner integration",
+    },
+    "opt/kron4ek-wine/x86_64-unix/wpcap.so": {
+        "libpcap.so.1": "optional packet-capture integration",
+    },
+    "opt/kron4ek-wine/x86_64-unix/winedmo.so": {
+        "libavutil.so.56": "optional DirectShow DMO / FFmpeg 4.4 integration",
+        "libavformat.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
+        "libavcodec.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
+    },
+}
+
 
 class ElfAuditError(ValueError):
     pass
@@ -377,6 +394,7 @@ def audit_rootfs(rootfs: Path) -> dict:
 
     elf_files: list[ElfInfo] = []
     issues: list[dict[str, str]] = []
+    optional_issues: list[dict[str, str]] = []
     architectures: dict[str, int] = {}
 
     for current, directory_names, file_names in os.walk(root, followlinks=False):
@@ -455,11 +473,19 @@ def audit_rootfs(rootfs: Path) -> dict:
         for soname in info.needed:
             dependency_status = _dependency_status(root, info, soname)
             if dependency_status == "missing":
-                issues.append({
+                optional_reason = OPTIONAL_MODULE_DEPENDENCIES.get(relative, {}).get(soname)
+                dependency_issue = {
                     "kind": "missing-library",
                     "file": relative,
                     "detail": soname,
-                })
+                }
+                if optional_reason is not None:
+                    optional_issues.append({
+                        **dependency_issue,
+                        "reason": optional_reason,
+                    })
+                else:
+                    issues.append(dependency_issue)
             elif dependency_status == "wrong-architecture":
                 issues.append({
                     "kind": "library-architecture",
@@ -472,6 +498,7 @@ def audit_rootfs(rootfs: Path) -> dict:
         "elfCount": len(elf_files),
         "architectures": dict(sorted(architectures.items())),
         "issues": issues,
+        "optionalIssues": optional_issues,
     }
 
 
@@ -507,8 +534,14 @@ def main() -> int:
                 f"{issue['kind']}: {issue['file']}: {issue['detail']}",
                 file=sys.stderr,
             )
+        for issue in report["optionalIssues"]:
+            print(
+                f"optional dependency: {issue['file']}: {issue['detail']} "
+                f"({issue['reason']})",
+                file=sys.stderr,
+            )
         if not report["issues"]:
-            print("No missing interpreters or direct shared-library dependencies found.")
+            print("No missing required interpreters or direct shared-library dependencies found.")
 
     return 1 if args.strict and report["issues"] else 0
 

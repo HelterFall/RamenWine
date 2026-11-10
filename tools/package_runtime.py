@@ -345,6 +345,12 @@ def validate_backend_payload(
             report = audit_rootfs(runtime_root / "rootfs")
         except (OSError, ElfAuditError) as error:
             raise ValueError(f"could not audit guest ELF dependencies: {error}") from error
+        for item in report.get("optionalIssues", []):
+            print(
+                "package warning: optional module dependency is not bundled: "
+                f"{item['file']} needs {item['detail']} ({item['reason']})",
+                file=sys.stderr,
+            )
         if report["issues"]:
             details = "; ".join(
                 f"{item['file']}: {item['kind']} ({item['detail']})"

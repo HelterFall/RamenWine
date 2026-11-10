@@ -36,6 +36,8 @@ This selects the x86-64 Wine WOW64 route under Box64. Box64's Wine guide documen
 
 The Python packager validates these headers before creating a ZIP. The Android inventory repeats the header checks after extraction. They reject architecture mismatches but still do not execute binaries or verify runtime linking.
 
+The ELF audit is strict for the Wine launcher, prefix initializer, core Wine modules and all guest libraries. Three optional integrations in the pinned Kron4ek archive are warnings rather than hard build blockers: SANE scanner access, WinPcap packet capture and the DirectShow DMO module built against the older FFmpeg 4.4 ABI. Ordinary Wine startup and the normal multimedia path remain audited; those optional host integrations are not claimed as available in this runtime package.
+
 ## Host/guest path mapping
 
 | Host path | Guest path | Purpose |
