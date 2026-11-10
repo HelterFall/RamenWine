@@ -44,7 +44,6 @@ import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
 import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
-import dev.ramenwine.runtime.RuntimePackageInstaller
 import dev.ramenwine.runtime.RuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,36 +72,7 @@ fun RamenWineApp() {
     var runtimeInspection by remember(context.filesDir) {
         mutableStateOf(RuntimeLayout.inspect(context.filesDir))
     }
-    var installingRuntime by remember { mutableStateOf(false) }
-    var runtimePackageError by remember { mutableStateOf<String?>(null) }
-    var runtimePackageNotice by remember { mutableStateOf<String?>(null) }
     val nativeDiagnostic = remember { NativeRuntime.diagnostic() }
-
-    val runtimePackagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null && !installingRuntime) {
-            installingRuntime = true
-            runtimePackageError = null
-            runtimePackageNotice = null
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        RuntimePackageInstaller(context.applicationContext).install(uri)
-                    }
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                    runtimePackageNotice = result.backend.displayName +
-                        " · " + result.runtimeVersion +
-                        " · " + result.installedFileCount + " файлов"
-                } catch (error: Exception) {
-                    runtimePackageError = error.message ?: error.javaClass.simpleName
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                } finally {
-                    installingRuntime = false
-                }
-            }
-        }
-    }
 
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -226,17 +196,7 @@ fun RamenWineApp() {
                 RuntimeStatusCard(
                     runtimeInspection = runtimeInspection,
                     nativeDiagnostic = nativeDiagnostic,
-                    installingRuntime = installingRuntime,
-                    showDeveloperTools = BuildConfig.DEBUG,
-                    onInstallRuntime = {
-                        runtimePackagePicker.launch(
-                            arrayOf(
-                                "application/zip",
-                                "application/x-zip-compressed",
-                                "application/octet-stream"
-                            )
-                        )
-                    }
+                    showDeveloperTools = BuildConfig.DEBUG
                 )
 
                 if (BuildConfig.DEBUG) {
@@ -285,25 +245,6 @@ fun RamenWineApp() {
                     ) {
                         Text("Тест Windows + Wayland (x86)")
                     }
-                }
-
-                if (installingRuntime) {
-                    Text(
-                        "Проверяю и устанавливаю локальный runtime-пакет…",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                runtimePackageError?.let {
-                    Text(
-                        text = "Runtime-пакет не установлен: " + it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                runtimePackageNotice?.let {
-                    Text(
-                        text = "Runtime установлен: " + it,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
                 }
 
                 Button(
@@ -410,9 +351,7 @@ fun RamenWineApp() {
 private fun RuntimeStatusCard(
     runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
     nativeDiagnostic: String,
-    installingRuntime: Boolean,
-    showDeveloperTools: Boolean,
-    onInstallRuntime: () -> Unit
+    showDeveloperTools: Boolean
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -467,21 +406,12 @@ private fun RuntimeStatusCard(
             )
             if (showDeveloperTools) {
                 Text(
-                    "Служебная функция для разработчиков. Готовый Wine/Proton runtime пока не входит в APK. " +
-                        "Обычному пользователю не нужно искать или скачивать ZIP вручную.",
+                    "Полный Wine/Box64 runtime пока не установлен. В целевой версии RamenWine " +
+                        "сама подготовит игровую среду; выбор ZIP или установка отдельного приложения " +
+                        "не будут частью пользовательского процесса.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(
-                    onClick = onInstallRuntime,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !installingRuntime
-                ) {
-                    Text(
-                        if (installingRuntime) "Установка…" else
-                            "Импортировать runtime из ZIP (для разработчиков)"
-                    )
-                }
                 HorizontalDivider()
                 Text("Native bridge · диагностика", fontWeight = FontWeight.Bold)
                 Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
