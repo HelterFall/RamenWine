@@ -239,7 +239,7 @@ PY
 # same-workflow audio job; no player download or post-install helper is needed.
 AUDIO_RELAY="$AUDIO_BUNDLE_DIR/host/bin/directaudio-relay"
 AUDIO_WINE_ROOT="$AUDIO_BUNDLE_DIR/rootfs/opt/ramenwine-audio/lib/wine"
-[[ -x "$AUDIO_RELAY" ]] || fail "DirectAudio Android relay build artifact is missing."
+[[ -f "$AUDIO_RELAY" && -s "$AUDIO_RELAY" ]] || fail "DirectAudio Android relay build artifact is missing or empty."
 for audio_file in \
   "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" \
   "$AUDIO_WINE_ROOT/x86_64-windows/winedirectaudio.drv" \
