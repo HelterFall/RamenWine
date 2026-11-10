@@ -266,11 +266,18 @@ jobs:
           files are included in source/.
           EOF
 
+      - name: Archive DirectAudio outputs with Unix permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C "$GITHUB_WORKSPACE/out" -cpf \
+            "$GITHUB_WORKSPACE/ramenwine-directaudio-bundle.tar" .
+
       - name: Upload pinned DirectAudio runtime bundle
         uses: actions/upload-artifact@v4
         with:
           name: ramenwine-directaudio-bundle
-          path: out/
+          path: ramenwine-directaudio-bundle.tar
           if-no-files-found: error
           retention-days: 14
 
@@ -290,6 +297,15 @@ jobs:
         with:
           name: ramenwine-directaudio-bundle
           path: build/prebuilt-runtime/directaudio-bundle
+
+      - name: Restore DirectAudio files and executable modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="build/prebuilt-runtime/directaudio-bundle"
+          tar -xpf "$BUNDLE/ramenwine-directaudio-bundle.tar" -C "$BUNDLE"
+          rm "$BUNDLE/ramenwine-directaudio-bundle.tar"
+          test -x "$BUNDLE/host/bin/directaudio-relay"
 
       - name: Set up Python
         uses: actions/setup-python@v5
