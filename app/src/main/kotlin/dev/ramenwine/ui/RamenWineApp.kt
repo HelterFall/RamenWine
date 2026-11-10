@@ -943,6 +943,8 @@ private fun LibraryCard(
 
 private fun formatFileSize(sizeBytes: Long): String {
     return when {
+        sizeBytes >= 1024L * 1024L * 1024L ->
+            "%.2f GB".format(sizeBytes / (1024.0 * 1024.0 * 1024.0))
         sizeBytes >= 1024L * 1024L -> "%.1f MB".format(sizeBytes / (1024.0 * 1024.0))
         sizeBytes >= 1024L -> "%.1f KB".format(sizeBytes / 1024.0)
         else -> "$sizeBytes B"

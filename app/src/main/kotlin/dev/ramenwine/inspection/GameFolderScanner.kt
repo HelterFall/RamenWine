@@ -68,7 +68,7 @@ class GameFolderScanner(private val context: Context) {
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
             val children = try {
-                current.document.listFiles()
+                SafDocumentTree.listChildren(context, current.document)
             } catch (error: Exception) {
                 warnings.addBounded(
                     "Could not list " + (current.relativePath.ifBlank { root.name ?: "game folder" }) +

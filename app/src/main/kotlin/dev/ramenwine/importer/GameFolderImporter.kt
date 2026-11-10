@@ -6,6 +6,7 @@ import android.os.StatFs
 import androidx.documentfile.provider.DocumentFile
 import dev.ramenwine.inspection.PeHeaderInspector
 import dev.ramenwine.inspection.SafeGamePath
+import dev.ramenwine.inspection.SafDocumentTree
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import java.io.File
@@ -82,7 +83,7 @@ class GameFolderImporter(private val context: Context) {
                 coroutineContext.ensureActive()
                 val current = queue.removeFirst()
                 val children = try {
-                    current.document.listFiles()
+                    SafDocumentTree.listChildren(context, current.document)
                 } catch (error: Exception) {
                     throw IOException(
                         "Could not read folder " +

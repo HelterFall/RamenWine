@@ -108,11 +108,13 @@ class GameStorageManager(
             removeFromLibrary(id)
         }
 
-        removed += cleanOrphans(
+        val gameOrphans = cleanOrphans(
             parent = gamesRoot,
             retainedIds = validRegistered,
             removeImportStaging = true
-        ).also { reclaimed = saturatedAdd(reclaimed, it) }
+        )
+        removed += gameOrphans.removedEntries
+        reclaimed = saturatedAdd(reclaimed, gameOrphans.reclaimedBytes)
 
         listOf(
             File(filesDirectory, "prefixes"),
@@ -120,31 +122,41 @@ class GameStorageManager(
             File(cacheDirectory, "wine-tmp"),
             File(cacheDirectory, "proot-tmp")
         ).forEach { parent ->
-            removed += cleanOrphans(parent, validRegistered, false)
-                .also { reclaimed = saturatedAdd(reclaimed, it) }
+            val orphans = cleanOrphans(parent, validRegistered, false)
+            removed += orphans.removedEntries
+            reclaimed = saturatedAdd(reclaimed, orphans.reclaimedBytes)
         }
 
         return StorageCleanupResult(removed, reclaimed)
     }
 
+    private data class CleanupDelta(
+        val removedEntries: Int = 0,
+        val reclaimedBytes: Long = 0L
+    )
+
     private fun cleanOrphans(
         parent: File,
         retainedIds: Set<String>,
         removeImportStaging: Boolean
-    ): Int {
-        if (!parent.isDirectory || Files.isSymbolicLink(parent.toPath())) return 0
+    ): CleanupDelta {
+        if (!parent.isDirectory || Files.isSymbolicLink(parent.toPath())) {
+            return CleanupDelta()
+        }
         var removed = 0
-        val children = parent.listFiles() ?: return 0
+        var reclaimed = 0L
+        val children = parent.listFiles() ?: return CleanupDelta()
         for (child in children) {
             val isOrphanId = ID_PATTERN.matches(child.name) && child.name !in retainedIds
             val isAbandonedImport = removeImportStaging &&
                 STAGING_PATTERN.matches(child.name)
             if (isOrphanId || isAbandonedImport) {
+                reclaimed = saturatedAdd(reclaimed, directorySize(child))
                 deleteOwnedEntry(parent, child.name)
                 removed++
             }
         }
-        return removed
+        return CleanupDelta(removed, reclaimed)
     }
 
     private fun directorySize(entry: File): Long {
