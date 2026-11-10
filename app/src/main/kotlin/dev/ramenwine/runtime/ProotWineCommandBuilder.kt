@@ -165,6 +165,26 @@ object ProotWineCommandBuilder {
             ensureGuestDirectory(rootfs, guestPath)
         }
 
+        val guestEnvironment = linkedMapOf(
+            "HOME" to guestHomeDirectory,
+            "WINEPREFIX" to guestPrefixDirectory,
+            "WINEDEBUG" to "err+all",
+            "WAYLAND_DISPLAY" to request.display.socketName,
+            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
+            "TMPDIR" to guestTempDirectory,
+            "LD_LIBRARY_PATH" to
+                "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/lib:/usr/lib",
+            "BOX64_LD_LIBRARY_PATH" to
+                "/opt/kron4ek-wine/x86_64-unix:" +
+                    "/opt/kron4ek-wine/lib/wine/x86_64-unix:" +
+                    "/opt/kron4ek-wine/lib64:/opt/kron4ek-wine/lib:" +
+                    "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib:/usr/lib",
+            "LANG" to request.locale,
+            "LC_ALL" to request.locale,
+            "PATH" to "/opt/kron4ek-wine/bin:/usr/local/bin:/usr/bin:/bin",
+            "BOX64_NOBANNER" to "1"
+        )
+
         val arguments = buildList {
             add("--kill-on-exit")
             add("--link2symlink")
@@ -199,26 +219,6 @@ object ProotWineCommandBuilder {
         val environment = linkedMapOf(
             "LD_LIBRARY_PATH" to hostLibraryDirectory.canonicalPath,
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
-        )
-
-        val guestEnvironment = linkedMapOf(
-            "HOME" to guestHomeDirectory,
-            "WINEPREFIX" to guestPrefixDirectory,
-            "WINEDEBUG" to "err+all",
-            "WAYLAND_DISPLAY" to request.display.socketName,
-            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
-            "TMPDIR" to guestTempDirectory,
-            "LD_LIBRARY_PATH" to
-                "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/lib:/usr/lib",
-            "BOX64_LD_LIBRARY_PATH" to
-                "/opt/kron4ek-wine/x86_64-unix:" +
-                    "/opt/kron4ek-wine/lib/wine/x86_64-unix:" +
-                    "/opt/kron4ek-wine/lib64:/opt/kron4ek-wine/lib:" +
-                    "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib:/usr/lib",
-            "LANG" to request.locale,
-            "LC_ALL" to request.locale,
-            "PATH" to "/opt/kron4ek-wine/bin:/usr/local/bin:/usr/bin:/bin",
-            "BOX64_NOBANNER" to "1"
         )
 
         return ProotWineCommand(

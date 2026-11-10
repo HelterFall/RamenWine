@@ -12,6 +12,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
+private const val OUTPUT_DRAIN_MILLIS = 500L
+private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
+
 /**
  * Starts a previously validated PRoot command without a shell.
  *
@@ -187,8 +190,6 @@ class ProotWineProcessSession internal constructor(
     companion object {
         private const val DEFAULT_GRACE_PERIOD_MILLIS = 1_500L
         private const val FORCE_STOP_WAIT_MILLIS = 1_500L
-        private const val OUTPUT_DRAIN_MILLIS = 500L
-        private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
         const val UNKNOWN_EXIT_CODE = -1
     }
 }

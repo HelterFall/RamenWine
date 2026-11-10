@@ -55,7 +55,7 @@ internal object RuntimeBinaryValidator {
     private fun readElfIdentity(file: File): ElfIdentity? = runCatching {
         RandomAccessFile(file, "r").use { input ->
             if (input.length() < ELF_HEADER_MIN_BYTES) return null
-            val header = ByteArray(ELF_HEADER_MIN_BYTES)
+            val header = ByteArray(ELF_HEADER_MIN_BYTES.toInt())
             input.readFully(header)
             if (
                 header[0] != 0x7f.toByte() ||
@@ -80,7 +80,7 @@ internal object RuntimeBinaryValidator {
     private fun isX86_64Pe32Plus(file: File): Boolean = runCatching {
         RandomAccessFile(file, "r").use { input ->
             if (input.length() < DOS_HEADER_BYTES) return false
-            val dosHeader = ByteArray(DOS_HEADER_BYTES)
+            val dosHeader = ByteArray(DOS_HEADER_BYTES.toInt())
             input.readFully(dosHeader)
             if (dosHeader[0] != 'M'.code.toByte() || dosHeader[1] != 'Z'.code.toByte()) {
                 return false
