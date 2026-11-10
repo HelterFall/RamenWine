@@ -131,9 +131,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
             WawonaNative.loadLibraries()
             WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
-            WawonaHostKeymap.apply()
             WawonaNative.nativeInit(cacheDirectory.absolutePath)
-            WawonaNative.nativeReloadHostKeymap()
             WawonaNative.nativeSetDisplayDensity(appContext.resources.displayMetrics.density)
 
             if (!WawonaNative.nativeIsCompositorReady()) {
@@ -155,7 +153,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 )
             )
         } catch (error: Exception) {
-            runCatching { WawonaNative.nativeDestroySurface(null) }
+            runCatching { WawonaNative.nativeDestroySurface() }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             if (error is DisplayBackendUnavailableException) throw error
@@ -164,7 +162,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 error
             )
         } catch (error: LinkageError) {
-            runCatching { WawonaNative.nativeDestroySurface(null) }
+            runCatching { WawonaNative.nativeDestroySurface() }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             throw DisplayBackendUnavailableException(
@@ -213,7 +211,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 return
             }
 
-            attachedSurface?.let { WawonaNative.nativeDestroySurface(it) }
+            attachedSurface?.let { WawonaNative.nativeDestroySurface() }
             WawonaNative.nativeSetDisplayDensity(density)
             WawonaNative.nativeSetSurface(surface)
             attachedSurface = surface
@@ -230,7 +228,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         override fun detachSurface(surface: Surface) {
             checkMainThread()
             if (stopped || attachedSurface !== surface) return
-            WawonaNative.nativeDestroySurface(surface)
+            WawonaNative.nativeDestroySurface()
             attachedSurface = null
         }
 
@@ -293,9 +291,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             if (stopped) return
             stopped = true
             try {
-                // Wawona's nativeDestroySurface(null) also releases a Vulkan
-                // instance created by nativeInit when no Surface was attached.
-                WawonaNative.nativeDestroySurface(attachedSurface)
+                // The pinned Wawona release also releases Vulkan resources when
+                // no Android Surface was attached.
+                WawonaNative.nativeDestroySurface()
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
             } finally {

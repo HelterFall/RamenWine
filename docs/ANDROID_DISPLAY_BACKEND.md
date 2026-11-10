@@ -95,9 +95,9 @@ The DisplayBackend API should describe capabilities and lifecycle, not expose up
 
 ## Integration sequence
 
-1. Build the arm64-v8a Android native output from the pinned revision using a reproducible toolchain; do not extract unidentified native libraries from a random APK.
-2. Identify and stage the minimal library/asset closure for compositor core, JNI, Android Surface presentation, Vulkan/ANGLE selection and XKB support.
-3. Load the native library closure in RamenWine and resolve any missing JNI or ELF dependencies.
+1. Download the checksum-pinned official v26.8.12 Android release asset from Wawona's GitHub Releases page.
+2. Verify the APK digest, ARM64 ELF headers and required JNI exports; stage the complete same-release native-library closure and the XKB/font/Weston assets.
+3. Package .so files through jniLibs with extraction enabled, and package support data plus provenance under assets/wawona.
 4. Start the compositor on the app cache path, wait for compositor-ready and verify that the Wayland socket is actually connectable before exposing a session.
 6. Attach a RamenWine SurfaceView, test create/change/destroy and Activity pause/resume, and ensure surface teardown does not stop a newer surface.
 7. Launch an original Wayland client smoke program, then a Wine Win32 GDI test program through the existing PRoot builder.

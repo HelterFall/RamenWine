@@ -9,16 +9,39 @@ import json
 import shutil
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-PINNED_REVISION = "dd745564ffe4e28628c9cf2525c620bcfd4ebed5"
+PINNED_RELEASE_TAG = "v26.8.12"
+PINNED_SOURCE_VERSION = "26.8.12"
+PINNED_REVISION = "75ffe2982bd7d99b29b7e743c4f70a9becf61f86"
+PINNED_APK_ASSET = "Wawona-26.8.12.apk"
+PINNED_APK_URL = "https://github.com/Wawona/Wawona/releases/download/v26.8.12/Wawona-26.8.12.apk"
+PINNED_APK_SHA256 = "f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570"
 REQUIRED_LIBRARIES = {
     "libEGL_angle.so",
     "libGLESv2_angle.so",
     "libwawona.so",
+}
+REQUIRED_JNI_SYMBOLS = {
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativePrepareShellEnvironment",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeInit",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeIsCompositorReady",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeSetSurface",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeDestroySurface",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeResizeSurface",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeSyncOutputSize",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeShutdown",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeSetDisplayDensity",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeTouchDown",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeTouchUp",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeTouchMotion",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeTouchCancel",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeTouchFrame",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeKeyEvent",
 }
 ASSET_ROOTS = ("xkb", "fonts", "weston")
 MAX_ENTRIES = 100_000
@@ -62,6 +85,39 @@ def check_arm64_elf(path: Path) -> None:
     machine = struct.unpack_from("<H", header, 18)[0]
     if machine != 183:
         raise ValueError(f"native library is not AArch64 (e_machine={machine}): {path.name}")
+
+
+def missing_required_jni_symbols(readelf_output: str) -> list[str]:
+    exported: set[str] = set()
+    for line in readelf_output.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        symbol = fields[-1].split("@", 1)[0]
+        if symbol in REQUIRED_JNI_SYMBOLS:
+            exported.add(symbol)
+    return sorted(REQUIRED_JNI_SYMBOLS - exported)
+
+
+def check_required_jni_symbols(library: Path) -> None:
+    try:
+        result = subprocess.run(
+            ["readelf", "--dyn-syms", "--wide", str(library)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise ValueError(f"could not inspect Wawona JNI exports: {error}") from error
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"readelf exited with {result.returncode}"
+        raise ValueError(f"could not inspect Wawona JNI exports: {detail}")
+    missing = missing_required_jni_symbols(result.stdout)
+    if missing:
+        raise ValueError(
+            "official Wawona library is missing JNI symbols required by RamenWine: "
+            + ", ".join(missing)
+        )
 
 
 def extract_member(
@@ -108,14 +164,18 @@ def main() -> int:
     try:
         if args.source_revision != PINNED_REVISION:
             raise ValueError("source revision does not match the pinned Wawona commit")
-        if not args.source_version or len(args.source_version) > 64:
-            raise ValueError("invalid Wawona source version")
+        if args.source_version != PINNED_SOURCE_VERSION:
+            raise ValueError("source version does not match the pinned official Wawona release")
         apk = args.apk.resolve(strict=True)
         app_main = args.app_main.resolve(strict=True)
         if not app_main.is_dir():
             raise ValueError("--app-main must be an existing Android app src/main directory")
 
         apk_hash = sha256_file(apk)
+        if apk_hash != PINNED_APK_SHA256:
+            raise ValueError(
+                "downloaded APK SHA-256 does not match the official Wawona release asset"
+            )
         native_manifest: dict[str, str] = {}
         asset_manifest: dict[str, str] = {}
         seen_paths: set[str] = set()
@@ -166,6 +226,7 @@ def main() -> int:
                                  ", ".join(sorted(missing_libs)))
             if not native_count:
                 raise ValueError("APK contains no arm64-v8a native libraries")
+            check_required_jni_symbols(staged_libs / "libwawona.so")
             for root_name in ASSET_ROOTS:
                 if not any(path.startswith(f"wawona/{root_name}/") for path in asset_manifest):
                     raise ValueError(f"APK is missing required {root_name} support assets")
@@ -173,8 +234,12 @@ def main() -> int:
             manifest = {
                 "schemaVersion": 1,
                 "sourceRepository": "https://github.com/Wawona/Wawona",
+                "sourceReleaseTag": PINNED_RELEASE_TAG,
                 "sourceRevision": args.source_revision,
                 "sourceVersion": args.source_version,
+                "sourceAsset": PINNED_APK_ASSET,
+                "sourceAssetUrl": PINNED_APK_URL,
+                "upstreamAssetSha256": PINNED_APK_SHA256,
                 "apkSha256": apk_hash,
                 "nativeLibraries": dict(sorted(native_manifest.items())),
                 "assets": dict(sorted(asset_manifest.items())),

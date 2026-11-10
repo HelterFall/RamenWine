@@ -7,11 +7,10 @@ import java.util.zip.ZipFile
 /**
  * Verifies the native-library closure inside the installed base APK.
  *
- * With modern non-legacy JNI packaging, Android may load uncompressed .so
- * entries directly from the APK rather than extracting them into
- * ApplicationInfo.nativeLibraryDir. Inspecting sourceDir avoids depending on
- * the extraction policy and verifies the exact bytes against the pinned
- * provenance manifest before System.loadLibrary is attempted.
+ * The app uses legacy JNI packaging so Wawona's dynamic helper-library
+ * loading can resolve extracted files from nativeLibraryDir. We still inspect
+ * sourceDir here to verify the exact bytes shipped in the APK against the
+ * pinned provenance manifest before System.loadLibrary is attempted.
  */
 internal object WawonaLibraryInventory {
     val requiredFileNames: List<String> = listOf(

@@ -14,7 +14,10 @@ internal data class WawonaPackageManifest(
 internal object WawonaPackageManifestReader {
     const val ASSET_PATH = "wawona/provenance.json"
     const val PINNED_SOURCE_REVISION =
-        "dd745564ffe4e28628c9cf2525c620bcfd4ebed5"
+        "75ffe2982bd7d99b29b7e743c4f70a9becf61f86"
+    const val PINNED_SOURCE_VERSION = "26.8.12"
+    const val PINNED_SOURCE_RELEASE_TAG = "v26.8.12"
+    const val PINNED_APK_SHA256 = "f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570"
 
     private val hashPattern = Regex("[0-9a-f]{64}")
     private val nativeLibraryNamePattern = Regex("lib[A-Za-z0-9_.+-]+\\.so(?:\\.[0-9]+)*")
@@ -36,15 +39,24 @@ internal object WawonaPackageManifestReader {
         require(revision == PINNED_SOURCE_REVISION) {
             "Wawona bundle source revision does not match the pinned adapter."
         }
+        require(root.getString("sourceReleaseTag") == PINNED_SOURCE_RELEASE_TAG) {
+            "Wawona release tag does not match the pinned adapter."
+        }
+        require(root.getString("sourceAsset") == "Wawona-26.8.12.apk") {
+            "Wawona source asset does not match the pinned adapter."
+        }
 
         val sourceVersion = root.getString("sourceVersion")
-        require(sourceVersion.isNotBlank() && sourceVersion.length <= 64) {
-            "Invalid Wawona source version."
+        require(sourceVersion == PINNED_SOURCE_VERSION) {
+            "Wawona source version does not match the pinned adapter."
         }
 
         val apkSha256 = root.getString("apkSha256")
-        require(hashPattern.matches(apkSha256)) {
-            "Invalid Wawona APK digest."
+        require(hashPattern.matches(apkSha256) && apkSha256 == PINNED_APK_SHA256) {
+            "Wawona APK digest does not match the pinned official release."
+        }
+        require(root.getString("upstreamAssetSha256") == PINNED_APK_SHA256) {
+            "Wawona upstream release asset digest is invalid."
         }
 
         val nativeObject = root.getJSONObject("nativeLibraries")

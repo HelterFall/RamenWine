@@ -28,7 +28,7 @@
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
 - Wawona native-library inventory that verifies every manifest-listed arm64-v8a shared object and SHA-256 directly inside the installed APK, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
 - A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
-- A pinned Wawona APK importer and Nix build script that stage all arm64-v8a native libraries plus XKB/font/Weston assets and generate a SHA-256 provenance manifest.
+- A checksum-pinned official Wawona v26.8.12 release downloader/importer that stages all arm64-v8a native libraries plus XKB/font/Weston assets and generates a SHA-256 provenance manifest; the importer also checks required JNI exports.
 - A Compose Surface host and initial per-game display/Play flow that only enables launch after the native Surface is attached and the compositor socket is ready.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
@@ -58,9 +58,9 @@ The builder requires a Wayland socket before it will create a command. It maps t
 
 ## Display backend decision
 
-Wawona is the selected upstream display/compositor. The upstream repository root is MIT-licensed and uses a shared Rust Wayland core with a Kotlin Android host, JNI and native Android presentation. The reviewed upstream snapshot is Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (Cargo package version 26.11.2).
+Wawona is the selected upstream display/compositor. The upstream repository root is MIT-licensed and uses a shared Rust Wayland core with a Kotlin Android host, JNI and native Android presentation. RamenWine pins the official Android release v26.8.12 (source commit 75ffe2982bd7d99b29b7e743c4f70a9becf61f86); the published APK SHA-256 is f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570.
 
-RamenWine now contains a narrow JNI wrapper, native-library inventory, pinned APK provenance reader, XKB/font/Weston asset installer, Android host-keymap bridge, WawonaDisplayBackend, SurfaceView/Compose host and GameSessionCoordinator. The source-to-bundle recipe is tools/build_wawona_android.sh; it builds the pinned upstream revision with Nix and stages native libraries/assets locally. Generated binary files are intentionally Git-ignored and are not present in a clean checkout until that script is run.
+RamenWine now contains a narrow JNI wrapper, native-library inventory, pinned APK provenance reader, XKB/font/Weston asset installer, Android host-keymap bridge, WawonaDisplayBackend, SurfaceView/Compose host and GameSessionCoordinator. The release-to-bundle recipe is tools/fetch_wawona_android.sh; it downloads the official Wawona v26.8.12 APK, verifies its published SHA-256, and stages native libraries/assets locally. It does not clone sources, install Nix or compile Wawona. Generated binary files are intentionally Git-ignored and are materialized by CI before Gradle.
 
 The upstream root MIT license does not make every transitive native dependency MIT. Before distribution, review the notices/licenses of every actual linked or bundled component.
 
@@ -71,7 +71,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - No pinned signing key or signed runtime release metadata exists. SHA-256 in a ZIP detects payload mismatch; it does not authenticate the publisher.
 - No real Windows EXE has been launched by RamenWine.
 - The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
-- The generated Wawona native libraries are intentionally not committed. The Android CI workflow is now configured to run tools/build_wawona_android.sh before Gradle and to verify that the APK contains wawona/provenance.json plus every native library named by that manifest. The APK shown in the 2026-11-10 device screenshots predates this CI change and is missing the bundle. Until the updated workflow completes successfully, do not assume a newly built APK contains Wawona; even a successful package check does not prove device-side compositor or game startup.
+- The generated Wawona native libraries are intentionally not committed. Android CI downloads the official v26.8.12 release APK, verifies the published asset digest, extracts the ARM64 JNI libraries and required support assets, then verifies the final APK contains the full SHA-256 inventory. No Wawona compilation or Nix setup occurs in CI. The APK shown in the 2026-11-10 device screenshots predates this packaging change and is missing the bundle; even a successful package check does not prove device-side compositor or game startup.
 - No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No production input, IME, audio, save-management, pause/resume or child-process lifecycle bridge exists.
@@ -93,7 +93,7 @@ The last explicitly documented successful Android build/test/lint run passed on 
 
 ## Next engineering steps
 
-1. Complete a green Android CI run with the pinned Wawona Nix build/import and APK payload verification enabled.
+1. Complete a green Android CI run with the official prebuilt Wawona release download/import and APK payload verification enabled.
 2. Install that exact APK on a physical ARM64 Android device and verify first-launch automatic runtime extraction plus Wawona native library loading.
 3. Verify compositor readiness and the actual app-private Wayland socket on-device.
 4. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.

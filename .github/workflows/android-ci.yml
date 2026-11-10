@@ -1,4 +1,4 @@
-name: Android CI · Prebuilt runtime APK
+name: Android CI · Prebuilt runtime and Wawona APK
 
 on:
   push:
@@ -15,10 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  prepare-runtime:
-    name: Prepare offline Wine runtime
+  android:
+    name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Test runtime packager and ELF auditor
+      - name: Test runtime packager, ELF auditor and Wawona release importer
         run: python -m unittest discover -s tools/tests -v
 
       - name: Enable ARM64 containers for Debian rootfs
@@ -55,7 +55,7 @@ jobs:
           cache-from: type=gha,scope=ramenwine-debian-arm64-rootfs
           cache-to: type=gha,scope=ramenwine-debian-arm64-rootfs,mode=max,ignore-error=true
 
-      - name: Assemble runtime from prebuilt PRoot, Box64 and Wine
+      - name: Assemble offline Wine, Box64 and PRoot runtime
         shell: bash
         run: |
           chmod +x tools/prepare_prebuilt_runtime.sh
@@ -70,52 +70,11 @@ jobs:
           unzip -t "$RUNTIME_ZIP"
           unzip -Z1 "$RUNTIME_ZIP" | grep -Fx "runtime-manifest.json"
 
-      - name: Upload offline runtime package
-        uses: actions/upload-artifact@v4
-        with:
-          name: ramenwine-offline-runtime
-          path: app/src/main/assets/runtime/ramenwine-runtime.zip
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  android:
-    name: Build Android APK with Wawona
-    needs: prepare-runtime
-    runs-on: macos-26
-    timeout-minutes: 180
-    env:
-      NIXPKGS_ALLOW_UNFREE: "1"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download offline Wine runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: ramenwine-offline-runtime
-          path: app/src/main/assets/runtime
-
-      # Match the pinned upstream Wawona Android producer: its Android
-      # cross-build is supported on macOS and uses relaxed Nix sandboxing.
-      - name: Install Determinate Nix
-        uses: DeterminateSystems/nix-installer-action@v22
-        with:
-          determinate: true
-          extra-conf: |
-            sandbox = relaxed
-            allow-import-from-derivation = true
-            max-jobs = auto
-            cores = 0
-
-      - name: Configure FlakeHub binary cache
-        uses: DeterminateSystems/flakehub-cache-action@v3
-
-      - name: Build and import pinned Wawona Android bundle
+      - name: Download and stage official prebuilt Wawona release
+        shell: bash
         run: |
-          chmod +x tools/build_wawona_android.sh
-          tools/build_wawona_android.sh
+          chmod +x tools/fetch_wawona_android.sh
+          tools/fetch_wawona_android.sh
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -137,38 +96,32 @@ jobs:
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
 
-      - name: Run runtime path regression tests
+      - name: Run Android runtime and Wawona adapter tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Build debug APK with prebuilt runtime and Wawona
+      - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Confirm APK contains the prebuilt runtime payload
+      - name: Verify embedded runtime and Wawona payload hashes
         shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           RUNTIME_ZIP="$RUNNER_TEMP/ramenwine-runtime.zip"
+          MANIFEST="app/src/main/assets/wawona/provenance.json"
 
           test -s "$APK"
-          unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
+          test -s "$MANIFEST"
 
+          unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
           unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
           test -s "$RUNTIME_ZIP"
           unzip -t "$RUNTIME_ZIP"
           unzip -Z1 "$RUNTIME_ZIP" | grep -Fx "runtime-manifest.json"
 
-      - name: Confirm APK contains the pinned Wawona display bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          MANIFEST="app/src/main/assets/wawona/provenance.json"
-
-          test -s "$MANIFEST"
           unzip -Z1 "$APK" | grep -Fx "assets/wawona/provenance.json"
-
           python3 - "$APK" "$MANIFEST" <<'PY'
+          import hashlib
           import json
           import sys
           import zipfile
@@ -177,23 +130,48 @@ jobs:
           with open(manifest_path, encoding="utf-8") as stream:
               manifest = json.load(stream)
 
+          expected_identity = {
+              "sourceReleaseTag": "v26.8.12",
+              "sourceRevision": "75ffe2982bd7d99b29b7e743c4f70a9becf61f86",
+              "sourceVersion": "26.8.12",
+              "sourceAsset": "Wawona-26.8.12.apk",
+              "upstreamAssetSha256": "f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570",
+              "apkSha256": "f9a3f82ac9c6e47701622f9f3d9be355cb549438e34c49760c7ac9b528dc5570",
+          }
+          for key, value in expected_identity.items():
+              if manifest.get(key) != value:
+                  raise SystemExit(f"Unexpected Wawona provenance field: {key}")
+
           libraries = manifest.get("nativeLibraries")
           if not isinstance(libraries, dict) or not libraries:
               raise SystemExit("Wawona provenance manifest has no native libraries")
 
+          required = {"libEGL_angle.so", "libGLESv2_angle.so", "libwawona.so"}
+          if not required.issubset(libraries):
+              raise SystemExit("Wawona manifest does not contain the required ANGLE/Wawona libraries")
+
           with zipfile.ZipFile(apk_path) as archive:
               names = set(archive.namelist())
-              required = {
-                  "lib/arm64-v8a/" + name
-                  for name in libraries
-              }
-              missing = sorted(required - names)
-              if missing:
-                  raise SystemExit(
-                      "APK is missing Wawona native libraries: " + ", ".join(missing)
-                  )
+              for name, expected_hash in libraries.items():
+                  entry_name = "lib/arm64-v8a/" + name
+                  if entry_name not in names:
+                      raise SystemExit(f"APK is missing {entry_name}")
+                  digest = hashlib.sha256()
+                  with archive.open(entry_name) as payload:
+                      for block in iter(lambda: payload.read(1024 * 1024), b""):
+                          digest.update(block)
+                  if digest.hexdigest() != expected_hash:
+                      raise SystemExit(f"APK native-library digest mismatch: {name}")
 
-          print(f"Verified Wawona provenance and {len(libraries)} native libraries in APK")
+              for root in ("xkb", "fonts", "weston"):
+                  prefix = f"assets/wawona/{root}/"
+                  if not any(name.startswith(prefix) for name in names):
+                      raise SystemExit(f"APK is missing Wawona support assets: {root}")
+
+          print(
+              f"Verified Wawona {manifest['sourceVersion']}: "
+              f"{len(libraries)} ARM64 libraries and {len(manifest['assets'])} support assets"
+          )
           PY
 
       - name: Upload debug APK
