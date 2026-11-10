@@ -75,40 +75,8 @@ RUN set -eux; \
       'zh_TW.UTF-8 UTF-8' \
       'ko_KR.UTF-8 UTF-8' > /etc/locale.gen; \
     locale-gen; \
-    locale -a | grep -qi '^ja_JP\.utf8    test -x /usr/bin/box64; \
-    test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# libcaca's optional OpenGL output plugin is shipped with the multimedia
-# dependency set; keep its ELF dependencies present so the rootfs audit can
-# validate every packaged plugin, not just the paths used by Wine.
-RUN set -eux; \
-    export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-      libglu1-mesa:amd64 \
-      libglut3.12:amd64; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-; \
-    locale -a | grep -qi '^zh_CN\.utf8    test -x /usr/bin/box64; \
-    test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# libcaca's optional OpenGL output plugin is shipped with the multimedia
-# dependency set; keep its ELF dependencies present so the rootfs audit can
-# validate every packaged plugin, not just the paths used by Wine.
-RUN set -eux; \
-    export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-      libglu1-mesa:amd64 \
-      libglut3.12:amd64; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-; \
+    locale -a | grep -qi 'ja_JP'; \
+    locale -a | grep -qi 'zh_CN'; \
     test -d /usr/share/fonts/opentype/noto; \
     test -x /usr/bin/env; \
     test -x /usr/bin/box64; \

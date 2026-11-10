@@ -48,7 +48,10 @@ class GameLibraryStore(context: Context) {
                             architecture = item.optString("architecture", "Unknown"),
                             totalBytes = item.optLong("totalBytes", 0L).coerceAtLeast(0L),
                             importedAtEpochMillis = item.optLong("importedAtEpochMillis", 0L)
-                                .coerceAtLeast(0L)
+                                .coerceAtLeast(0L),
+                            locale = item.optString("locale", GameLocaleProfile.DEFAULT_LOCALE)
+                                .takeIf { GameLocaleProfile.isSupported(it) }
+                                ?: GameLocaleProfile.DEFAULT_LOCALE
                         )
                     )
                 }
@@ -81,7 +84,10 @@ class GameLibraryStore(context: Context) {
                     directory != "games/$id" ||
                     safeExecutable == null ||
                     !safeExecutable.endsWith(".exe", ignoreCase = true) ||
-                    item.optString("title").length > MAX_TITLE_LENGTH
+                    item.optString("title").length > MAX_TITLE_LENGTH ||
+                    !GameLocaleProfile.isSupported(
+                        item.optString("locale", GameLocaleProfile.DEFAULT_LOCALE)
+                    )
                 ) {
                     return false
                 }
@@ -107,6 +113,9 @@ class GameLibraryStore(context: Context) {
         }
         require(game.title.length <= MAX_TITLE_LENGTH) {
             "Game title is too long."
+        }
+        require(GameLocaleProfile.isSupported(game.locale)) {
+            "Unsupported game locale profile."
         }
 
         val updatedGames = list().filterNot { it.id == game.id } + game
@@ -135,6 +144,7 @@ class GameLibraryStore(context: Context) {
                     .put("architecture", item.architecture)
                     .put("totalBytes", item.totalBytes)
                     .put("importedAtEpochMillis", item.importedAtEpochMillis)
+                    .put("locale", item.locale)
             )
         }
 
