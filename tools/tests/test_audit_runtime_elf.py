@@ -125,7 +125,7 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 issue["kind"] == "missing-library"
                 for issue in report["issues"]
             ))
-            self.assertEqual({"aarch64": 1}, report["architectures"])
+            self.assertEqual({"aarch64": 2}, report["architectures"])
 
 
 if __name__ == "__main__":
