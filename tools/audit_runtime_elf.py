@@ -212,11 +212,62 @@ def _architecture(machine: int) -> str:
     }.get(machine, f"unsupported-machine-{machine}")
 
 
+def _resolve_guest_path(root: Path, candidate: Path) -> Path | None:
+    """Resolve a path using Linux guest-root semantics without host-root escapes."""
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return None
+
+    resolved_parts: list[str] = []
+    pending = list(relative.parts)
+    visited_states: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
+
+    while pending:
+        component = pending.pop(0)
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            if not resolved_parts:
+                return None
+            resolved_parts.pop()
+            continue
+
+        resolved_parts.append(component)
+        link = root.joinpath(*resolved_parts)
+        if not link.is_symlink():
+            continue
+
+        state = (tuple(resolved_parts), tuple(pending))
+        if state in visited_states:
+            return None
+        visited_states.add(state)
+
+        try:
+            target = os.readlink(link)
+        except OSError:
+            return None
+
+        resolved_parts.pop()
+        if target.startswith("/"):
+            resolved_parts = []
+            pending = target.lstrip("/").split("/") + pending
+        else:
+            pending = target.split("/") + pending
+
+    resolved = root.joinpath(*resolved_parts)
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None
+    return resolved
+
+
 def _inside(root: Path, candidate: Path) -> Path | None:
     try:
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(root)
-        return resolved if resolved.is_file() else None
+        root_real = root.resolve(strict=True)
+        resolved = _resolve_guest_path(root_real, candidate)
+        return resolved if resolved is not None and resolved.is_file() else None
     except (OSError, ValueError, RuntimeError):
         return None
 

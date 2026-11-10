@@ -90,6 +90,38 @@ class RuntimeElfAuditTests(unittest.TestCase):
             )
 
 
+    def test_dependency_resolves_guest_absolute_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            executable = rootfs / "usr/bin/box64"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(dynamic_elf64(183, "libguest-test.so.1"))
+
+            library_dir = rootfs / "usr/lib/aarch64-linux-gnu"
+            library_dir.mkdir(parents=True)
+            real_library = library_dir / "libguest-test-real.so.1"
+            real_library.write_bytes(elf64(183))
+            guest_link = library_dir / "libguest-test.so.1"
+            guest_link.symlink_to("/usr/lib/aarch64-linux-gnu/libguest-test-real.so.1")
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertFalse(any(
+                issue["kind"] == "missing-library" and
+                issue["detail"] == "libguest-test.so.1"
+                for issue in report["issues"]
+            ))
+            self.assertEqual(real_library, audit_runtime_elf._inside(rootfs, guest_link))
+
+    def test_guest_path_resolver_rejects_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            link = rootfs / "usr/lib/libescape.so"
+            link.parent.mkdir(parents=True)
+            link.symlink_to("/../../outside/libescape.so")
+
+            self.assertIsNone(audit_runtime_elf._inside(rootfs, link))
+
     def test_rejects_library_with_wrong_elf_machine(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"
