@@ -122,6 +122,42 @@ class RuntimeElfAuditTests(unittest.TestCase):
 
             self.assertIsNone(audit_runtime_elf._inside(rootfs, link))
 
+    def test_resolves_wine_unix_modules_from_their_architecture_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            wine_unix = rootfs / "opt/kron4ek-wine/x86_64-unix"
+            wine_unix.mkdir(parents=True)
+            module = wine_unix / "mountmgr.so"
+            module.write_bytes(dynamic_elf64(62, "ntdll.so"))
+            ntdll = wine_unix / "ntdll.so"
+            ntdll.write_bytes(elf64(62))
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertFalse(any(
+                issue["kind"] == "missing-library" and
+                issue["detail"] == "ntdll.so"
+                for issue in report["issues"]
+            ))
+
+    def test_resolves_private_systemd_library_next_to_consumer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            systemd_dir = rootfs / "usr/lib/aarch64-linux-gnu/systemd"
+            systemd_dir.mkdir(parents=True)
+            core = systemd_dir / "libsystemd-core-257.so"
+            shared = systemd_dir / "libsystemd-shared-257.so"
+            core.write_bytes(dynamic_elf64(183, "libsystemd-shared-257.so"))
+            shared.write_bytes(elf64(183))
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertFalse(any(
+                issue["kind"] == "missing-library" and
+                issue["detail"] == "libsystemd-shared-257.so"
+                for issue in report["issues"]
+            ))
+
     def test_rejects_library_with_wrong_elf_machine(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"

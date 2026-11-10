@@ -311,6 +311,12 @@ def _library_directories(root: Path, info: ElfInfo) -> list[Path]:
     for value in info.rpath + info.runpath:
         directories.extend(_expanded_rpath_directories(root, origin, value, architecture))
 
+    # Box64's configured module search path includes Wine's x86_64-unix
+    # directory. Debian also keeps private DSOs beside consumers (for example
+    # systemd/libsystemd-core and libsystemd-shared). Treat co-located files as
+    # available, but still validate their ELF machine below.
+    directories.append(origin)
+
     triplet = "x86_64-linux-gnu" if architecture == "x86_64" else "aarch64-linux-gnu"
     for relative in (
         f"lib/{triplet}",

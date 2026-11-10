@@ -66,7 +66,7 @@ The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvip
 The two environments are deliberately separate:
 
 - **Android host / PRoot:** LD_LIBRARY_PATH points to backend/host/lib so the Android/Bionic PRoot executable can resolve its host libraries. PROOT_TMP_DIR points to the app-private PRoot temporary directory.
-- **Linux guest / Box64 / Wine:** HOME, WINEPREFIX, WINEDEBUG, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, LANG, LC_ALL and PATH are guest paths. LD_LIBRARY_PATH points to ARM64 glibc directories inside the rootfs; BOX64_LD_LIBRARY_PATH points to x86-64 library directories inside the rootfs. BOX64_NOBANNER is set to 1.
+- **Linux guest / Box64 / Wine:** HOME, WINEPREFIX, WINEDEBUG, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, LANG, LC_ALL and PATH are guest paths. LD_LIBRARY_PATH points to ARM64 glibc directories inside the rootfs; BOX64_LD_LIBRARY_PATH starts with the Wine build's actual `/opt/kron4ek-wine/x86_64-unix` module directory, then adds compatible Wine and system x86-64 library directories. BOX64_NOBANNER is set to 1.
 
 This split matters: Box64 uses BOX64_LD_LIBRARY_PATH to find x86-64 shared libraries, while ordinary LD_LIBRARY_PATH is used for the guest's native ARM64/glibc libraries. The Android host library path must not be reused as Wine's guest library path. See the [Box64 environment-variable reference](https://github.com/ptitSeb/box64/blob/main/docs/USAGE.md) and [PRoot-Distro guest-environment documentation](https://github.com/termux/proot-distro#guest-environment) for the corresponding environment model.
 

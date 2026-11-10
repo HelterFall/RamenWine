@@ -70,3 +70,15 @@ RUN set -eux; \
     test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# libcaca's optional OpenGL output plugin is shipped with the multimedia
+# dependency set; keep its ELF dependencies present so the rootfs audit can
+# validate every packaged plugin, not just the paths used by Wine.
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      libglu1-mesa:amd64 \
+      libglut3.12:amd64; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
