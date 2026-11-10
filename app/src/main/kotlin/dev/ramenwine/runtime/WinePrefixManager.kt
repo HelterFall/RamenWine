@@ -30,12 +30,6 @@ internal class WinePrefixManager(
         val presentRegistryCount = registryFiles.count { it.isFile && it.length() > 0L }
         val registryReady = presentRegistryCount == registryFiles.size
 
-        if (presentRegistryCount in 1 until registryFiles.size && !marker.isFile) {
-            throw IOException(
-                "The Wine prefix is partially initialized. It was left untouched to protect game data."
-            )
-        }
-
         if (registryReady && marker.isFile &&
             runCatching {
                 marker.readText(Charsets.UTF_8) == expectedMarker
@@ -44,7 +38,11 @@ internal class WinePrefixManager(
             return false
         }
 
-        val updateExistingPrefix = registryReady || marker.exists()
+        // An interrupted first-time wineboot may have created only some
+        // registry files. Treat that prefix as existing and let wineboot -u
+        // complete it instead of permanently blocking a retry. Existing
+        // files are not deleted or replaced by this recovery path.
+        val updateExistingPrefix = presentRegistryCount > 0 || marker.exists()
         val winebootCommand = ProotWineCommandBuilder.buildWinebootCommand(
             gameCommand = gameCommand,
             updateExistingPrefix = updateExistingPrefix

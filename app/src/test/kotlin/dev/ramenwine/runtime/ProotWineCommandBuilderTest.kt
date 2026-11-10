@@ -54,6 +54,13 @@ class ProotWineCommandBuilderTest {
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
             )
+            assertEquals(
+                "/games/" + fixture.gameId,
+                command.guestWorkingDirectory
+            )
+            assertTrue(
+                command.arguments.contains("--pwd=/games/" + fixture.gameId)
+            )
             assertTrue(
                 command.arguments.contains(
                     "--bind=" + fixture.gameDirectory.absolutePath + ":/games/" + fixture.gameId
@@ -81,6 +88,21 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.unsetEnvironment.contains("WINEDLLPATH"))
             assertTrue(command.unsetEnvironment.contains("BANNER_AUDIO_DIRECT_RELAY"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun runsNestedExecutableFromItsOwnDirectory() {
+        val fixture = Fixture(executableRelativePath = "bin/game.exe")
+        try {
+            val command = ProotWineCommandBuilder.build(fixture.request())
+            val expectedDirectory = "/games/" + fixture.gameId + "/bin"
+
+            assertEquals(expectedDirectory, command.guestWorkingDirectory)
+            assertTrue(command.arguments.contains("--pwd=" + expectedDirectory))
+            assertTrue(File(fixture.gameDirectory, "bin").isDirectory)
         } finally {
             fixture.cleanup()
         }

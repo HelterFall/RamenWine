@@ -30,6 +30,7 @@ data class ProotWineCommand(
     val guestEnvironment: Map<String, String>,
     val unsetEnvironment: Set<String>,
     val guestExecutablePath: String,
+    val guestWorkingDirectory: String,
     val guestRuntimeDirectory: String,
     val guestRootfsDirectory: File,
     val hostPrefixDirectory: File,
@@ -125,6 +126,17 @@ object ProotWineCommandBuilder {
             throw IOException("The selected game EXE is missing or unreadable.")
         }
 
+        val executableParentRelativePath = executableRelativePath.substringBeforeLast('/', "")
+        val gameWorkingDirectory = if (executableParentRelativePath.isEmpty()) {
+            gameDirectory
+        } else {
+            File(gameDirectory, executableParentRelativePath).canonicalFile
+        }
+        requireContained(gameDirectory, gameWorkingDirectory, "Game working directory")
+        if (!gameWorkingDirectory.isDirectory) {
+            throw IOException("The selected EXE working directory is missing or unreadable.")
+        }
+
         val prefixDirectory = ensurePrivateDirectory(
             File(filesRoot, "prefixes"),
             request.game.id
@@ -163,6 +175,11 @@ object ProotWineCommandBuilder {
         val guestTempDirectory = "/tmp"
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
         val guestExecutable = guestGameDirectory + "/" + executableRelativePath
+        val guestWorkingDirectory = if (executableParentRelativePath.isEmpty()) {
+            guestGameDirectory
+        } else {
+            guestGameDirectory + "/" + executableParentRelativePath
+        }
 
         // PRoot bind targets must exist in the guest filesystem. Create only
         // app-private directories inside this runtime's rootfs.
@@ -213,7 +230,7 @@ object ProotWineCommandBuilder {
             add("--bind=" + homeDirectory.absolutePath + ":" + guestHomeDirectory)
             add("--bind=" + tempDirectory.absolutePath + ":" + guestTempDirectory)
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
-            add("--pwd=" + guestGameDirectory)
+            add("--pwd=" + guestWorkingDirectory)
 
             // PRoot itself runs on Android and needs the Bionic host library
             // path. Do not reuse it for Box64/Wine inside the glibc rootfs.
@@ -245,6 +262,7 @@ object ProotWineCommandBuilder {
             guestEnvironment = guestEnvironment,
             unsetEnvironment = HOST_ONLY_ENVIRONMENT_KEYS,
             guestExecutablePath = guestExecutable,
+            guestWorkingDirectory = guestWorkingDirectory,
             guestRuntimeDirectory = guestRuntimeDirectory,
             guestRootfsDirectory = rootfs,
             hostPrefixDirectory = prefixDirectory,

@@ -1,6 +1,8 @@
 package dev.ramenwine.runtime
 
 import android.os.Build
+import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import java.io.IOException
 
@@ -82,7 +84,7 @@ internal class DirectAudioRelaySupervisor(
                         "See Android logcat tag DA-Relay for its diagnostic."
                 )
             }
-            if (socket.exists()) return DirectAudioRelaySession(process, socket)
+            if (isUnixSocket(socket)) return DirectAudioRelaySession(process, socket)
             try {
                 Thread.sleep(SOCKET_POLL_INTERVAL_MILLIS)
             } catch (interrupted: InterruptedException) {
@@ -100,6 +102,10 @@ internal class DirectAudioRelaySupervisor(
                 "See Android logcat tag DA-Relay for its diagnostic."
         )
     }
+
+    private fun isUnixSocket(socket: File): Boolean = runCatching {
+        OsConstants.S_ISSOCK(Os.lstat(socket.absolutePath).st_mode)
+    }.getOrDefault(false)
 
     private companion object {
         const val MIN_ANDROID_API = 28
