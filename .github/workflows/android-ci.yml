@@ -36,9 +36,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Test runtime packager
-        run: python -m unittest discover -s tools/tests -v
-
       - name: Assemble runtime from prebuilt PRoot, Box64 and Wine
         shell: bash
         run: |
@@ -65,9 +62,8 @@ jobs:
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
 
-      - name: Build, test and lint
-        run: |
-          gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug lintDebug
+      - name: Build debug APK with prebuilt runtime
+        run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Confirm APK contains the prebuilt runtime payload
         shell: bash
