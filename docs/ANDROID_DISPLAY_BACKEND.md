@@ -1,6 +1,6 @@
 # Android game display backend and Wawona integration
 
-**Status:** Wawona selected as the current upstream candidate; not yet integrated into RamenWine  
+**Status:** Kotlin/JNI adapter and SurfaceView host implemented; upstream native libraries not yet packaged  
 **Review snapshot:** 2026-11-10  
 **Pinned research revision:** Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (upstream Cargo package version 26.11.2)
 
@@ -8,7 +8,7 @@
 
 Display a Windows game's graphical output inside the RamenWine Android application, without exposing a Linux desktop shell to the user. The display backend must own an Android Surface, start a Wayland compositor in the same app UID, publish a local Wayland socket for Wine, route input/IME, and survive Activity and Surface lifecycle changes.
 
-Wine process execution and display are separate systems. ProotWineCommandBuilder already expects a Wayland socket; it deliberately refuses to construct a launch command until the socket exists. RamenWine currently has no component that creates that socket.
+Wine process execution and display are separate systems. ProotWineCommandBuilder already expects a Wayland socket; it deliberately refuses to construct a launch command until the socket exists. RamenWine now has a Wawona adapter that starts the in-process core and verifies the real socket, but the native libraries required for that path are not yet packaged.
 
 ## Selected candidate: Wawona
 
@@ -55,15 +55,16 @@ Implemented:
 - WawonaLibraryInventory checks for the three native library files used by the pinned upstream Android host: libEGL_angle.so, libGLESv2_angle.so and libwawona.so.
 - WawonaNative declares the minimal upstream JNI method set using the exact upstream package/class symbol name and loads libraries in the upstream order.
 - WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
-- WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and provides an explicit stop operation.
+- WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and releases Vulkan presentation resources even when no Surface was attached.
 - WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
+- GameSessionCoordinator starts PRoot/Wine only after the compositor socket and Android Surface are ready, then tears down display resources when the game process exits.
 - JVM tests cover the expected native-library inventory.
 
 Not implemented:
 - The Wawona native libraries are not packaged in the RamenWine APK, so availability() reports missing files and start() fails closed.
 - No reproducible Wawona Nix/NDK build output or pinned native binary archive is staged into jniLibs.
 - No pinned asset provenance manifest or extraction pipeline is bundled; WawonaAssetIntegrity is only a verifier and is not connected to an installer.
-- The Wawona adapter and SurfaceView are not yet called by a GameSession coordinator or the Compose UI.
+- The Wawona adapter, SurfaceView and GameSessionCoordinator are not yet called by the Compose UI.
 - No actual Wayland client or Wine process has connected to the socket through RamenWine.
 - Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
 - No physical-device Vulkan presentation or pause/resume test has been completed.

@@ -104,6 +104,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 )
             )
         } catch (error: Exception) {
+            runCatching { WawonaNative.nativeDestroySurface(null) }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             if (error is DisplayBackendUnavailableException) throw error
@@ -112,6 +113,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 error
             )
         } catch (error: LinkageError) {
+            runCatching { WawonaNative.nativeDestroySurface(null) }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             throw DisplayBackendUnavailableException(
@@ -160,7 +162,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 return
             }
 
-            attachedSurface?.let(WawonaNative::nativeDestroySurface)
+            attachedSurface?.let { WawonaNative.nativeDestroySurface(it) }
             WawonaNative.nativeSetDisplayDensity(density)
             WawonaNative.nativeSetSurface(surface)
             attachedSurface = surface
@@ -240,7 +242,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             if (stopped) return
             stopped = true
             try {
-                attachedSurface?.let(WawonaNative::nativeDestroySurface)
+                // Wawona's nativeDestroySurface(null) also releases a Vulkan
+                // instance created by nativeInit when no Surface was attached.
+                WawonaNative.nativeDestroySurface(attachedSurface)
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
             } finally {

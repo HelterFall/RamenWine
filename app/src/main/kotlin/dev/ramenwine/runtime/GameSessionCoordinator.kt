@@ -81,12 +81,12 @@ class GameSessionCoordinator(
                 command = command,
                 onOutput = onOutput,
                 onExit = { exitCode ->
-                    if (displaySession === display) {
-                        displaySession = null
-                        display.stop()
+                    try {
+                        closeDisplayIfCurrent(display)
+                    } finally {
+                        processSession = null
+                        onExit(exitCode)
                     }
-                    processSession = null
-                    onExit(exitCode)
                 }
             )
 
@@ -125,12 +125,9 @@ class GameSessionCoordinator(
         checkMainThread()
         if (displaySession !== expected) return
         displaySession = null
-        currentProcessClear()
-        expected.stop()
-    }
-
-    private fun currentProcessClear() {
         processSession = null
+        // Process exit must still be delivered if native teardown reports an error.
+        runCatching { expected.stop() }
     }
 
     private fun checkMainThread() {

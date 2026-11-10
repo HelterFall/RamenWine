@@ -233,6 +233,7 @@ The Android host scaffold currently includes:
 - a Python runtime package builder and automated Python/JVM tests;
 - a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
 - a Wawona display adapter, native JNI contract wrapper and Android SurfaceView host;
+- a game-session coordinator that gates PRoot/Wine launch on a live compositor and attached Surface;
 - Wawona support-asset integrity verification, library inventory, JNI adapter, SurfaceView host and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
@@ -240,4 +241,4 @@ The Android host scaffold currently includes:
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md) and [PRoot Wine Launch](docs/PROOT_WINE_LAUNCH.md).
 
-Wawona is the selected display/compositor research candidate. The upstream project is MIT-licensed at its root and uses a Rust Wayland core with an Android Kotlin/JNI host. The reviewed upstream snapshot is pinned in [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md). RamenWine now has a narrow Kotlin/JNI adapter and SurfaceView host for the pinned upstream API, but it does not bundle the upstream native libraries yet. The adapter therefore refuses to start until the expected native libraries are packaged.
+Wawona is the selected display/compositor research candidate. The upstream project is MIT-licensed at its root and uses a Rust Wayland core with an Android Kotlin/JNI host. The reviewed upstream snapshot is pinned in [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md). RamenWine now has a narrow Kotlin/JNI adapter, SurfaceView host and game-session coordinator for the pinned upstream API, but it does not bundle the upstream native libraries yet. The adapter therefore refuses to start until the expected native libraries are packaged; the coordinator cannot launch an EXE before the compositor and Surface are ready.
