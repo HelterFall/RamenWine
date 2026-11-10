@@ -76,8 +76,26 @@ class GameStorageManager(
      * directories that no longer have a matching library record. Call only
      * during app startup, before accepting a new import.
      */
-    fun cleanupAbandonedData(registeredGameIds: Set<String>): StorageCleanupResult {
+    fun cleanupAbandonedData(
+        registeredGameIds: Set<String>,
+        canPruneUnlistedData: Boolean = true
+    ): StorageCleanupResult {
         val gamesRoot = File(filesDirectory, "games")
+        if (!canPruneUnlistedData) {
+            // A missing/corrupt library index gives us no reliable ownership map.
+            // Only old import staging folders are safe to consider in this state.
+            val staging = cleanOrphans(
+                parent = gamesRoot,
+                retainedIds = emptySet(),
+                removeImportStaging = true,
+                removeOrphanIds = false
+            )
+            return StorageCleanupResult(
+                staging.removedEntries,
+                staging.reclaimedBytes
+            )
+        }
+
         val registered = registeredGameIds.filter { ID_PATTERN.matches(it) }.toSet()
         val validRegistered = registered.filterTo(mutableSetOf()) { id ->
             val path = File(gamesRoot, id).toPath()
@@ -138,7 +156,8 @@ class GameStorageManager(
     private fun cleanOrphans(
         parent: File,
         retainedIds: Set<String>,
-        removeImportStaging: Boolean
+        removeImportStaging: Boolean,
+        removeOrphanIds: Boolean = true
     ): CleanupDelta {
         if (!parent.isDirectory || Files.isSymbolicLink(parent.toPath())) {
             return CleanupDelta()
@@ -147,8 +166,10 @@ class GameStorageManager(
         var reclaimed = 0L
         val children = parent.listFiles() ?: return CleanupDelta()
         for (child in children) {
-            val isOrphanId = ID_PATTERN.matches(child.name) && child.name !in retainedIds
-            val isAbandonedImport = removeImportStaging &&
+            val isOldEnough = isOldEnoughForCleanup(child)
+            val isOrphanId = removeOrphanIds && isOldEnough &&
+                ID_PATTERN.matches(child.name) && child.name !in retainedIds
+            val isAbandonedImport = removeImportStaging && isOldEnough &&
                 STAGING_PATTERN.matches(child.name)
             if (isOrphanId || isAbandonedImport) {
                 reclaimed = saturatedAdd(reclaimed, directorySize(child))
@@ -228,6 +249,12 @@ class GameStorageManager(
         })
     }
 
+    private fun isOldEnoughForCleanup(entry: File): Boolean {
+        val lastModified = entry.lastModified()
+        return lastModified > 0L &&
+            System.currentTimeMillis() - lastModified >= ORPHAN_GRACE_PERIOD_MILLIS
+    }
+
     private fun existsWithoutFollowingLinks(entry: File): Boolean =
         Files.exists(entry.toPath(), LinkOption.NOFOLLOW_LINKS)
 
@@ -239,6 +266,7 @@ class GameStorageManager(
         val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
         val STAGING_PATTERN =
             Regex("\\.[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\\.importing")
+        const val ORPHAN_GRACE_PERIOD_MILLIS = 60L * 60L * 1000L
     }
 }
 

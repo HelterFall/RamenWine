@@ -95,6 +95,28 @@ class GameStorageManagerTest {
     }
 
     @Test
+    fun cleanupPreservesUnlistedGameDataWhenLibraryIndexIsNotTrustworthy() {
+        val root = Files.createTempDirectory("ramenwine-storage").toFile()
+        try {
+            val cache = File(root, "cache").apply { mkdirs() }
+            val orphanId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+            write(File(root, "games/$orphanId/game.exe"), 5)
+            write(File(root, "prefixes/$orphanId/save.dat"), 7)
+            val manager = GameStorageManager(root, cache) {}
+
+            manager.cleanupAbandonedData(
+                registeredGameIds = emptySet(),
+                canPruneUnlistedData = false
+            )
+
+            assertTrue(File(root, "games/$orphanId/game.exe").isFile)
+            assertTrue(File(root, "prefixes/$orphanId/save.dat").isFile)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun deletingGameDoesNotFollowSymlinksOutsideItsDirectory() {
         val root = Files.createTempDirectory("ramenwine-storage").toFile()
         val outside = Files.createTempDirectory("ramenwine-outside").toFile()

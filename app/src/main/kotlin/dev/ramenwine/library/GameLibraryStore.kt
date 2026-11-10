@@ -56,6 +56,42 @@ class GameLibraryStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * True only when the on-disk index is structurally sound enough to decide
+     * which UUID directories are genuinely unreferenced. A missing or corrupt
+     * index must never cause automatic deletion of all game data.
+     */
+    @Synchronized
+    fun hasTrustworthyIndex(): Boolean {
+        if (!libraryFile.isFile) return false
+        return try {
+            val root = JSONObject(libraryFile.readText(StandardCharsets.UTF_8))
+            if (root.optInt("schemaVersion", -1) != SCHEMA_VERSION) return false
+            val items = root.optJSONArray("games") ?: return false
+            val seenIds = HashSet<String>()
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: return false
+                val id = item.optString("id")
+                val directory = item.optString("relativeDirectory")
+                val executable = item.optString("executableRelativePath")
+                val safeExecutable = SafeGamePath.normalizeRelativePath(executable)
+                if (
+                    !id.matches(ID_PATTERN) ||
+                    !seenIds.add(id) ||
+                    directory != "games/$id" ||
+                    safeExecutable == null ||
+                    !safeExecutable.endsWith(".exe", ignoreCase = true) ||
+                    item.optString("title").length > MAX_TITLE_LENGTH
+                ) {
+                    return false
+                }
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     @Synchronized
     fun add(game: ImportedGame) {
         require(game.id.matches(ID_PATTERN)) { "Invalid game ID." }

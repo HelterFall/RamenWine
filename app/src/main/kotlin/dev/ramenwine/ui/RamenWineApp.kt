@@ -129,10 +129,17 @@ fun RamenWineApp() {
             withContext(Dispatchers.IO) {
                 releaseUnusedPersistedTreePermissions(context)
                 storageManager.cleanupAbandonedData(
-                    libraryStore.list().map { it.id }.toSet()
+                    registeredGameIds = libraryStore.list().map { it.id }.toSet(),
+                    canPruneUnlistedData = libraryStore.hasTrustworthyIndex()
                 )
             }
             refreshLibraryStorage()
+            if (!libraryStore.hasTrustworthyIndex() &&
+                java.io.File(context.filesDir, "games/library.json").exists()
+            ) {
+                storageError = "Индекс библиотеки повреждён или имеет неизвестную версию. " +
+                    "Неиспользуемые папки не удалялись автоматически, чтобы сохранить данные."
+            }
         } catch (error: Exception) {
             storageError = error.message ?: error.javaClass.simpleName
         }
