@@ -118,32 +118,34 @@ Graphics selection remains a separate router:
 
 ## Current implementation status
 
-Implemented in RamenWine:
-- `RuntimeBackendId` for the three package families;
-- a bounded `runtime.properties` inventory reader;
-- an offline ZIP installer with streaming extraction, SHA-256 payload verification, executable flags, safe symlink creation, staged activation and rollback;
-- a Python runtime package builder for manifest-backed ZIP archives;
+Implemented in RamenWine source:
+- `RuntimeBackendId` and a bounded inventory reader for the backend families;
+- an internal offline ZIP extractor with streaming SHA-256 verification, safe path/symlink handling, staging, atomic activation and rollback;
+- a Python runtime package builder and source-build scripts for Android PRoot, Ubuntu/glibc, Box64 and Wine;
 - PRoot/Box64/Wine argument-vector construction and a host-tested Wine-prefix initializer;
-- UI display of backend states;
-- JVM tests for inventory states, path containment, command construction and process lifecycle.
+- ARM64/x86-64 ELF and i386/AMD64 PE architecture/dependency validation;
+- a Wawona Android display adapter and a pinned native payload already included in a successfully packaged debug APK;
+- an Android game surface and touch-to-mouse input wiring.
 
-Not implemented yet:
-- no Wine, FEX, Box64 or PRoot runtime package is bundled;
-- no Linux rootfs is built or installed;
-- runtime metadata is not signed, so SHA-256 does not authenticate the publisher;
-- no real Windows EXE launch has been validated;
-- no graphics backend is integrated;
-- no physical-device performance/compatibility results exist.
+Not ready yet:
+- the complete PRoot + Ubuntu ARM64 + Box64 + Wine runtime has not been assembled, installed or booted on the phone;
+- the in-app download/provisioning manager and signed runtime release catalog do not exist yet;
+- no real Windows EXE or visual novel has launched successfully;
+- the Wawona asset-provenance fix has passed source-level checks, but the fixed APK still needs a physical-device rendering retest.
 
+The manual runtime ZIP picker has been removed from the Android UI. The installer remains an internal implementation primitive; it is not a player feature.
 ## Rule
 
 The current target is one ARM64 glibc rootfs + Android PRoot + ARM64 Linux Box64 + x86-64 Wine Wayland path. Bionic/FEX remains deferred. Reconsider the backend only if the selected path is blocked by a demonstrated technical limitation or a measured incompatibility with the chosen visual-novel fixture.
 
 
-## Offline runtime package format
+## Internal runtime archive format (not a player action)
 
-The Android app accepts a locally selected ZIP package. It does not fetch runtime
-binaries from the network during installation.
+This ZIP layout is an internal build/transport format. It is not a player-facing file. The normal Android UI must never ask the player to select, browse for or import a runtime ZIP.
+
+The target flow is app-owned provisioning: when a game needs the shared runtime and none is installed, RamenWine fetches a versioned artifact from its pinned distribution channel, verifies signed release metadata and package/file hashes, stages and validates the contents, and atomically activates the new version. The player sees progress and retry/error messages, not an archive picker. Once installed, the shared runtime is reusable by every game and works offline.
+
+The Android app does not yet implement that network provisioner or signed release channel. Until then the Play button remains unavailable when the runtime is missing. The internal installer can only consume an archive supplied by controlled development code.
 
 Expected archive layout:
 
@@ -236,11 +238,31 @@ and the backup is restored.
 
 **Security boundary:** SHA-256 checks detect a damaged or inconsistent file
 payload, but a manifest stored inside the same ZIP does not authenticate who
-created the package. Until RamenWine adds a pinned signing key and signed
-release metadata, users should install runtime ZIPs only from a source they
-trust. A future release pipeline must sign package metadata (for example with
-Ed25519) and the app must verify the signature before extraction.
+created the package. The planned RamenWine release channel must publish an
+immutable versioned archive and an Ed25519-signed index/manifest. The Android
+app must verify that signature with a public key pinned in the APK before it
+trusts the package digest or extracts any payload. The app must not rely on a
+mutable `latest` URL or on hashes supplied only by the same untrusted ZIP.
 
 The installer limits ZIP entries, manifest size, uncompressed bytes, and
 available disk reserve. It does not execute any runtime or game binary during
 installation. Presence of installed files is still not proof that Wine starts.
+
+## Compatibility scope: broad Windows API, not an engine allow-list
+
+The selected Wine build is the generic Windows compatibility layer. RamenWine
+must not compile a small API subset tied to named visual-novel engines, and it
+must not reject an EXE only because its engine is unknown. Keep the Wine
+components that applications may call directly or indirectly (including COM,
+cryptography, networking, installers, multimedia, fonts, input and system
+libraries) unless a concrete dependency analysis proves they are not part of
+the supported runtime contract.
+
+The product does not need a Windows desktop shell. Removing Explorer, Start
+menu, taskbar, terminal, window manager and unrelated Linux desktop programs is
+a separate decision from removing Wine API support. Optional rendering
+translators such as DXVK/VKD3D or legacy compatibility libraries can be
+versioned app-managed add-ons; the generic Wine runtime remains broad.
+
+See [Runtime Delivery](RUNTIME_DELIVERY.md) for the player-facing contract and
+the planned automatic in-app provisioning lifecycle.
