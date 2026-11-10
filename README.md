@@ -233,7 +233,7 @@ The Android host scaffold currently includes:
 - a Python runtime package builder and automated Python/JVM tests;
 - a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
 - a Wawona display adapter, native JNI contract wrapper, XKB/font/Weston asset bootstrap, Android SurfaceView and Compose host;
-- a game-session coordinator and initial per-game Compose flow that gate PRoot/Wine launch on a live compositor and attached Surface;
+- a game-session coordinator and per-game Compose flow that gate PRoot/Wine launch on a live compositor and attached Surface;
 - Wawona support-asset integrity verification, full native-library inventory, pinned APK import/build scripts, JNI bootstrap, SurfaceView host and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 

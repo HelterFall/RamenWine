@@ -71,6 +71,7 @@ Not implemented:
 - No reproducible Wawona Nix/NDK build output has been staged into jniLibs for the current checkout.
 - The pinned APK importer and runtime support-asset installer now exist; the generated provenance manifest and local assets are ignored by Git and must be created on the build host.
 - The Compose UI now offers a per-game prepare-display and launch flow, and shows Wawona/runtime errors rather than simulating a successful launch.
+- WawonaSurfaceHost reports Android Surface attach/detach transitions back to the Compose state; the launch button remains disabled until the Surface is attached.
 - No actual Wayland client or Wine process has connected to the socket through RamenWine; the Compose flow and JNI/display lifecycle have not been exercised on a device.
 - Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
 - No physical-device Vulkan presentation or pause/resume test has been completed.

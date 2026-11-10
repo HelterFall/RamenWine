@@ -35,6 +35,9 @@
 5. Watch copied-file and byte progress.
 6. Save game metadata in the local library index.
 7. Optionally install a runtime ZIP selected from local device storage.
+8. Choose “Open game display” for an imported game; the UI checks the pinned Wawona package and starts the compositor.
+9. Wait for the real Android Surface to attach; the launch button stays disabled until attachment is reported.
+10. Request the Windows EXE launch; the coordinator validates runtime paths and requires the active Wayland socket before starting PRoot/Wine.
 
 The UI now exposes an initial per-game flow: prepare the Wawona display, attach its Surface, then request a Windows EXE launch. The flow fails closed when the native Wawona package or a compatible PRoot/Wine runtime is absent. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
 
@@ -43,7 +46,7 @@ The UI now exposes an initial per-game flow: prepare the Wawona display, attach 
 The current glibc/PRoot path has a command builder and process supervisor, coordinated by GameSessionCoordinator:
 
 - ProotWineCommandBuilder checks the imported game ID and EXE path, validates the runtime rootfs and host PRoot executable, requires Box64 and the unified Wine 11 loader at rootfs/usr/bin/wine, prepares bind mount targets and constructs the environment/argument vector.
-- ProotWineProcessSupervisor starts that command without a shell, streams diagnostics and waits for the PRoot process. It is not yet connected to the Compose UI or a GameSession coordinator.
+- ProotWineProcessSupervisor starts that command without a shell, streams diagnostics and waits for the PRoot process. GameSessionCoordinator connects it to the Compose per-game launch flow and owns display/process teardown.
 
 The builder requires a Wayland socket before it will create a command. It maps the supplied host runtime directory to /run/user/<uid> inside the rootfs. Per-game prefix/home/temp directories are prepared, but first-time Wine prefix initialization and child-process-tree supervision have not been validated on a device.
 
@@ -80,7 +83,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - Compose BOM: 2026.04.01
 - JDK: 17
 
-The last explicitly documented successful Android build/test/lint run passed on commit 500374b9311e938a7931b48e456daeeb5def3f88. The later PRoot/Wine and Wawona changes must not be treated as device-validated merely because JVM or packaging tests exist.
+The last explicitly documented successful Android build/test/lint run passed on commit 500374b9311e938a7931b48e456daeeb5def3f88. The later PRoot/Wine, Wawona and Compose launch-flow changes have not been run through Gradle/CI in this task or verified on a physical Android device; do not treat them as device-validated.
 
 ## Next engineering steps
 

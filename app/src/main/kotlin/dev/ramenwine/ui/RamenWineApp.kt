@@ -426,7 +426,86 @@ fun RamenWineApp() {
                 }
 
                 if (importedGames.isNotEmpty()) {
-                    LibraryCard(games = importedGames)
+                    LibraryCard(
+                        games = importedGames,
+                        canPrepareGame = activeDisplaySession == null &&
+                            activeGameSession?.isRunning != true && !preparingGame,
+                        preparingGame = preparingGame,
+                        onPrepareGame = ::prepareGame
+                    )
+                }
+
+                gameLaunchError?.let {
+                    Text(
+                        text = "Не удалось открыть игру: $it",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                gameLaunchNotice?.let {
+                    Text(text = it, color = MaterialTheme.colorScheme.secondary)
+                }
+
+                val currentDisplay = activeDisplaySession
+                val currentGame = selectedDisplayGame
+                if (currentDisplay != null && currentGame != null) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(currentGame.title, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (surfaceReady) {
+                                    "Wawona Surface подключён · Wayland socket готов"
+                                } else {
+                                    "Ожидаю Android Surface…"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            WawonaSurfaceHost(
+                                session = currentDisplay,
+                                modifier = Modifier.fillMaxWidth().height(320.dp),
+                                onSurfaceStateChanged = { attached -> surfaceReady = attached }
+                            )
+                            if (activeGameSession == null) {
+                                Button(
+                                    onClick = ::launchSelectedGame,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = surfaceReady && !preparingGame
+                                ) {
+                                    Text(
+                                        if (preparingGame) "Подготовка…"
+                                        else "Запустить Windows EXE"
+                                    )
+                                }
+                            } else {
+                                Button(
+                                    onClick = ::stopSelectedGame,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !preparingGame
+                                ) {
+                                    Text("Остановить игру")
+                                }
+                            }
+                            Button(
+                                onClick = ::stopSelectedGame,
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !preparingGame
+                            ) {
+                                Text("Закрыть игровой экран")
+                            }
+                            if (processOutput.isNotBlank()) {
+                                HorizontalDivider()
+                                Text("Вывод runtime", fontWeight = FontWeight.Medium)
+                                Text(
+                                    text = processOutput.takeLast(8_000),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 16
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Text(
