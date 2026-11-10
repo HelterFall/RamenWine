@@ -19,19 +19,22 @@ class WawonaLibraryInventoryTest {
     }
 
     @Test
-    fun acceptsOnlyNonEmptyNativeLibraryFiles() {
+    fun checksTheWholeLibraryClosureRecordedInThePackageManifest() {
         val directory = Files.createTempDirectory("ramenwine-wawona-libs").toFile()
         try {
-            WawonaLibraryInventory.requiredFileNames.forEach { name ->
-                File(directory, name).writeBytes(byteArrayOf(1))
-            }
+            val hashes = linkedMapOf(
+                "libEGL_angle.so" to "0".repeat(64),
+                "libGLESv2_angle.so" to "0".repeat(64),
+                "libwawona.so" to "0".repeat(64),
+                "libwayland-server.so" to "0".repeat(64)
+            )
+            hashes.keys.forEach { File(directory, it).writeBytes(byteArrayOf(1)) }
 
-            assertTrue(WawonaLibraryInventory.missingFiles(directory).isEmpty())
-
-            File(directory, "libwawona.so").writeBytes(byteArrayOf())
+            assertTrue(WawonaLibraryInventory.missingFiles(directory, hashes).isEmpty())
+            File(directory, "libwayland-server.so").delete()
             assertEquals(
-                listOf("libwawona.so"),
-                WawonaLibraryInventory.missingFiles(directory)
+                listOf("libwayland-server.so"),
+                WawonaLibraryInventory.missingFiles(directory, hashes)
             )
         } finally {
             directory.deleteRecursively()

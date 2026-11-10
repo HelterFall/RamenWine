@@ -29,17 +29,24 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
     override val id: String = "wawona"
 
     override fun availability(): DisplayBackendAvailability {
+        val manifest = runCatching {
+            WawonaPackageManifestReader.read(appContext)
+        }.getOrNull()
         val libraryDirectory = File(appContext.applicationInfo.nativeLibraryDir)
-        val missing = WawonaLibraryInventory.missingFiles(libraryDirectory)
-        return if (missing.isEmpty()) {
+        val missing = if (manifest == null) {
+            WawonaLibraryInventory.requiredFileNames + WawonaPackageManifestReader.ASSET_PATH
+        } else {
+            WawonaLibraryInventory.missingFiles(libraryDirectory, manifest.nativeLibraries)
+        }
+        return if (missing.isEmpty() && manifest != null) {
             DisplayBackendAvailability(
                 available = true,
-                detail = "Wawona native libraries are present; runtime loading is still required."
+                detail = "Pinned Wawona native libraries and support assets are staged; runtime loading is still required."
             )
         } else {
             DisplayBackendAvailability(
                 available = false,
-                detail = "Wawona native libraries are not packaged in this APK.",
+                detail = "Pinned Wawona native bundle is incomplete or not packaged in this APK.",
                 missingLibraries = missing
             )
         }
@@ -82,8 +89,14 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 )
             }
 
+            val manifest = WawonaPackageManifestReader.read(appContext)
+            WawonaSupportAssetInstaller.install(appContext, manifest)
             WawonaNative.loadLibraries()
+            WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
+            WawonaHostKeymap.apply()
             WawonaNative.nativeInit(cacheDirectory.absolutePath)
+            WawonaNative.nativeReloadHostKeymap()
+            WawonaNative.nativeSetDisplayDensity(appContext.resources.displayMetrics.density)
 
             if (!WawonaNative.nativeIsCompositorReady()) {
                 throw DisplayBackendUnavailableException(

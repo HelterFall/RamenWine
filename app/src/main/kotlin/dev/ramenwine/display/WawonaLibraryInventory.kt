@@ -3,10 +3,8 @@ package dev.ramenwine.display
 import java.io.File
 
 /**
- * Native libraries loaded by Wawona's Android JNI host.
- *
- * Names match WawonaNative.loadLibraries() in the pinned upstream revision.
- * This is an inventory check, not proof that the ELF dependencies can load.
+ * Checks the complete native library closure recorded by the pinned Wawona APK.
+ * Presence is only a packaging check; the Android linker must still load it.
  */
 internal object WawonaLibraryInventory {
     val requiredFileNames: List<String> = listOf(
@@ -16,8 +14,28 @@ internal object WawonaLibraryInventory {
     )
 
     fun missingFiles(nativeLibraryDirectory: File): List<String> =
-        requiredFileNames.filterNot { name ->
+        missingFiles(nativeLibraryDirectory, requiredFileNames.toSet())
+
+    fun missingFiles(
+        nativeLibraryDirectory: File,
+        expectedLibraries: Map<String, String>
+    ): List<String> {
+        val missing = linkedSetOf<String>()
+        requiredFileNames.filterNotTo(missing) { it in expectedLibraries }
+
+        for (name in expectedLibraries.keys) {
+            if (!SAFE_LIBRARY_NAME.matches(name)) {
+                missing += name
+                continue
+            }
             val file = File(nativeLibraryDirectory, name)
-            file.isFile && file.length() > 0L
+            if (!file.isFile || file.length() <= 0L) {
+                missing += name
+            }
         }
+        return missing.toList().sorted()
+    }
+
+    private val SAFE_LIBRARY_NAME =
+        Regex("lib[A-Za-z0-9_.+-]+\\.so(?:\\.[0-9]+)*")
 }

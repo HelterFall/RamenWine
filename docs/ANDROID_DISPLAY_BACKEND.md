@@ -1,6 +1,6 @@
 # Android game display backend and Wawona integration
 
-**Status:** Kotlin/JNI adapter and SurfaceView host implemented; upstream native libraries not yet packaged  
+**Status:** Kotlin/JNI adapter, support-asset bootstrap and SurfaceView host implemented; local native bundle build recipe added  
 **Review snapshot:** 2026-11-10  
 **Pinned research revision:** Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (upstream Cargo package version 26.11.2)
 
@@ -54,6 +54,10 @@ Implemented:
 - WawonaAssetIntegrity maps selected APK-relative xkb/font/Weston asset paths into an app-private support tree and checks their SHA-256 hashes.
 - WawonaLibraryInventory checks for the three native library files used by the pinned upstream Android host: libEGL_angle.so, libGLESv2_angle.so and libwawona.so.
 - WawonaNative declares the minimal upstream JNI method set using the exact upstream package/class symbol name and loads libraries in the upstream order.
+- WawonaPackageManifestReader validates the pinned source revision and complete native-library/asset inventories.
+- WawonaSupportAssetInstaller extracts XKB, fonts and Weston data to filesDir/wawona-rootfs with size limits, staging/rollback and SHA-256 verification.
+- WawonaHostKeymap applies Android KeyCharacterMap levels to the Wawona seat.
+- WawonaDisplayBackend follows upstream bootstrap order: prepare shell environment, apply host keymap, initialize the core, reload the keymap, set density, then check compositor readiness and the Wayland socket.
 - WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
 - WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and releases Vulkan presentation resources even when no Surface was attached.
 - WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
@@ -61,9 +65,9 @@ Implemented:
 - JVM tests cover the expected native-library inventory.
 
 Not implemented:
-- The Wawona native libraries are not packaged in the RamenWine APK, so availability() reports missing files and start() fails closed.
-- No reproducible Wawona Nix/NDK build output or pinned native binary archive is staged into jniLibs.
-- No pinned asset provenance manifest or extraction pipeline is bundled; WawonaAssetIntegrity is only a verifier and is not connected to an installer.
+- The generated Wawona native bundle is not currently present in this repository checkout, so availability() reports missing libraries/manifest and start() fails closed until the staging script has been run.
+- No reproducible Wawona Nix/NDK build output has been staged into jniLibs for the current checkout.
+- The pinned APK importer and runtime support-asset installer now exist; the generated provenance manifest and local assets are ignored by Git and must be created on the build host.
 - The Wawona adapter, SurfaceView and GameSessionCoordinator are not yet called by the Compose UI.
 - No actual Wayland client or Wine process has connected to the socket through RamenWine.
 - Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
@@ -106,3 +110,21 @@ The DisplayBackend API should describe capabilities and lifecycle, not expose up
 - The same test is reproducible on the documented Android version, SoC, GPU and driver.
 
 Passing an asset hash test, loading a shared library, seeing a compositor-ready flag or building an APK is not by itself proof that Wine windows render correctly.
+
+## Building and staging the pinned native bundle
+
+The native libraries are intentionally not committed as opaque binaries. From the RamenWine checkout, run:
+
+```bash
+tools/build_wawona_android.sh
+```
+
+The script clones Wawona at revision `dd745564ffe4e28628c9cf2525c620bcfd4ebed5`, builds `.#wawona-android` using the upstream Nix flake, then runs `tools/import_wawona_android.py` against the resulting APK.
+
+The importer extracts every arm64-v8a `.so`/versioned shared object plus the XKB, font and Weston support assets. It rejects non-AArch64 ELF files, path traversal, symlink entries, duplicate names and oversized payloads, then creates `assets/wawona/provenance.json` with the source revision and SHA-256 inventory.
+
+Generated files are local and Git-ignored:
+- `app/src/main/jniLibs/arm64-v8a/`
+- `app/src/main/assets/wawona/`
+
+The Android adapter checks the full library inventory, verifies the embedded source revision, installs support assets into app-private storage and follows the upstream native bootstrap order. This is packaging preparation only: it does not prove the native libraries load or that a Wine window renders on a device.

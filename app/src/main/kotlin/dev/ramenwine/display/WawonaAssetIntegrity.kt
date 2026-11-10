@@ -28,7 +28,7 @@ internal object WawonaAssetIntegrity {
 
         for ((assetPath, expectedHash) in expectedHashes) {
             if (!SHA256_PATTERN.matches(expectedHash)) return false
-            val relativePath = mapAssetPath(assetPath) ?: return false
+            val relativePath = destinationRelativePath(assetPath) ?: return false
             val file = runCatching {
                 File(canonicalRoot, relativePath).canonicalFile
             }.getOrNull() ?: return false
@@ -54,7 +54,7 @@ internal object WawonaAssetIntegrity {
         return true
     }
 
-    private fun mapAssetPath(assetPath: String): String? {
+    internal fun destinationRelativePath(assetPath: String): String? {
         if (
             assetPath.isBlank() ||
             assetPath.contains('\\') ||

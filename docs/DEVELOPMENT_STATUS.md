@@ -21,6 +21,8 @@
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
 - Wawona native-library inventory, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
+- A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
+- A pinned Wawona APK importer and Nix build script that stage all arm64-v8a native libraries plus XKB/font/Weston assets and generate a SHA-256 provenance manifest.
 - GameSessionCoordinator to order compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
@@ -82,7 +84,7 @@ The last explicitly documented successful Android build/test/lint run passed on 
 
 ## Next engineering steps
 
-1. Build and stage the pinned Wawona Android native libraries for arm64-v8a, including the exact ANGLE/JNI dependency closure.
+1. Run tools/build_wawona_android.sh on a Nix-capable build host to build and stage the pinned Wawona Android native libraries and support assets.
 2. Verify native loading, compositor readiness and the actual app-private Wayland socket on an Android device.
 3. Add a GameSession coordinator that owns the Wawona display session and PRoot/Wine process lifecycle.
 4. Connect the Wawona socket endpoint to ProotWineCommandBuilder and start an original Win32 GDI test application only after both compositor and surface are ready.
