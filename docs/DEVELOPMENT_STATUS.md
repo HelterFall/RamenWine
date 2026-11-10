@@ -68,9 +68,9 @@ The user's Android 16 / arm64-v8a device test showed:
 - The app can select the game folder, scan 406 files, detect two EXE candidates and select `SaDisticBloOD.exe` as an x86 candidate.
 - The game folder was imported into the app library.
 - **Играть** remained disabled because the glibc/PRoot/Box64/Wine runtime was not installed.
-- The Wawona diagnostic received a valid Android Surface, but the compositor stopped during asset-provenance validation, before the test window could render.
+- The first Wawona diagnostic received a valid Android Surface, but the compositor stopped during asset-provenance validation, before the test window could render. The provenance mismatch is fixed in source and included in the replacement APK; the phone-side render result remains unverified.
 
-The Wawona failure was traced to a mismatch between the actual packaged asset inventory and the Android allow-list: the pinned APK includes `wawona/vulkan/icd.d/vk_swiftshader_icd.json`, while the installer only accepted XKB, fonts and Weston. The source fix now explicitly accepts that single Vulkan ICD subtree, maps it into app-private storage, copies it and includes it in SHA-256 verification. The new source passed focused CI. **A new APK containing this fix has not yet been built and retested on the phone.**
+The Wawona failure was traced to a mismatch between the actual packaged asset inventory and the Android allow-list: the pinned APK includes `wawona/vulkan/icd.d/vk_swiftshader_icd.json`, while the installer only accepted XKB, fonts and Weston. The source fix now explicitly accepts that single Vulkan ICD subtree, maps it into app-private storage, copies it and includes it in SHA-256 verification. A replacement debug APK was successfully assembled and verified in [Actions run #42733393190](https://github.com/HelterFall/RamenWine/actions/runs/42733393190), commit `0c9c5699eab460c2b14a30acd3d9d50875c0cc15`. The APK is 107,750,261 bytes (about 102.7 MiB), SHA-256 `6ea3be1926ce3028b54dd5b9a5b82df9f3b32d835bad70f392584b6dbc9d24dc`. Inspection confirms the provenance includes the Vulkan ICD file and the Android package contains Wawona/ANGLE/Wayland, but no PRoot/Box64/Wine guest runtime. **The physical-device SHM retest is still pending.**
 
 The earlier message `Unexpected runtime ZIP entry` appeared because the selected archive was not a RamenWine runtime package (which must contain `runtime-manifest.json` and `payload/...`). Players must not be asked to repeat that action. The debug runtime ZIP picker has now been removed from source; the already-installed older APK still contains the old UI until a replacement APK is built.
 
@@ -95,7 +95,7 @@ Bionic ARM64EC/FEX and Bionic x86-64/Box64 remain deferred experiments; do not b
 - No in-app network `RuntimeProvisioner`, signed release index or app-managed runtime update channel exists yet.
 - The offline ZIP installer is only an internal extraction/activation primitive; it does not fetch the package.
 - The Play action is still gated by local runtime file presence; there is no automatic download/installation path yet.
-- The Vulkan asset fix has passed source-level tests but has not yet been installed and confirmed on the physical phone.
+- The Vulkan asset fix passed source-level checks and is included in the successfully packaged replacement APK; it has not yet been retested on the physical phone.
 - The Wawona SHM test window has not yet been observed rendering on the phone.
 - Wine has not run a real `wineboot.exe --init` on the device.
 - No original Win32 GUI test or visual novel has launched successfully on an ARM64 Android device.
