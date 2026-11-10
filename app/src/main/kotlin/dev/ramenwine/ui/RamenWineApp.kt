@@ -337,8 +337,8 @@ fun RamenWineApp() {
     fun stopSelectedGame() {
         scope.launch {
             preparingGame = true
+            val running = activeGameSession
             try {
-                val running = activeGameSession
                 if (running != null) {
                     running.stop()
                 } else {
@@ -347,10 +347,14 @@ fun RamenWineApp() {
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
             } finally {
-                activeGameSession = null
-                activeDisplaySession = null
-                selectedDisplayGame = null
-                surfaceReady = false
+                // Do not remove the Surface or forget the session while the
+                // process is still alive; that would strand a running game.
+                if (running == null || !running.isRunning) {
+                    activeGameSession = null
+                    activeDisplaySession = null
+                    selectedDisplayGame = null
+                    surfaceReady = false
+                }
                 preparingGame = false
             }
         }
