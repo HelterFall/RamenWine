@@ -88,6 +88,33 @@ class ProotWineProcessSupervisorTest {
     }
 
     @Test
+    fun naturalExitRacingWithManualStopDeliversOneFinalCallback() = runBlocking {
+        val fakeProcess = FinalOutputProcess("wine-natural-exit-line")
+        val output = CopyOnWriteArrayList<String>()
+        val exitCount = AtomicInteger()
+        val exit = CompletableDeferred<Int>()
+        val session = ProotWineProcessSession(
+            process = fakeProcess,
+            onOutput = output::add,
+            onExit = { code ->
+                exitCount.incrementAndGet()
+                exit.complete(code)
+            },
+            callbackDispatcher = Dispatchers.Unconfined
+        )
+
+        fakeProcess.exitNaturally()
+        val stopCode = session.stop(gracePeriodMillis = 0L)
+        val callbackCode = withTimeout(TEST_TIMEOUT_MILLIS) { exit.await() }
+
+        assertEquals(0, stopCode)
+        assertEquals(0, callbackCode)
+        assertEquals(1, exitCount.get())
+        assertEquals(listOf("wine-natural-exit-line"), output.toList())
+        assertFalse(session.isAlive())
+    }
+
+    @Test
     fun concurrentStopCallsOnlyTerminateOnceAndShareExitCallback() = runBlocking {
         val fakeProcess = FinalOutputProcess("wine-stopping-line")
         val output = CopyOnWriteArrayList<String>()
@@ -160,6 +187,8 @@ class ProotWineProcessSupervisorTest {
             finish()
             return this
         }
+
+        fun exitNaturally() = finish()
 
         private fun finish() {
             if (!terminated.compareAndSet(false, true)) return
