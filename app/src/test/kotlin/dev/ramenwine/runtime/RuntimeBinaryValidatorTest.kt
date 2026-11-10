@@ -19,7 +19,7 @@ class RuntimeBinaryValidatorTest {
                 backendRoot
             )
 
-            assertTrue(errors.any { it.contains("x86-64 Wine loader") })
+            assertTrue(errors.any { it.contains("Wine loader for Box64") })
         } finally {
             root.deleteRecursively()
         }

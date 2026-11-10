@@ -62,8 +62,15 @@ object SafeRuntimePath {
             // Absolute host links would point outside app-private storage.
             val targetPath = if (target.startsWith('/')) {
                 if (domain == "host") return null
+                val guestTarget = target.removePrefix("/")
+                // /host is reserved for the Android-side runtime payload and
+                // is not part of the Linux guest namespace. Do not let an
+                // absolute guest symlink cross from rootfs into host files.
+                if (domain == "rootfs" && guestTarget.substringBefore('/') == "host") {
+                    return null
+                }
                 val absoluteRoot = if (domain == "rootfs") domainRoot else rootPath
-                absoluteRoot.resolve(target.removePrefix("/")).normalize()
+                absoluteRoot.resolve(guestTarget).normalize()
             } else {
                 linkParent.resolve(target).normalize()
             }
