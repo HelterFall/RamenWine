@@ -315,14 +315,6 @@ def validate_backend_payload(
     if not is_x86_64_pe32_plus(wineboot.source_path):
         raise ValueError("Wine prefix initializer must be an x86-64 PE32+ executable")
 
-    has_host_library_payload = (
-        any(item.relative_path.startswith("host/lib/") for item in file_items) or
-        any(item.relative_path == "host/lib" or item.relative_path.startswith("host/lib/")
-            for item in link_items)
-    )
-    if not has_host_library_payload:
-        raise ValueError("runtime has no packaged host/lib content")
-
 
 def make_manifest(
     backend: str,

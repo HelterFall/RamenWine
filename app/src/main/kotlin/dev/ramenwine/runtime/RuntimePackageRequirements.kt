@@ -37,14 +37,6 @@ internal object RuntimePackageRequirements {
             errors += "Missing Wine prefix initializer (wineboot.exe)."
         }
 
-        val hasHostLibraryPayload =
-            manifest.files.any { it.path.startsWith("host/lib/") } ||
-                manifest.symlinks.any {
-                    it.path == "host/lib" || it.path.startsWith("host/lib/")
-                }
-        if (!hasHostLibraryPayload) {
-            errors += "The PRoot host library directory has no packaged content."
-        }
         return errors
     }
 

@@ -42,10 +42,6 @@ class RuntimePackagerTests(unittest.TestCase):
         ):
             self.write_elf64(root / relative, machine)
 
-        host_library = root / "host/lib/libproot.so"
-        host_library.parent.mkdir(parents=True, exist_ok=True)
-        host_library.write_bytes(b"host library")
-
         self.write_pe32_plus_amd64(
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
         )
@@ -132,6 +128,21 @@ class RuntimePackagerTests(unittest.TestCase):
                 package_runtime.make_manifest(
                     "glibc-proot-box64", "test-1", files, symlinks
                 )
+
+
+    def test_glibc_manifest_does_not_require_placeholder_host_libraries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+
+            manifest = package_runtime.make_manifest(
+                "glibc-proot-box64", "test-1", files, symlinks
+            )
+
+            parsed = json.loads(manifest)
+            self.assertEqual(parsed["backendId"], "glibc-proot-box64")
+            self.assertFalse(any(item["path"].startswith("host/lib/") for item in parsed["files"]))
 
     def test_glibc_manifest_requires_launch_components(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

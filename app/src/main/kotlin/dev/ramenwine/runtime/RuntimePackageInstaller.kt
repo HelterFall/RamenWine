@@ -222,6 +222,7 @@ class RuntimePackageInstaller(private val context: Context) {
                 }
             }
 
+            ensureHostLibraryDirectory(stagingDirectory, manifest.backend)
             writeRuntimeProperties(stagingDirectory, manifest)
 
             val backendDirectory = File(backendsRoot, manifest.backend.directoryName)
@@ -292,6 +293,27 @@ class RuntimePackageInstaller(private val context: Context) {
                 throw IOException("Runtime manifest exceeds the size limit.")
             }
             output.write(buffer, 0, read)
+        }
+    }
+
+    private fun ensureHostLibraryDirectory(
+        backendDirectory: File,
+        backend: RuntimeBackendId
+    ) {
+        if (backend != RuntimeBackendId.GLIBC_PROOT_BOX64) return
+
+        val hostLibraries = resolveInside(backendDirectory, "host/lib")
+            ?: throw IOException("Unsafe PRoot host library directory.")
+
+        if (hostLibraries.exists()) {
+            if (!hostLibraries.isDirectory) {
+                throw IOException("PRoot host library path is not a directory.")
+            }
+            return
+        }
+
+        if (!hostLibraries.mkdirs() && !hostLibraries.isDirectory) {
+            throw IOException("Could not create PRoot host library directory.")
         }
     }
 

@@ -139,13 +139,13 @@ Implemented in RamenWine:
 - ProotWineCommandBuilder for the glibc/PRoot path. It requires host/bin/proot, host/lib, rootfs/usr/bin/box64 and rootfs/usr/bin/wine, then builds a PRoot argument vector and per-game bind/environment configuration.
 - ProotWineProcessSupervisor for ProcessBuilder start, merged diagnostic output, exit notification and graceful/forced stop.
 
-These are package-management and launch-scaffolding capabilities. No production Wine/Box64/FEX/PRoot binaries or rootfs are bundled. The command builder requires a pre-existing Wayland socket; RamenWine does not yet create one. The supervisor is not yet connected to the Compose UI and has not been validated against Wine/Box64 child-process trees on a physical device. No Windows EXE launch is claimed.
+These are package-management and launch-scaffolding capabilities. No production Wine/Box64/FEX/PRoot binaries or rootfs are bundled. The command builder requires a Wayland socket from the in-process Wawona display backend. The Compose per-game flow is connected through GameSessionCoordinator, but the native Wawona bundle is staged by a local build/import script and the full launch path has not been validated on a physical device. No Windows EXE launch is claimed.
 
 Not implemented or not proven:
 - Signed runtime metadata or a pinned release signing key. SHA-256 protects payload consistency, not publisher identity.
 - Runtime binary acquisition/build pipeline and a production rootfs.
-- First-time per-game Wine prefix initialization.
-- Wawona or another Android Wayland compositor integration.
+- Physical-device validation of first-time per-game Wine prefix initialization.
+- Physical-device validation of Wawona, Wine GUI display, graphics, audio and input.
 - Wine GUI display, graphics translation, audio and input on a physical device.
 
 ## Rule
@@ -203,7 +203,7 @@ Example manifest:
 ```
 
 The manifest file list is illustrative only; each backend has its own real file
-requirements. Every file listed in the manifest must be present under
+requirements. The installer creates an empty `host/lib` directory for the glibc/PRoot backend if the package does not include one; package host libraries are optional and should only be included when the chosen Android PRoot build requires them. Every file listed in the manifest must be present under
 `payload/`, and its SHA-256 must match. Paths must be relative, unique
 case-insensitively and remain inside the backend staging directory. Symlink
 targets are normalized to remain inside that backend directory. The installer

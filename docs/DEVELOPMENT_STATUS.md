@@ -16,7 +16,7 @@
 - App-private JSON library metadata, atomically replaced and validated on load.
 - Runtime backend inventory for Bionic ARM64EC/FEX, Bionic x64/Box64 and glibc/PRoot/Box64 package families.
 - Offline runtime ZIP installer with bounded streaming extraction, SHA-256 payload checks, executable flags, safe path/symlink validation, staged activation and rollback after failed post-install inventory.
-- Backend-aware glibc/PRoot package contract: verifies the PRoot host executable, guest env, Box64, Wine, wineboot and host-library payload both before extraction and in the installed runtime inventory.
+- Backend-aware glibc/PRoot package contract: verifies PRoot, guest env, Box64, Wine and wineboot before extraction and rechecks the installed launch paths afterwards; the installer creates the host/lib directory while packaged Bionic libraries remain optional.
 - ELF/PE ABI inspection for the PRoot/Wine package: requires AArch64 ELF for Android PRoot, guest env and Box64, x86-64 ELF for Wine, and AMD64 PE32+ for wineboot. The Python packager and Android post-install inventory perform the same header checks without executing the files.
 - Rootfs-aware absolute symlink handling: Linux absolute links inside rootfs resolve from the guest root, remain confined to rootfs and are rewritten as app-private relative links; absolute host-payload links are rejected.
 - Python runtime package builder with manifest, hashes, executable flags, symlink metadata and glibc/PRoot launch-prerequisite validation.

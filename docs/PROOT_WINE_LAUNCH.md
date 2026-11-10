@@ -20,7 +20,7 @@ This document describes the first Windows-process launch route using the glibc r
 
 The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
 
-The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/box64` and `rootfs/usr/bin/wine`, a readable `wineboot.exe` at one of the supported paths, and the `host/lib` payload directory. Symlink chains are followed when checking required launch files.
+The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/box64` and `rootfs/usr/bin/wine`, plus a readable `wineboot.exe` at one of the supported paths. Symlink chains are followed when checking required launch files. The installer creates the app-private `host/lib` directory when it is omitted; extra Bionic host libraries may be packaged there only when the selected PRoot build actually needs them.
 
 The binary ABI is also checked from the actual headers:
 
