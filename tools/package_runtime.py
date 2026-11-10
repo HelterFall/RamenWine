@@ -340,6 +340,25 @@ def validate_backend_payload(
     if not is_x86_64_pe32_plus(wineboot.source_path):
         raise ValueError("Wine prefix initializer must be an x86-64 PE32+ executable")
 
+    wayland_driver_paths = sorted(
+        path
+        for path in (set(files_by_path) | set(links_by_path))
+        if path.startswith("rootfs/opt/kron4ek-wine/")
+        and path.rsplit("/", 1)[-1] == "winewayland.drv.so"
+    )
+    wayland_drivers = [
+        resolve_manifest_file(path, files_by_path, links_by_path)
+        for path in wayland_driver_paths
+    ]
+    valid_wayland_drivers = [
+        item for item in wayland_drivers
+        if item is not None and read_elf_identity(item.source_path) == (2, 1, 62)
+    ]
+    if not valid_wayland_drivers:
+        raise ValueError(
+            "runtime is missing an x86-64 Wine Wayland driver (winewayland.drv.so)"
+        )
+
     if runtime_root is not None:
         try:
             report = audit_rootfs(runtime_root / "rootfs")

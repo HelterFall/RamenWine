@@ -72,6 +72,10 @@ class RuntimePackagerTests(unittest.TestCase):
         self.write_pe32_plus_amd64(
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
         )
+        self.write_elf64(
+            root / "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so",
+            62,
+        )
 
     def test_creates_manifest_and_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -173,6 +177,33 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 package_runtime.resolve_symlink_inside(root, link, "bad\x00target")
 
+
+    def test_glibc_manifest_requires_x86_64_wine_wayland_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            (root / "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so").unlink()
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "Wine Wayland driver"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
+
+    def test_glibc_manifest_rejects_wrong_architecture_wine_wayland_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            self.write_elf64(
+                root / "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so",
+                183,
+            )
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "Wine Wayland driver"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
 
     def test_glibc_manifest_rejects_arm64_wine_loader(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

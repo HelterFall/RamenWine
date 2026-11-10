@@ -49,6 +49,25 @@ internal object RuntimeBinaryValidator {
             errors += "Wine prefix initializer must be an x86-64 PE32+ executable."
         }
 
+        val wineRoot = resolveInside(backendRoot, WINE_ROOT_PATH)
+        val waylandDrivers = wineRoot
+            ?.walkTopDown()
+            ?.filter { it.name == WINE_WAYLAND_DRIVER_NAME && it.isFile && it.canRead() }
+            ?.toList()
+            .orEmpty()
+        if (waylandDrivers.isEmpty()) {
+            errors += "Wine Wayland display driver is missing: $WINE_WAYLAND_DRIVER_NAME"
+        } else if (waylandDrivers.none {
+                readElfIdentity(it) == ElfIdentity(
+                    ELF_CLASS_64,
+                    ELF_DATA_LITTLE_ENDIAN,
+                    ELF_MACHINE_X86_64
+                )
+            }
+        ) {
+            errors += "Wine Wayland display driver must be a 64-bit x86-64 ELF."
+        }
+
         return errors
     }
 
@@ -120,6 +139,8 @@ internal object RuntimeBinaryValidator {
         return file.takeIf { it.path.startsWith(prefix) }
     }
 
+    private const val WINE_ROOT_PATH = "rootfs/opt/kron4ek-wine"
+    private const val WINE_WAYLAND_DRIVER_NAME = "winewayland.drv.so"
     private const val ELF_HEADER_MIN_BYTES = 20L
     private const val ELF_CLASS_64 = 2
     private const val ELF_DATA_LITTLE_ENDIAN = 1

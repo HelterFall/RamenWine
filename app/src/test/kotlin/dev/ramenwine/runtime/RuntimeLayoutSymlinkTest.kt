@@ -138,6 +138,13 @@ class RuntimeLayoutSymlinkTest {
         val wineboot = File(backendRoot, "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe")
         wineboot.parentFile?.mkdirs()
         wineboot.writeBytes(pe32PlusAmd64())
+
+        val waylandDriver = File(
+            backendRoot,
+            "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so"
+        )
+        waylandDriver.parentFile?.mkdirs()
+        waylandDriver.writeBytes(elf64(62))
     }
 
 

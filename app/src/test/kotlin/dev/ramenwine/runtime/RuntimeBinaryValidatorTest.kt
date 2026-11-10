@@ -44,6 +44,50 @@ class RuntimeBinaryValidatorTest {
         }
     }
 
+    @Test
+    fun rejectsRuntimeWithoutWineWaylandDriver() {
+        val root = Files.createTempDirectory("ramenwine-binary-check").toFile()
+        try {
+            val backendRoot = File(root, "backend")
+            createRuntimeHeaders(backendRoot, wineMachine = 62)
+            File(
+                backendRoot,
+                "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so"
+            ).delete()
+
+            val errors = RuntimeBinaryValidator.inspectInstalled(
+                RuntimeBackendId.GLIBC_PROOT_BOX64,
+                backendRoot
+            )
+
+            assertTrue(errors.any { it.contains("Wine Wayland display driver is missing") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun rejectsArm64WineWaylandDriver() {
+        val root = Files.createTempDirectory("ramenwine-binary-check").toFile()
+        try {
+            val backendRoot = File(root, "backend")
+            createRuntimeHeaders(backendRoot, wineMachine = 62)
+            File(
+                backendRoot,
+                "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so"
+            ).writeBytes(elf64(183))
+
+            val errors = RuntimeBinaryValidator.inspectInstalled(
+                RuntimeBackendId.GLIBC_PROOT_BOX64,
+                backendRoot
+            )
+
+            assertTrue(errors.any { it.contains("x86-64 ELF") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun createRuntimeHeaders(backendRoot: File, wineMachine: Int) {
         listOf(
             "host/bin/proot" to 183,
@@ -62,6 +106,13 @@ class RuntimeBinaryValidatorTest {
         )
         wineboot.parentFile?.mkdirs()
         wineboot.writeBytes(pe32PlusAmd64())
+
+        val waylandDriver = File(
+            backendRoot,
+            "rootfs/opt/kron4ek-wine/x86_64-unix/winewayland.drv.so"
+        )
+        waylandDriver.parentFile?.mkdirs()
+        waylandDriver.writeBytes(elf64(62))
     }
 
     private fun elf64(machine: Int): ByteArray = ByteArray(64).apply {

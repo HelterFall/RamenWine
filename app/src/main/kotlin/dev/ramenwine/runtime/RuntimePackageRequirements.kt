@@ -37,6 +37,14 @@ internal object RuntimePackageRequirements {
             errors += "Missing Wine prefix initializer (wineboot.exe)."
         }
 
+        val waylandDriverPaths = (files.keys + links.keys).filter { path ->
+            path.startsWith(WINE_ROOT_PREFIX) &&
+                path.endsWith("/winewayland.drv.so")
+        }
+        if (waylandDriverPaths.none { resolveManifestFile(it, files, links) != null }) {
+            errors += "Missing Wine Wayland display driver (winewayland.drv.so)."
+        }
+
         return errors
     }
 
@@ -130,4 +138,5 @@ internal object RuntimePackageRequirements {
     }
 
     private const val MAX_SYMLINK_HOPS = 40
+    private const val WINE_ROOT_PREFIX = "rootfs/opt/kron4ek-wine/"
 }

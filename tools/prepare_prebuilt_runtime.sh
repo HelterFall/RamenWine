@@ -135,8 +135,23 @@ WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 
 # WoW64 distributions include both i386 and x86-64 PE tools. Select by
 # the actual PE machine and optional-header magic, not nondeterministic find order.
-WINEBOOT_FILE="$(python3 "$ROOT_DIR/tools/select_wineboot.py" "$WINE_ROOT")" || \
-  fail "Kron4ek archive does not contain an AMD64 PE32+ wineboot.exe."
+# Wawona is the only display server in this app. Without Wine's native
+# Wayland driver, an EXE may start successfully but never create a visible
+# window, so fail the package build instead of shipping a silent runtime.
+WINE_WAYLAND_DRIVER=""
+while IFS= read -r candidate; do
+  [[ -n "$candidate" ]] || continue
+  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
+    WINE_WAYLAND_DRIVER="$candidate"
+    break
+  fi
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name winewayland.drv.so -print)
+
+[[ -n "$WINE_WAYLAND_DRIVER" ]] || \
+  fail "Kron4ek Wine archive does not contain an x86-64 winewayland.drv.so required by Wawona."
+
 [[ -n "$WINEBOOT_FILE" ]] || \
   fail "Kron4ek archive does not contain an AMD64 PE32+ wineboot.exe."
 WINEBOOT_RELATIVE="${WINEBOOT_FILE#"$WINE_ROOT"/}"
