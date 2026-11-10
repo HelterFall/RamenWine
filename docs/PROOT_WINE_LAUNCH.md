@@ -1,107 +1,76 @@
 # PRoot + Box64 + Wine launch contract
 
-**Status:** command builder and process supervisor implemented; actual runtime package and device launch remain unverified.
+**Status:** command builder and process supervisor exist; runtime binaries, compositor socket and device launch remain unverified.
 
 ## Purpose
 
-This document defines the first real Windows-process launch route for the `glibc-proot-box64` backend. It keeps host Android binaries separate from Linux rootfs binaries and avoids shell-string command construction.
+This document describes the first Windows-process launch route using the glibc rootfs + PRoot backend. Host Android binaries stay outside the guest rootfs. Commands are passed as an argument vector; no shell command string is constructed.
 
 ## Required package layout
 
-The runtime package must include at least:
+    backend/
+      host/
+        bin/proot                 # Android/Bionic ARM64 executable
+        lib/                      # host libraries required by PRoot
+      rootfs/
+        usr/bin/box64             # ARM64 Linux/glibc Box64
+        usr/bin/wine              # Wine 11 unified loader
+        ...                       # Wine PE/Unix drivers and guest libraries
 
-```text
-host/
-  bin/
-    proot                  # ARM64 Android/Bionic executable
-rootfs/
-  usr/bin/
-    box64                  # ARM64 Linux/glibc Box64 executable
-    wine64                 # x86-64 Linux/glibc Wine loader
-  ...
-```
-
-The Wine installation must also include the matching Wayland driver components for the selected Wine build. Their exact paths vary by distribution/build, so the runtime build recipe must verify their presence and test that Wine loads the driver:
-
-- `winewayland.drv` for the relevant Windows PE architecture(s);
-- `winewayland.so` for the relevant Unix architecture(s);
-- Wayland client libraries and protocols required by that Wine build.
-
-A runtime inventory that omits any required executable is not launch-ready. The command builder checks the three required paths directly before constructing a process command.
+The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
 
 ## Host/guest path mapping
 
-For each imported game, the builder prepares private host directories and maps them into the guest:
-
 | Host path | Guest path | Purpose |
 |---|---|---|
-| `filesDir/games/<id>` | `/games/<id>` | Imported game files, read/write only if a game requires it |
-| `filesDir/prefixes/<id>` | `/prefixes/<id>` | Persistent per-game Wine prefix |
-| `filesDir/wine-home/<id>` | `/home/ramen` | Per-game home/configuration |
-| `cacheDir/wine-tmp/<id>` | `/tmp` | Per-game temporary files |
-| Wawona/runtime host socket directory | `/run/user/<Android UID>` | Wayland socket |
+| filesDir/games/<id> | /games/<id> | Imported game directory |
+| filesDir/prefixes/<id> | /prefixes/<id> | Per-game Wine prefix directory |
+| filesDir/wine-home/<id> | /home/ramen | Per-game home/configuration |
+| cacheDir/wine-tmp/<id> | /tmp | Per-game temporary files |
+| Wawona runtime directory | /run/user/<Android UID> | Wayland socket directory |
 
-The launch environment uses:
+The command builder prepares private directories and mount targets. It does not run wineboot or prove that a newly created prefix has been initialized.
 
-- `WINEPREFIX=/prefixes/<id>`
-- `HOME=/home/ramen`
-- `XDG_RUNTIME_DIR=/run/user/<Android UID>`
-- `WAYLAND_DISPLAY=wayland-0`
-- `TMPDIR=/tmp`
-- `PROOT_TMP_DIR=<app-private host cache path>`
-- `LANG=C.UTF-8` by default (a per-game locale can be added later)
-- `DISPLAY` is explicitly removed so Wine does not choose an inherited X11 display over Wayland.
+## Command and environment
 
-The Android app does not grant INTERNET permission in this scaffold. The game process inherits the app UID and Android sandbox; PRoot is not root and the command does not use PRoot's fake-root option.
+The builder requires:
+- a valid imported-game UUID and relative directory games/<id>;
+- a safe selected EXE path contained in the imported game directory;
+- host/bin/proot and host/lib;
+- rootfs/usr/bin/box64 and rootfs/usr/bin/wine, both executable;
+- an app-private Wayland runtime directory containing the selected socket;
+- a socket path below the Android AF_UNIX sun_path limit.
 
-## Command construction
+The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory, followed by /usr/bin/box64 /usr/bin/wine <game-exe>.
 
-The first launch route is an argument vector, not a shell command:
+The environment includes HOME, WINEPREFIX, WINEDEBUG, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, TMPDIR, PROOT_TMP_DIR, LANG, LC_ALL, PATH, BOX64_NOBANNER and LD_LIBRARY_PATH pointing to backend/host/lib. Android-only inherited environment variables and DISPLAY/WAYLAND_SOCKET/LD_PRELOAD are removed as defined by the builder.
 
-```text
-proot
-  --rootfs=<app-private backend>/rootfs
-  --bind=/dev:/dev
-  --bind=/proc:/proc
-  --bind=<game host dir>:/games/<id>
-  --bind=<prefix host dir>:/prefixes/<id>
-  --bind=<home host dir>:/home/ramen
-  --bind=<temp host dir>:/tmp
-  --bind=<Wayland socket dir>:/run/user/<uid>
-  --pwd=/games/<id>
-  /usr/bin/box64
-  /usr/bin/wine64
-  /games/<id>/<selected.exe>
-```
+The command does not use PRoot fake-root mode. The guest process inherits the app's ordinary Android UID and sandbox.
 
-PRoot's documented CLI supports the rootfs, bind and initial-working-directory options used above. PRoot bind targets are prepared inside the guest rootfs before process launch. The implementation does not use `-0`: the Windows game remains in the Android app's ordinary UID/sandbox and does not receive fake root.
+## Display precondition
 
-## Display preconditions
+The host socket is supplied by a display backend. The builder only checks the socket path before constructing the command; it does not start or verify the compositor protocol handshake. The planned Wawona Android runtime directory is <cacheDir>/wawona-runtime, subject to the actual socket name published by the integrated backend.
 
-The command builder refuses to construct a launch if the Wayland socket is absent. This prevents a misleading process start when there is no compositor to display the game's window.
+Without an in-process compositor and a reachable Wayland socket, a launch command cannot be built. RamenWine currently has no Play action wired to this command path.
 
-The intended display endpoint is an Android-host Unix socket supplied by a future RamenWine display backend. Wawona is the leading MIT-licensed research candidate. Its compositor has not yet been integrated into RamenWine, so this launcher is not connected to a user-facing Play button.
+## Process supervisor
 
-Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
+ProotWineProcessSupervisor starts PRoot directly with ProcessBuilder, merges stdout/stderr, dispatches output and exit callbacks to the main dispatcher, and supports a graceful stop followed by forced stop. The current stop grace period is 1.5 seconds, followed by a 1.5-second forced-wait period.
 
-## Process lifecycle
+The supervisor currently supervises the Process returned by ProcessBuilder. It has not been proven that all Wine/Box64 descendants terminate in every failure or Android lifecycle scenario. A production GameSession coordinator must own and verify the complete process tree.
 
-The process supervisor:
-- starts PRoot directly with `ProcessBuilder`;
-- merges stdout/stderr into diagnostic output;
-- delivers output and exit callbacks on the Android main dispatcher;
-- supports graceful process termination followed by forced termination as a fallback.
+## Security and package trust
 
-The implementation has not yet been validated against Wine child-process trees on a physical Android device. A production session manager must verify that all Wine/Box64 children terminate when a game exits or the user closes the session.
+Imported games are untrusted. Scanning and import do not execute game code. Runtime ZIP extraction enforces limits, safe paths, symlink containment and SHA-256 payload consistency. A manifest inside the same ZIP is not publisher authentication; only install packages from trusted origins until signed metadata and a pinned key are implemented.
 
 ## Validation gates before enabling Play
 
-1. Package PRoot for Android/Bionic ARM64 and run `proot --version` under the app UID.
-2. Package a minimal ARM64 glibc rootfs and run a Linux ARM64 smoke executable inside it.
-3. Run Box64 inside that rootfs and validate host library resolution.
-4. Build Wine x86-64 with the Wayland driver and validate the installed PE/Unix driver files.
-5. Start the Wayland compositor on Android, bind its socket into the rootfs and run an original Win32 GDI test window.
-6. Verify the window appears on the Android SurfaceView and that touch, keyboard, close, pause/resume and process teardown work.
-7. Run x86-64 and WoW64 samples before attempting commercial visual-novel engines.
+1. Install a pinned PRoot package and run a host-side version/smoke check under the app UID.
+2. Enter the glibc rootfs and run an ARM64 Linux smoke program.
+3. Run Box64 and verify host/guest library resolution.
+4. Run Wine's version/loader and prefix initialization checks.
+5. Start Wawona on an Android Surface and verify a Wayland client can connect to the socket.
+6. Run an original Win32 GDI window through PRoot/Box64/Wine and display it in the RamenWine surface.
+7. Verify touch, keyboard, IME, resize, pause/resume, exit and complete child-process teardown.
 
-No actual Windows EXE launch is claimed until these gates pass.
+No actual Windows EXE launch is claimed until these gates pass on a physical Android device.

@@ -229,12 +229,14 @@ The Android host scaffold currently includes:
 - streamed import into private app storage with live progress;
 - local JSON game library with atomic metadata persistence;
 - runtime inventory for Bionic ARM64EC/FEX, Bionic + Box64 and glibc + PRoot + Box64;
-- offline runtime ZIP installation with SHA-256 payload verification, staged activation and rollback;
+- offline runtime ZIP installation with SHA-256 payload verification, staged activation, symlink/path checks and rollback;
 - a Python runtime package builder and automated Python/JVM tests;
+- a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
+- Wawona support-asset integrity verification and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
-**Wine/Box64/FEX binaries are not bundled and imported games cannot be launched yet.** Runtime package file checks are not a proof of execution. No game EXE is run during scanning or import.
+**Wine/Box64/FEX/PRoot binaries are not bundled, and imported games cannot be launched from the Android UI yet.** The command builder requires an existing Wayland socket, and no Wawona compositor is integrated to provide it. The process supervisor is not wired to a Play action and has not been validated against a physical device or complete Wine child-process teardown. Runtime file checks are not proof of execution. No game EXE is run during scanning or import.
 
-See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
+See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md) and [PRoot Wine Launch](docs/PROOT_WINE_LAUNCH.md).
 
-Piperella Wayland Compositor is currently a research reference only. It is GPL-3.0 and requires Android API 36, so it has not been added as a direct dependency.
+Wawona is the selected display/compositor research candidate. The upstream project is MIT-licensed at its root and uses a Rust Wayland core with an Android Kotlin/JNI host. The reviewed upstream snapshot is pinned in [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md). RamenWine currently has only a Wawona asset-integrity helper; it does not bundle the upstream native libraries or start a compositor.

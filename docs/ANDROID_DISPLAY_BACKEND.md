@@ -1,126 +1,102 @@
-# Android game display backend research
+# Android game display backend and Wawona integration
 
-**Status:** candidate evaluated; direct dependency not approved  
-**Review date:** 2026-11-09
+**Status:** Wawona selected as the current upstream candidate; not yet integrated into RamenWine  
+**Review snapshot:** 2026-11-10  
+**Pinned research revision:** Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (upstream Cargo package version 26.11.2)
 
 ## Goal
 
-RamenWine must display a Windows game's graphical output inside an Android SurfaceView, without showing a Windows desktop or asking the user to interact with a Linux desktop shell.
+Display a Windows game's graphical output inside the RamenWine Android application, without exposing a Linux desktop shell to the user. The display backend must own an Android Surface, start a Wayland compositor in the same app UID, publish a local Wayland socket for Wine, route input/IME, and survive Activity and Surface lifecycle changes.
 
-This is separate from Wine process execution and CPU translation. A working Wine process is not useful to the user until a display backend can present windows, route input and survive Android lifecycle events.
+Wine process execution and display are separate systems. ProotWineCommandBuilder already expects a Wayland socket; it deliberately refuses to construct a launch command until the socket exists. RamenWine currently has no component that creates that socket.
 
-## Candidate: Piperella Wayland Compositor
+## Selected candidate: Wawona
 
-Repository: https://github.com/Piperella/Piperella-Wayland-Compositor
+Upstream repository: https://github.com/Wawona/Wawona  
+License: MIT at the upstream repository root (retain the copyright and permission notice).  
+Android source: android/app and src/platform/android.
 
-Piperella is a substantial Android Wayland compositor proof-of-concept. Its source tree contains a Kotlin Android library, a C++ Wayland server, EGL/GLES rendering, JNI, Wayland protocol implementations, input forwarding, and example Android applications. Its design is directly relevant to RamenWine:
+The current upstream architecture has:
+- a shared Rust Wayland compositor core using Smithay and generated Wayland protocol bindings;
+- a Kotlin/Jetpack Compose Android host;
+- a JNI/C Android platform layer;
+- native Android presentation using ANativeWindow and a dedicated render path, with Vulkan support;
+- a SurfaceView host and input forwarding for touch, pointer, keyboard and Android IME;
+- a local XDG_RUNTIME_DIR under the app cache directory, with the Wayland socket published from the native compositor core.
 
-- Starts an in-process libwayland-server and publishes a Unix-domain socket in app-private storage.
-- Uses SurfaceView, ANativeWindow, EGL/GLES3 and Android Choreographer for output.
-- Imports wl_shm and DMA-BUF buffers; the DMA-BUF path can avoid a CPU frame copy when the Android driver exposes the required extensions.
-- Implements Wayland core surfaces, XDG shell windows/popups, output, seat/input, text input, and additional protocols needed by graphical clients.
-- Has a Kotlin CompositorEngine lifecycle API and a JNI/C++ compositor core.
-- Its Wine example configures winewayland.drv, WAYLAND_DISPLAY, XDG_RUNTIME_DIR and a per-game Wine prefix.
+The Android Kotlin wrapper exposes lifecycle calls including nativeInit(cacheDir), nativeIsCompositorReady(), nativeSetSurface(surface), nativeDestroySurface(surface), nativeResizeSurface(width,height) and nativeShutdown(). The JNI layer creates the Rust core, starts/stops it, attaches the Android native window and drives presentation. The upstream WawonaNative class loads its own native library family; its JNI symbols are tied to the upstream package name unless RamenWine adds an explicit JNI registration/adapter layer.
 
-The architecture is a strong reference for an Android-native game surface and Wayland display server. It is not proof that every Wine application or graphics backend works.
+## Integration constraints
 
-## Direct-integration blockers
+### It is not a drop-in Android library
 
-### 1. License
+The upstream android/app Gradle module is a full application, not a small AAR intended for embedding. The Android native build is assembled through the upstream Nix dependency graph and links the Rust core plus platform/native dependencies. Copying one Kotlin SurfaceView class is not sufficient to get a compositor.
 
-The repository is GPL-3.0. Its latest license-change commit explains that the AIDL input-forwarding path derives from wlroots-android-bridge, which is GPL-3.0, and that the whole compositor project therefore moved to GPL-3.0.
+Upstream Android settings in the reviewed revision include minSdk 24, compileSdk 36 and NDK 29. RamenWine currently targets minSdk 26, compileSdk 36 and NDK 30. The SDK floor is compatible in principle, but the NDK and native dependency graph must be made reproducible rather than mixing arbitrary .so files from an APK.
 
-Directly adding Piperella as a linked Gradle/native module can create GPL-3.0 obligations for a combined distributed application. RamenWine has not yet selected an application license, so we must not silently vendor or link this dependency.
+### License boundary
 
-Before direct integration, the project owner must explicitly choose one of these paths:
+The Wawona repository root declares MIT. That does not automatically relicense all libraries linked into its Android application. Before bundling a native build, generate and review the exact third-party license/NOTICE inventory for the selected feature set, including renderer, Vulkan loader/driver shims, xkbcommon, Wayland, Weston assets and any optional clients. Do not assume every dependency is MIT.
 
-- Accept and comply with GPL-3.0 for the relevant RamenWine distribution.
-- Obtain a separate compatible license from the relevant rightsholders.
-- Keep Piperella as an external reference and implement an independent compositor using components whose licenses are compatible with RamenWine's chosen distribution model.
+The former Piperella candidate is not the selected route. It had a GPL-3.0 integration concern and a higher Android API floor; Wawona's current MIT-licensed root project and native Android host offer a better starting point, subject to the dependency audit above.
 
-A separate process or IPC boundary is not an automatic legal solution; that design would still need license review.
+### App-private socket and process boundary
 
-### 2. Android version floor
+Wawona's Android JNI initialization sets XDG_RUNTIME_DIR under the supplied cache directory as <cacheDir>/wawona-runtime. RamenWine's display endpoint should therefore be based on the same app-private directory and the actual socket name returned/confirmed by the compositor. Do not launch the separately installed Wawona application and expect RamenWine to access its private Unix socket: Android application UIDs and private storage isolate those processes by default.
 
-Piperella's Android library declares minSdk = 36 and targets API 36. RamenWine currently declares minSdk = 26.
+The target is an in-process compositor inside the RamenWine process, or a deliberately designed same-UID component. The app should not rely on /data/local/tmp fallbacks intended for upstream development/emulator conditions.
 
-A direct dependency would prevent RamenWine from installing on Android 8–15 unless we:
-- raise RamenWine's minimum Android version to API 36, or
-- fork/adapt the required compositor code to a lower API baseline and validate all Android API dependencies.
+## Current RamenWine state
 
-Do not raise minSdk just to make a proof-of-concept dependency compile. RamenWine's current broad-device target remains API 26 until a deliberate product decision changes it.
+Implemented:
+- ProotWineCommandBuilder accepts a WaylandDisplayEndpoint, checks that the supplied socket path exists, checks the Unix socket path length and binds the host runtime directory into the guest at /run/user/<uid>.
+- ProotWineProcessSupervisor starts the PRoot argument vector and forwards merged stdout/stderr.
+- WawonaAssetIntegrity maps selected APK-relative xkb/font/Weston asset paths into an app-private support tree and checks their SHA-256 hashes.
+- WawonaAssetIntegrityTest covers matching assets, missing/modified data, traversal and symlink escape.
 
-### 3. Toolchain and native integration
+Not implemented:
+- No Wawona native libraries or generated JNI bindings are present in RamenWine.
+- No Wawona Kotlin host classes or compositor SurfaceView are integrated.
+- No pinned Wawona APK/source archive or provenance manifest is bundled.
+- WawonaAssetIntegrity is only a verifier; it does not extract assets and is not connected to the runtime installer.
+- No in-process Wayland compositor starts and no RamenWine code creates the Wayland socket.
+- No Wine process is currently launched from the Android UI.
 
-Piperella documents NDK r29, committed Wayland/xkbcommon prebuilts, generated protocol glue, CMake and AIDL-generated native sources. RamenWine currently builds with NDK r30 and CMake 3.22.1.
+## RamenWine-owned abstraction
 
-Before integration, verify:
-- exact binary dependencies and their ABI/API requirements;
-- 16 KB ELF page alignment;
-- AIDL generation paths under the chosen Android Gradle Plugin;
-- JNI symbol visibility and library loading;
-- coexistence of multiple native libraries and shared dependencies;
-- lifecycle, socket cleanup and process shutdown;
-- memory ownership and synchronization between JNI, Wayland dispatch and rendering.
+Keep game management independent from the selected compositor. The intended boundary is:
 
-### 4. Proof-of-concept maturity and example caveats
-
-The upstream README itself labels Piperella a proof of concept.
-
-The public examples are not a general visual-novel compatibility suite:
-- SteamTest documents a CPU-only baseline where Steam's Chromium Embedded Framework UI still enters a white-screen/restart loop without a usable GPU path.
-- SteamTestVk adds an additional Vulkan/Turnip/DXVK stack. This is device- and driver-sensitive.
-- The SteamTest README describes rootless XDG toplevel windows, while its current Launcher.kt still constructs an explorer /desktop=... command. This documentation/code mismatch must be resolved in an upstream integration test before copying the launch flow.
-- The example's Bionic Hangover package is a separate release asset of roughly 340 MB, and its release history is from July 2026. It is a research input, not a stable RamenWine dependency.
-- Wine's Wayland driver is a particular display route. Older Wine builds, games requiring X11 paths, and games with unusual windowing behavior still need tests and possibly an XWayland/X11 fallback.
-
-### 5. Graphics is not solved by the compositor
-
-The compositor's EGL/GLES renderer displays client buffers. It does not itself provide a universal Direct3D implementation or a Vulkan driver.
-
-RamenWine still needs a separate graphics/runtime matrix:
-- Wine Wayland + system-memory/SHM path for basic 2D and GDI-style windows.
-- Vulkan/DXVK path only when the device driver and extensions are proven compatible.
-- WineD3D and legacy DirectDraw/Direct3D fallbacks for older games.
-- D3D12 through VKD3D only on validated driver/device combinations.
-
-The CPU-only SteamTest example does not establish that DXVK works on arbitrary Android GPUs.
-
-## RamenWine decision
-
-Do not add Piperella as a Gradle dependency or vendor its source at this stage.
-
-Use it as a technical reference for:
-- Android SurfaceView + EGL lifecycle;
-- Wayland server/socket lifecycle;
-- JNI contract and thread marshalling;
-- input/IME forwarding;
-- DMA-BUF and wl_shm fallbacks;
-- Wine winewayland.drv environment and per-game prefixes.
-
-In parallel, define a RamenWine-owned display abstraction so the runtime is not permanently coupled to one compositor:
-
-    GameSession
-      ├── RuntimeProcess (Wine / native adapter)
+    GameSessionCoordinator
       ├── DisplayBackend
-      │     ├── WaylandSurfaceBackend (candidate)
-      │     └── X11/XWaylandBackend (legacy fallback candidate)
-      ├── InputRouter
-      └── AudioRouter
+      │     └── WawonaDisplayBackend
+      │           ├── initialize compositor core
+      │           ├── attach/detach Android Surface
+      │           ├── publish/confirm Wayland endpoint
+      │           ├── resize and forward input/IME
+      │           └── stop compositor and release native resources
+      └── RuntimeProcess
+            └── PRoot → Box64 → Wine
 
-A compositor candidate must pass:
-1. a native Wayland client smoke test in an Android SurfaceView;
-2. a Wine GDI/Win32 GUI test (not Steam);
-3. an old 32-bit visual-novel test;
-4. a current 64-bit Wine GUI test;
-5. touch, mouse, keyboard, IME and orientation tests;
-6. pause/resume, Activity recreation and long-session tests;
-7. a Vulkan/DXVK test on each supported GPU family;
-8. a documented license and third-party-notice review.
+The DisplayBackend API should describe capabilities and lifecycle, not expose upstream Wawona types to the game library. A later compositor can implement the same interface.
 
-## Related references
+## Integration sequence
 
-- Piperella repository: https://github.com/Piperella/Piperella-Wayland-Compositor
-- Piperella documentation: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/DOCUMENTATION.md
-- Piperella third-party notices: https://github.com/Piperella/Piperella-Wayland-Compositor/blob/main/THIRD_PARTY_NOTICES.md
-- Piperella Bionic Hangover release project: https://github.com/Piperella/Piperella-Hangover-Bionic
+1. Pin the exact Wawona source revision and record its license and third-party dependency inventory.
+2. Build the arm64-v8a Android native output from that revision using a reproducible toolchain; do not extract unidentified native libraries from a random APK.
+3. Identify the minimal library/asset closure for compositor core, JNI, Android Surface presentation, Vulkan/ANGLE selection and XKB support.
+4. Add a thin RamenWine JNI/Kotlin adapter. Prefer explicit JNI registration over copying the entire upstream application package; keep upstream changes isolated and traceable.
+5. Start the compositor on the app cache path, wait for compositor-ready and verify that the Wayland socket is actually connectable before exposing a session.
+6. Attach a RamenWine SurfaceView, test create/change/destroy and Activity pause/resume, and ensure surface teardown does not stop a newer surface.
+7. Launch an original Wayland client smoke program, then a Wine Win32 GDI test program through the existing PRoot builder.
+8. Verify IME, touch, mouse, hardware keyboard, orientation, focus, exit and complete cleanup on a physical ARM64 device.
+
+## Acceptance gates
+
+- A Wayland client can connect to the socket while RamenWine owns the Android Surface.
+- A minimal Wine Win32 GUI window is visible in the RamenWine surface.
+- Surface recreation and Activity lifecycle do not leave stale Vulkan swapchains or compositor threads.
+- Process exit closes Wine/Box64/PRoot children and compositor resources.
+- The license/NOTICE inventory exactly matches the linked and bundled components.
+- The same test is reproducible on the documented Android version, SoC, GPU and driver.
+
+Passing an asset hash test, loading a shared library, seeing a compositor-ready flag or building an APK is not by itself proof that Wine windows render correctly.

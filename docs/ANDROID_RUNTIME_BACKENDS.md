@@ -89,7 +89,7 @@ executableFiles=bin/wine
 - Every path in `executableFiles` must also appear in `requiredFiles` and have executable permissions.
 - A valid manifest and file inventory mean only **FILES_PRESENT**, not that Wine can launch a game.
 
-A future package installer must validate package SHA-256 digests before extraction and must extract into a staging directory before atomically activating a runtime version. The runtime package manifest is trusted only after its package digest has been verified.
+The implemented Android installer validates each listed payload file against its manifest SHA-256 before activation, extracts into app-private staging storage, and rolls back to the previous backend if the post-install inventory check fails. The manifest is still not an authenticated publisher statement when it is carried inside the same ZIP.
 
 ## Prototype and comparison plan
 
@@ -131,24 +131,26 @@ Graphics selection remains a separate router:
 ## Current implementation status
 
 Implemented in RamenWine:
-- `RuntimeBackendId` for the three package families;
-- a bounded `runtime.properties` inventory reader;
-- checks for host ABI, safe relative paths, required files and executable bits;
-- UI display of backend states;
-- JVM tests for missing, incomplete, complete and path-escape cases.
+- RuntimeBackendId and inventory for the three backend package families.
+- Bounded runtime.properties inspection, host ABI checks, safe relative paths, required-file presence, executable-bit checks and symlink containment.
+- Offline ZIP installer with bounded streaming extraction, runtime-manifest parsing, SHA-256 verification, executable flag restoration, symlink validation, staging, activation and rollback after post-install inventory failure.
+- Python runtime package builder in tools/package_runtime.py.
+- Android UI for selecting a local ZIP and displaying per-backend inventory state.
+- ProotWineCommandBuilder for the glibc/PRoot path. It requires host/bin/proot, host/lib, rootfs/usr/bin/box64 and rootfs/usr/bin/wine, then builds a PRoot argument vector and per-game bind/environment configuration.
+- ProotWineProcessSupervisor for ProcessBuilder start, merged diagnostic output, exit notification and graceful/forced stop.
 
-Not implemented yet:
-- no Wine, FEX, Box64 or PRoot runtime package is bundled;
-- no rootfs is built or installed;
-- no runtime package installer or checksum verifier exists;
-- no EXE launch process exists;
-- no graphics backend is integrated;
-- no physical-device performance/compatibility results exist.
+These are package-management and launch-scaffolding capabilities. No production Wine/Box64/FEX/PRoot binaries or rootfs are bundled. The command builder requires a pre-existing Wayland socket; RamenWine does not yet create one. The supervisor is not yet connected to the Compose UI and has not been validated against Wine/Box64 child-process trees on a physical device. No Windows EXE launch is claimed.
+
+Not implemented or not proven:
+- Signed runtime metadata or a pinned release signing key. SHA-256 protects payload consistency, not publisher identity.
+- Runtime binary acquisition/build pipeline and a production rootfs.
+- First-time per-game Wine prefix initialization.
+- Wawona or another Android Wayland compositor integration.
+- Wine GUI display, graphics translation, audio and input on a physical device.
 
 ## Rule
 
-Bionic-native is the performance-first experiment; glibc + PRoot is the compatibility fallback. Production default is chosen only from reproducible device and game test results.
-
+Bionic-native remains the performance-first experiment; glibc + PRoot remains the compatibility fallback. Production default must be chosen from reproducible device and game results, not theoretical performance. Keep the current offline installer and backend inventory as infrastructure, but do not label an installed package launch-ready until the real smoke tests pass.
 
 ## Offline runtime package format
 
