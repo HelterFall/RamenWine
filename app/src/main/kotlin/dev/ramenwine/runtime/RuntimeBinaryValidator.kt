@@ -40,11 +40,12 @@ internal object RuntimeBinaryValidator {
             }
         }
 
-        val wineboot = winebootCandidates
+        val winebootFiles = winebootCandidates
             .asSequence()
             .mapNotNull { resolveInside(backendRoot, it) }
-            .firstOrNull { it.isFile && it.canRead() }
-        if (wineboot != null && !isX86_64Pe32Plus(wineboot)) {
+            .filter { it.isFile && it.canRead() }
+            .toList()
+        if (winebootFiles.isNotEmpty() && winebootFiles.none(::isX86_64Pe32Plus)) {
             errors += "Wine prefix initializer must be an x86-64 PE32+ executable."
         }
 
