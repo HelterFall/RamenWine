@@ -1,5 +1,7 @@
 package dev.ramenwine.inspection
 
+import java.io.InputStream
+
 /**
  * A bounded PE header reader. It never executes or loads the inspected file.
  *
@@ -13,6 +15,68 @@ object PeHeaderInspector {
     private const val COFF_HEADER_SIZE = 20
     private const val PE_OFFSET_FIELD = 0x3C
     private const val MAX_ACCEPTED_PE_OFFSET = 1024 * 1024
+
+    /**
+     * Reads only the DOS header and the PE/COFF headers from a stream.
+     * The file is never loaded wholesale; the read remains bounded by the
+     * maximum accepted e_lfanew offset plus the fixed PE/COFF header size.
+     */
+    fun inspect(input: InputStream): PeInspection? {
+        val dosHeader = readUpTo(input, DOS_HEADER_SIZE)
+        if (dosHeader.size < DOS_HEADER_SIZE ||
+            dosHeader[0] != 'M'.code.toByte() ||
+            dosHeader[1] != 'Z'.code.toByte()
+        ) {
+            return inspect(dosHeader)
+        }
+
+        val peOffset = readUInt32LittleEndian(dosHeader, PE_OFFSET_FIELD)
+        if (peOffset > MAX_ACCEPTED_PE_OFFSET.toLong()) {
+            return inspect(dosHeader)
+        }
+
+        val requiredLength = (peOffset + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE)
+            .toInt()
+            .coerceAtLeast(DOS_HEADER_SIZE)
+        if (requiredLength == DOS_HEADER_SIZE) {
+            return inspect(dosHeader)
+        }
+
+        val prefix = ByteArray(requiredLength)
+        System.arraycopy(dosHeader, 0, prefix, 0, dosHeader.size)
+        var total = dosHeader.size
+        while (total < requiredLength) {
+            val count = input.read(prefix, total, requiredLength - total)
+            when {
+                count < 0 -> break
+                count == 0 -> {
+                    val next = input.read()
+                    if (next < 0) break
+                    prefix[total++] = next.toByte()
+                }
+                else -> total += count
+            }
+        }
+        return inspect(prefix.copyOf(total))
+    }
+
+    private fun readUpTo(input: InputStream, maxBytes: Int): ByteArray {
+        val prefix = ByteArray(maxBytes)
+        var total = 0
+        while (total < maxBytes) {
+            val count = input.read(prefix, total, maxBytes - total)
+            when {
+                count < 0 -> break
+                count == 0 -> {
+                    val next = input.read()
+                    if (next < 0) break
+                    prefix[total++] = next.toByte()
+                }
+                else -> total += count
+            }
+        }
+        return prefix.copyOf(total)
+    }
 
     fun inspect(prefix: ByteArray): PeInspection? {
         if (prefix.size < 2 || prefix[0] != 'M'.code.toByte() || prefix[1] != 'Z'.code.toByte()) {
