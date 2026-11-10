@@ -158,7 +158,7 @@ The JVM tests use a controlled fake PRoot process that creates the expected regi
 
 The command builder refuses to construct a launch if the Wayland socket is absent, is not an actual Unix-domain socket (checked with Android lstat), or its runtime directory resolves outside the app-private cache directory. It requires both guest glibc loaders — ARM64 for Box64 and x86-64 for Wine — plus all three Wine Wayland components: the x86-64 Unix ELF module, the AMD64 PE driver and the i386 PE driver. This catches a rootfs with the wrong ABI or missing display payload before starting a process.
 
-The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The RamenWine adapter source is present, but its pinned Nix-built native payload still has to be generated/staged and its Vulkan surface must pass a physical-device smoke test. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. The library's **Играть** action is already wired to `GamePlayerActivity`, which opens the dedicated game-only surface and delegates launch to this coordinator. However, the action is enabled only when `RuntimeLayout` reports `FILES_PRESENT`; that state checks package contents and permissions, not whether Wine can actually boot. The full runtime ZIP and Wawona native payload still have not been built, installed and verified on a physical phone.
+The intended display endpoint is an Android-host Unix socket supplied by WawonaDisplayBackend. The pinned Wawona native payload has already been packaged into a successful debug APK and its library/asset inventory passed the APK verification step. The first phone test then failed inside `WawonaRuntimeAssets` before the compositor reached rendering: the provenance allow-list omitted the optional `wawona/vulkan/icd.d/vk_swiftshader_icd.json` entry included by the pinned APK. The source now accepts, maps, copies and hash-verifies this exact ICD subtree; a new APK and physical-device SHM rendering retest are still pending. Wawona's Android target is an application rather than a reusable AAR; see [Wawona Integration](WAWONA_INTEGRATION.md). GameLaunchCoordinator starts the supplied backend, validates its resulting socket, builds the command and owns the display/process lifetime. The library's **Играть** action is wired to `GamePlayerActivity`, which opens the dedicated game-only surface and delegates launch to this coordinator. The action is enabled only when `RuntimeLayout` reports `FILES_PRESENT`; that state checks package contents and permissions, not whether Wine can actually boot. The complete PRoot/Box64/Wine runtime has not yet been built or installed on the phone.
 
 Wine's Wayland driver must be present and successfully selected. Wine's Wayland driver is not a universal solution for every old application; legacy X11-only dependencies and incomplete Wayland protocol support still need a fallback display strategy.
 
@@ -182,10 +182,25 @@ The main-library Play action and the immersive game Activity are wired in source
 
 1. Build the pinned Android/Bionic PRoot host payload and run it under the app UID.
 2. Build the Ubuntu ARM64 rootfs, ARM64 Box64 and x86-64 Wine 11 WoW64 runtime. The packager must validate both ELF dependency closures and every PE image in both Wine architecture directories.
-3. Install the runtime ZIP on an ARM64 phone, then run Box64 and an x86-64 Linux smoke program inside the PRoot guest.
+3. Once the app-managed RuntimeProvisioner exists, let RamenWine fetch, verify and install its pinned runtime artifact internally; then run Box64 and an x86-64 Linux smoke program inside the PRoot guest. Do not expose a ZIP picker to the player.
 4. Create a real per-game Wine prefix using Wine 11 wineboot.exe --init; confirm the two registry files and the #arch=win64 marker.
 5. Build and stage the pinned Wawona native payload. Show a real Wayland SHM test-client window on the Android Surface; a ready socket or native running flag alone is insufficient.
 6. In a debug build, launch both bundled x86-64 and x86 Wayland probes from the developer buttons. Confirm that their fullscreen Windows windows render directly on the game Surface, without a Windows desktop shell; tap the screen and confirm the touch message changes.
 7. Verify touch-to-click, pointer movement, keyboard input, resize, exit, pause/resume, Activity recreation and full process cleanup on the device.
 8. Run both 32-bit and 64-bit Windows samples, then test an appropriately licensed visual novel and record its engine, architecture and device configuration.
 No actual Windows EXE launch is claimed until these gates pass.
+
+## Runtime delivery boundary
+
+The archive format in this document is an internal packaging contract. The
+Android player UI must not ask for a local runtime ZIP. The planned
+RuntimeProvisioner will obtain an immutable versioned package and signed
+release index from the RamenWine distribution channel, verify the pinned
+signature and file hashes, stage the package under app-private storage, run
+the ABI/dependency validators, and activate it atomically with rollback.
+
+Until that provisioner and a signed runtime artifact exist, the selected EXE
+may be scanned/imported but the Play action remains disabled when the runtime
+is missing. This is an honest development gate, not a player setup step.
+
+See [Runtime Delivery](RUNTIME_DELIVERY.md).
