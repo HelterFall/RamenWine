@@ -1,10 +1,8 @@
 name: Package final RamenWine APK (manual, end-of-project only)
 
-# The feature-branch push trigger is enabled for this requested APK
-# validation run. Restore manual-only triggering after the package is verified.
+# Deliberately manual-only. The installable APK is assembled on request;
+# runtime development checks remain in the separate focused workflow.
 on:
-  push:
-    branches: [feature/wawona-shm-smoke]
   workflow_dispatch:
 
 concurrency:
