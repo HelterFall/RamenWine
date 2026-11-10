@@ -71,6 +71,7 @@ internal class WinePrefixManager(
         append("schema=1\n")
         append("backend=glibc-proot-box64\n")
         append("runtimeVersion=").append(command.runtimeVersion).append('\n')
+        append("locale=").append(command.guestEnvironment["LC_ALL"].orEmpty()).append('\n')
     }
 
     private fun writeMarkerAtomically(marker: File, contents: String) {

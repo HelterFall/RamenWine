@@ -16,7 +16,9 @@ download a language pack.
 Existing library records that predate this setting are read with the Japanese
 default. Changing a game's profile updates only its library metadata and takes
 effect the next time that game is launched; it does not reset its Wine prefix or
-save files.
+save files. The prefix marker records the locale, so a changed profile causes the
+prefix manager to run Wine's normal `wineboot -u` update using the newly selected
+locale before starting the game.
 
 ## Important compatibility boundary
 
