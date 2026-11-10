@@ -350,13 +350,18 @@ def validate_backend_payload(
         resolve_manifest_file(path, files_by_path, links_by_path)
         for path in wayland_driver_paths
     ]
+    if not wayland_driver_paths or not any(wayland_drivers):
+        raise ValueError(
+            "runtime is missing the Wine Wayland driver Unix library (winewayland.so)"
+        )
+
     valid_wayland_drivers = [
         item for item in wayland_drivers
         if item is not None and read_elf_identity(item.source_path) == (2, 1, 62)
     ]
     if not valid_wayland_drivers:
         raise ValueError(
-            "runtime is missing the x86-64 Wine Wayland Unix library (winewayland.so)"
+            "Wine Wayland driver Unix library must be a 64-bit x86-64 ELF"
         )
 
     if runtime_root is not None:
