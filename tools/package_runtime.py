@@ -76,22 +76,31 @@ def sha256_file(path: Path) -> str:
 
 
 def resolve_symlink_inside(root: Path, link_path: Path, target: str) -> Path:
-    if not target or "\\\\" in target or "\\x00" in target or any(ord(ch) < 32 for ch in target):
+    if not target or "\\" in target or "\x00" in target or any(ord(ch) < 32 for ch in target):
         raise ValueError(f"invalid symlink target for {link_path}: {target!r}")
 
     root_real = root.resolve(strict=True)
+    relative_link = link_path.relative_to(root_real).as_posix()
+    domain = relative_link.split("/", 1)[0]
+    domain_root = root_real / domain if domain in {"rootfs", "host"} else root_real
+
     if target.startswith("/"):
-        candidate = root_real / target.lstrip("/")
+        if domain == "host":
+            raise ValueError(
+                f"absolute host symlinks are not allowed: {link_path} -> {target}"
+            )
+        absolute_root = domain_root if domain == "rootfs" else root_real
+        candidate = absolute_root / target.lstrip("/")
     else:
         candidate = link_path.parent / target
 
-    # Normalize existing symlinks, but allow a missing tail under virtual
-    # mount points such as /proc/self/fd that PRoot supplies at runtime.
+    # Absolute Linux links in rootfs use the guest root, not the package root.
+    # Host links must remain inside the Android-host payload.
     resolved = candidate.resolve(strict=False)
     try:
-        resolved.relative_to(root_real)
+        resolved.relative_to(domain_root)
     except ValueError as exc:
-        raise ValueError(f"symlink escapes runtime root: {link_path} -> {target}") from exc
+        raise ValueError(f"symlink escapes its runtime domain: {link_path} -> {target}") from exc
 
     probe = resolved
     while not probe.exists() and not probe.is_symlink():
@@ -175,13 +184,111 @@ def scan_runtime(root: Path, max_bytes: int) -> tuple[list[PackageFile], list[Pa
     return files, symlinks
 
 
+def resolve_manifest_file(
+    requested_path: str,
+    files_by_path: dict[str, PackageFile],
+    symlinks_by_path: dict[str, PackageSymlink],
+) -> PackageFile | None:
+    current = requested_path
+    visited: set[str] = set()
+
+    for _ in range(40):
+        if current in visited:
+            return None
+        visited.add(current)
+        file_entry = files_by_path.get(current)
+        if file_entry is not None:
+            return file_entry
+        link = symlinks_by_path.get(current)
+        if link is None:
+            return None
+
+        domain = current.split("/", 1)[0]
+        target = link.target
+        if not target or "\\" in target or "\x00" in target or any(ord(ch) < 32 for ch in target):
+            return None
+        if target.startswith("/") and domain == "host":
+            return None
+
+        if target.startswith("/"):
+            parts = (["rootfs"] if domain == "rootfs" else []) + target.lstrip("/").split("/")
+        else:
+            parts = current.split("/")[:-1] + target.split("/")
+
+        normalized: list[str] = []
+        for part in parts:
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not normalized:
+                    return None
+                normalized.pop()
+            else:
+                normalized.append(part)
+        if not normalized:
+            return None
+        if domain in {"rootfs", "host"} and normalized[0] != domain:
+            return None
+        current = "/".join(normalized)
+    return None
+
+
+def validate_backend_payload(
+    backend: str,
+    files: Iterable[PackageFile],
+    symlinks: Iterable[PackageSymlink],
+) -> None:
+    if backend != "glibc-proot-box64":
+        return
+
+    file_items = list(files)
+    link_items = list(symlinks)
+    files_by_path = {item.relative_path: item for item in file_items}
+    links_by_path = {item.relative_path: item for item in link_items}
+
+    required_executables = (
+        "host/bin/proot",
+        "rootfs/usr/bin/env",
+        "rootfs/usr/bin/box64",
+        "rootfs/usr/bin/wine",
+    )
+    for path in required_executables:
+        item = resolve_manifest_file(path, files_by_path, links_by_path)
+        if item is None:
+            raise ValueError(f"runtime is missing required executable: {path}")
+        if not item.executable:
+            raise ValueError(f"runtime file is not executable: {path}")
+
+    wineboot_candidates = (
+        "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",
+        "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+    )
+    if not any(
+        resolve_manifest_file(path, files_by_path, links_by_path) is not None
+        for path in wineboot_candidates
+    ):
+        raise ValueError("runtime is missing Wine prefix initializer (wineboot.exe)")
+
+    has_host_library_payload = (
+        any(item.relative_path.startswith("host/lib/") for item in file_items) or
+        any(item.relative_path == "host/lib" or item.relative_path.startswith("host/lib/")
+            for item in link_items)
+    )
+    if not has_host_library_payload:
+        raise ValueError("runtime has no packaged host/lib content")
+
+
 def make_manifest(
     backend: str,
     version: str,
     files: Iterable[PackageFile],
     symlinks: Iterable[PackageSymlink],
 ) -> bytes:
-    manifest = {
+    files = list(files)
+    symlinks = list(symlinks)
+    if backend not in BACKENDS:
+        raise ValueError(f"unsupported runtime backend: {backend}")
+    validate_backend_payload(backend, files, symlinks)
         "schemaVersion": 1,
         "backendId": backend,
         "hostAbi": "arm64-v8a",

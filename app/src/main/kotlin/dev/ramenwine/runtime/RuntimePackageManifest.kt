@@ -110,13 +110,18 @@ object RuntimePackageManifestParser {
             }
         }
 
-        return RuntimePackageManifest(
+        val manifest = RuntimePackageManifest(
             backend = backend,
             hostAbi = hostAbi,
             runtimeVersion = version,
             files = files,
             symlinks = symlinks
         )
+        val requirementErrors = RuntimePackageRequirements.validateManifest(manifest)
+        require(requirementErrors.isEmpty()) {
+            "Runtime package is incomplete: " + requirementErrors.joinToString("; ")
+        }
+        return manifest
     }
 
     private const val SUPPORTED_SCHEMA_VERSION = 1

@@ -44,24 +44,31 @@ object SafeRuntimePath {
             target.contains('\\') ||
             target.contains('\u0000') ||
             target.any { it.isISOControl() }
-        ) {
-            return null
-        }
+        ) return null
 
         return runCatching {
+            val safeLinkPath = normalizeRelativePath(linkRelativePath) ?: return null
             val rootPath = runtimeRoot.canonicalFile.toPath().normalize()
-            val linkPath = rootPath.resolve(linkRelativePath).normalize()
+            val linkPath = rootPath.resolve(safeLinkPath).normalize()
             val linkParent = linkPath.parent ?: return null
+            val domain = safeLinkPath.substringBefore('/')
+            val domainRoot = if (domain == "rootfs" || domain == "host") {
+                rootPath.resolve(domain).normalize()
+            } else {
+                rootPath
+            }
+
+            // Absolute links in rootfs are relative to the guest root.
+            // Absolute host links would point outside app-private storage.
             val targetPath = if (target.startsWith('/')) {
-                rootPath.resolve(target.removePrefix("/")).normalize()
+                if (domain == "host") return null
+                val absoluteRoot = if (domain == "rootfs") domainRoot else rootPath
+                absoluteRoot.resolve(target.removePrefix("/")).normalize()
             } else {
                 linkParent.resolve(target).normalize()
             }
 
-            if (!targetPath.startsWith(rootPath)) {
-                return null
-            }
-
+            if (!targetPath.startsWith(domainRoot)) return null
             linkParent.relativize(targetPath).toString()
                 .replace(File.separatorChar, '/')
         }.getOrNull()

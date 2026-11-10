@@ -161,6 +161,8 @@ object RuntimeLayout {
             }
         }
 
+        missing += RuntimePackageRequirements.inspectInstalled(backend, backendRoot)
+
         return RuntimeBackendInspection(
             backend = backend,
             state = if (missing.isEmpty()) {
@@ -214,18 +216,28 @@ object RuntimeLayout {
             val linkPath = backendRoot.toPath().resolve(safeRelativePath).normalize()
             if (!linkPath.startsWith(rootPath)) return false
 
+            val domain = safeRelativePath.substringBefore('/')
+            val domainRoot = if (domain == "rootfs" || domain == "host") {
+                rootPath.resolve(domain).normalize()
+            } else {
+                rootPath
+            }
+            if (!linkPath.startsWith(domainRoot)) return false
+
             val parent = linkPath.parent ?: return false
             val realParent = parent.toRealPath()
-            if (!realParent.startsWith(rootPath)) return false
+            if (!realParent.startsWith(domainRoot)) return false
             if (!Files.isSymbolicLink(linkPath)) return false
 
             val rawTarget = Files.readSymbolicLink(linkPath)
+            if (rawTarget.isAbsolute && domain == "host") return false
+            val absoluteRoot = if (domain == "rootfs") domainRoot else rootPath
             val targetPath = if (rawTarget.isAbsolute) {
-                rootPath.resolve(rawTarget.toString().removePrefix("/")).normalize()
+                absoluteRoot.resolve(rawTarget.toString().removePrefix("/")).normalize()
             } else {
                 linkPath.parent.resolve(rawTarget).normalize()
             }
-            if (!targetPath.startsWith(rootPath)) return false
+            if (!targetPath.startsWith(domainRoot)) return false
 
             // Rootfs symlinks may point to virtual mount paths such as
             // /proc/self/fd. Their final component may not exist until PRoot
@@ -239,7 +251,7 @@ object RuntimeLayout {
             }
 
             val realAncestor = existingAncestor.toRealPath()
-            realAncestor.startsWith(rootPath)
+            realAncestor.startsWith(domainRoot)
         }.getOrDefault(false)
     }
 
