@@ -60,7 +60,7 @@ class RuntimeBinaryValidatorTest {
                 backendRoot
             )
 
-            assertTrue(errors.any { it.contains("Wine Wayland display driver is missing") })
+            assertTrue(errors.any { it.contains("Wine Wayland Unix library is missing") })
         } finally {
             root.deleteRecursively()
         }
