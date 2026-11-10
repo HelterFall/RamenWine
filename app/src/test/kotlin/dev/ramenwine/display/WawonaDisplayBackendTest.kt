@@ -193,13 +193,14 @@ class WawonaDisplayBackendTest {
     }
 
     @Test
-    fun verifiesExactXkbFontAndWestonAssetHashes() {
+    fun verifiesExactXkbFontWestonAndVulkanIcdAssetHashes() {
         val root = Files.createTempDirectory("ramenwine-wawona-assets").toFile()
         try {
             val assetContents = mapOf(
                 "wawona/xkb/rules/evdev" to "rules",
                 "wawona/fonts/truetype/test.ttf" to "font",
-                "wawona/weston/sign_close.png" to "decoration"
+                "wawona/weston/sign_close.png" to "decoration",
+                "wawona/vulkan/icd.d/vk_swiftshader_icd.json" to "icd manifest"
             )
             val hashes = assetContents.mapValues { (path, content) ->
                 writeIntegrityFixture(root, path, content)
@@ -251,6 +252,12 @@ class WawonaDisplayBackendTest {
             assertFalse(
                 WawonaAssetIntegrity.matches(
                     root,
+                    mapOf("wawona/vulkan/layers/unsafe.json" to "0".repeat(64))
+                )
+            )
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
                     mapOf("wawona/xkb/rules/evdev" to "not-a-sha256")
                 )
             )
@@ -289,6 +296,9 @@ class WawonaDisplayBackendTest {
                 "usr/share/fonts/" + assetPath.removePrefix("wawona/fonts/")
             assetPath.startsWith("wawona/weston/") ->
                 "usr/share/weston/" + assetPath.removePrefix("wawona/weston/")
+            assetPath.startsWith("wawona/vulkan/icd.d/") ->
+                "usr/share/vulkan/icd.d/" +
+                    assetPath.removePrefix("wawona/vulkan/icd.d/")
             else -> error("Unexpected Wawona asset path in test fixture.")
         }
         File(root, relativePath).apply {
