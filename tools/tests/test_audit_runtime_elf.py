@@ -54,6 +54,28 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 for issue in report["issues"]
             ))
 
+    def test_guest_absolute_rpath_is_resolved_under_rootfs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            binary = rootfs / "usr/bin/box64"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(dynamic_elf64(183, "libdummy.so"))
+            info = audit_runtime_elf.ElfInfo(
+                path=binary,
+                machine=183,
+                interpreter=None,
+                needed=("libdummy.so",),
+                rpath=("/usr/local/runtime-libs",),
+                runpath=(),
+            )
+            lib = rootfs / "usr/local/runtime-libs/libdummy.so"
+            lib.parent.mkdir(parents=True)
+            lib.write_bytes(b"dummy")
+
+            self.assertTrue(
+                audit_runtime_elf._dependency_exists(rootfs, info, "libdummy.so")
+            )
+
     def test_resolves_dependencies_from_matching_architecture_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"

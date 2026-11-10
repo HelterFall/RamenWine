@@ -231,16 +231,24 @@ def _expanded_rpath_directories(
     for entry in value.split(":"):
         if not entry:
             continue
-        expanded = entry.replace("$ORIGIN", str(origin))
-        expanded = expanded.replace("$PLATFORM", architecture)
-        if "$LIB" in expanded:
-            for library_token in library_tokens:
-                candidate_text = expanded.replace("$LIB", library_token)
-                candidate = Path(candidate_text)
-                results.append(candidate if candidate.is_absolute() else origin / candidate)
-        else:
-            candidate = Path(expanded)
-            results.append(candidate if candidate.is_absolute() else origin / candidate)
+
+        has_origin = "$ORIGIN" in entry or "${ORIGIN}" in entry
+        expanded = entry.replace("${ORIGIN}", str(origin)).replace("$ORIGIN", str(origin))
+        expanded = expanded.replace("${PLATFORM}", architecture).replace("$PLATFORM", architecture)
+        guest_absolute = entry.startswith("/") and not has_origin
+
+        token_values = library_tokens if "$LIB" in expanded or "${LIB}" in expanded else ("",)
+        for library_token in token_values:
+            candidate_text = expanded
+            if library_token:
+                candidate_text = candidate_text.replace("${LIB}", library_token).replace("$LIB", library_token)
+            candidate = Path(candidate_text)
+            if guest_absolute:
+                results.append(root / candidate.as_posix().lstrip("/"))
+            elif candidate.is_absolute():
+                results.append(candidate)
+            else:
+                results.append(origin / candidate)
     return results
 
 

@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from audit_runtime_elf import ElfAuditError, audit_rootfs
+
 MAX_ENTRIES = 100_000
 MAX_TOTAL_BYTES = 64 * 1024 * 1024 * 1024
 CHUNK_SIZE = 256 * 1024
@@ -270,6 +272,7 @@ def validate_backend_payload(
     backend: str,
     files: Iterable[PackageFile],
     symlinks: Iterable[PackageSymlink],
+    runtime_root: Path | None = None,
 ) -> None:
     if backend != "glibc-proot-box64":
         return
@@ -315,18 +318,34 @@ def validate_backend_payload(
     if not is_x86_64_pe32_plus(wineboot.source_path):
         raise ValueError("Wine prefix initializer must be an x86-64 PE32+ executable")
 
+    if runtime_root is not None:
+        try:
+            report = audit_rootfs(runtime_root / "rootfs")
+        except (OSError, ElfAuditError) as error:
+            raise ValueError(f"could not audit guest ELF dependencies: {error}") from error
+        if report["issues"]:
+            details = "; ".join(
+                f"{item['file']}: {item['kind']} ({item['detail']})"
+                for item in report["issues"][:20]
+            )
+            remaining = len(report["issues"]) - 20
+            if remaining > 0:
+                details += f"; and {remaining} more issue(s)"
+            raise ValueError("guest rootfs has unresolved ELF dependencies: " + details)
+
 
 def make_manifest(
     backend: str,
     version: str,
     files: Iterable[PackageFile],
     symlinks: Iterable[PackageSymlink],
+    runtime_root: Path | None = None,
 ) -> bytes:
     files = list(files)
     symlinks = list(symlinks)
     if backend not in BACKENDS:
         raise ValueError(f"unsupported runtime backend: {backend}")
-    validate_backend_payload(backend, files, symlinks)
+    validate_backend_payload(backend, files, symlinks, runtime_root=runtime_root)
     manifest = {
         "schemaVersion": 1,
         "backendId": backend,
@@ -432,7 +451,13 @@ def main() -> int:
         if not files:
             raise ValueError("runtime root contains no regular files")
 
-        manifest = make_manifest(args.backend, args.version, files, symlinks)
+        manifest = make_manifest(
+            args.backend,
+            args.version,
+            files,
+            symlinks,
+            runtime_root=root_real,
+        )
         write_zip(args.output, manifest, files)
 
         total_bytes = sum(item.size_bytes for item in files)

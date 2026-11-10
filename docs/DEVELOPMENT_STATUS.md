@@ -21,6 +21,7 @@
 - Rootfs-aware absolute symlink handling: Linux absolute links inside rootfs resolve from the guest root, remain confined to rootfs and are rewritten as app-private relative links; absolute host-payload links are rejected.
 - Python runtime package builder with manifest, hashes, executable flags, symlink metadata and glibc/PRoot launch-prerequisite validation.
 - Pinned runtime source acquisition: exact Termux PRoot and Box64 commits plus checksum-verified talloc and Wine WOW64 archives; fetcher emits local source provenance but does not build binaries.
+- Static guest ELF dependency audit: package generation checks ARM64/x86-64 ELF interpreters and direct DT_NEEDED libraries, including architecture-specific paths, before emitting a glibc/PRoot ZIP.
 - PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, prepares per-game directories and creates an argument-vector without a shell.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.

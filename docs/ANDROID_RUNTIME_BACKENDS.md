@@ -261,3 +261,29 @@ inputs, not a production release guarantee. Before runtime distribution, RamenWi
 must review upstream licenses/notices, generate a dependency closure, run the
 binary/package checks, sign the release metadata and move the player flow away from
 manual ZIP selection to an app-managed component download.
+
+
+### Guest ELF dependency audit
+
+Before emitting a glibc/PRoot runtime ZIP, \`tools/package_runtime.py\` now calls
+\`tools/audit_runtime_elf.py\` against the supplied \`rootfs/\`. The audit reads
+ELF64 program headers and dynamic tables without executing guest binaries. It
+checks each guest ELF's interpreter, architecture and direct \`DT_NEEDED\`
+libraries, using the binary's RPATH/RUNPATH plus the matching ARM64 or x86-64
+library directories.
+
+For investigation without packaging:
+
+\`\`\`bash
+python3 tools/audit_runtime_elf.py --rootfs path/to/backend/rootfs --json
+\`\`\`
+
+Add \`--strict\` to return a non-zero exit status when the report contains
+missing interpreters, unresolved direct library dependencies, malformed ELF
+headers or unsupported ELF architectures. Package generation always uses
+strict behavior for the glibc/PRoot backend.
+
+This is not a complete dynamic-loader emulator. It does not discover libraries
+loaded only with \`dlopen\`, Wine plugins loaded at runtime, Vulkan ICDs, audio
+drivers, or Android linker namespace behavior. A clean report is a prerequisite
+for packaging, not proof that Wine or a Windows game launches.

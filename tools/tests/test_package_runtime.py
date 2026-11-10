@@ -13,6 +13,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import package_runtime
 
 
+
+def package_runtime_test_dynamic_elf64(machine: int, needed: str) -> bytes:
+    data = bytearray(768)
+    data[:4] = b"\x7fELF"
+    data[4:7] = bytes((2, 1, 1))
+    struct.pack_into("<HHIQQQIHHHHHH", data, 16,
+                     2, machine, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0)
+    struct.pack_into("<IIQQQQQQ", data, 64,
+                     1, 4, 0, 0x400000, 0, len(data), len(data), 0x1000)
+    dynamic_offset = 0x100
+    string_offset = 0x200
+    string_table = b"\x00" + needed.encode("utf-8") + b"\x00"
+    entries = (
+        (5, 0x400000 + string_offset),
+        (10, len(string_table)),
+        (1, 1),
+        (0, 0),
+    )
+    for index, (tag, value) in enumerate(entries):
+        struct.pack_into("<qQ", data, dynamic_offset + index * 16, tag, value)
+    struct.pack_into("<IIQQQQQQ", data, 120,
+                     2, 6, dynamic_offset, 0x400000 + dynamic_offset,
+                     0, len(entries) * 16, len(entries) * 16, 8)
+    data[string_offset:string_offset + len(string_table)] = string_table
+    return bytes(data)
+
+
 class RuntimePackagerTests(unittest.TestCase):
     def write_elf64(self, path: Path, machine: int) -> None:
         header = bytearray(64)
@@ -143,6 +170,27 @@ class RuntimePackagerTests(unittest.TestCase):
             parsed = json.loads(manifest)
             self.assertEqual(parsed["backendId"], "glibc-proot-box64")
             self.assertFalse(any(item["path"].startswith("host/lib/") for item in parsed["files"]))
+
+
+    def test_glibc_packager_rejects_missing_guest_elf_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            box64 = root / "rootfs/usr/bin/box64"
+            box64.write_bytes(
+                package_runtime_test_dynamic_elf64(183, "libmissing-runtime.so.1")
+            )
+            box64.chmod(0o755)
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "unresolved ELF dependencies"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64",
+                    "test-1",
+                    files,
+                    symlinks,
+                    runtime_root=root,
+                )
 
     def test_glibc_manifest_requires_launch_components(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
