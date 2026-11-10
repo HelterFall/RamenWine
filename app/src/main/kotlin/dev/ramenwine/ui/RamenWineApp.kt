@@ -22,6 +22,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.GameSession
 import dev.ramenwine.runtime.GameSessionCoordinator
 import dev.ramenwine.runtime.NativeRuntime
+import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
 import dev.ramenwine.runtime.RuntimeState
@@ -93,28 +95,28 @@ fun RamenWineApp() {
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
     var processOutput by remember { mutableStateOf("") }
 
-    val runtimePackagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null && !installingRuntime) {
+
+    LaunchedEffect(context.filesDir) {
+        val installedBackend = RuntimeLayout.inspect(context.filesDir)
+            .backends
+            .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+
+        if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
             installingRuntime = true
             runtimePackageError = null
             runtimePackageNotice = null
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        RuntimePackageInstaller(context.applicationContext).install(uri)
-                    }
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                    runtimePackageNotice = result.backend.displayName +
-                        " · " + result.runtimeVersion +
-                        " · " + result.installedFileCount + " файлов"
-                } catch (error: Exception) {
-                    runtimePackageError = error.message ?: error.javaClass.simpleName
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                } finally {
-                    installingRuntime = false
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    RuntimePackageInstaller(context.applicationContext).installBundled()
                 }
+                runtimeInspection = RuntimeLayout.inspect(context.filesDir)
+                runtimePackageNotice = result.runtimeVersion +
+                    " · " + result.installedFileCount + " файлов"
+            } catch (error: Exception) {
+                runtimePackageError = error.message ?: error.javaClass.simpleName
+                runtimeInspection = RuntimeLayout.inspect(context.filesDir)
+            } finally {
+                installingRuntime = false
             }
         }
     }
@@ -311,17 +313,7 @@ fun RamenWineApp() {
 
                 RuntimeStatusCard(
                     runtimeInspection = runtimeInspection,
-                    nativeDiagnostic = nativeDiagnostic,
-                    installingRuntime = installingRuntime,
-                    onInstallRuntime = {
-                        runtimePackagePicker.launch(
-                            arrayOf(
-                                "application/zip",
-                                "application/x-zip-compressed",
-                                "application/octet-stream"
-                            )
-                        )
-                    }
+                    nativeDiagnostic = nativeDiagnostic
                 )
 
                 if (installingRuntime) {
@@ -514,9 +506,7 @@ fun RamenWineApp() {
 @Composable
 private fun RuntimeStatusCard(
     runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
-    nativeDiagnostic: String,
-    installingRuntime: Boolean,
-    onInstallRuntime: () -> Unit
+    nativeDiagnostic: String
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -569,13 +559,6 @@ private fun RuntimeStatusCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(
-                onClick = onInstallRuntime,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !installingRuntime
-            ) {
-                Text(if (installingRuntime) "Установка…" else "Установить runtime из ZIP")
-            }
             HorizontalDivider()
             Text("Native bridge", fontWeight = FontWeight.Bold)
             Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)

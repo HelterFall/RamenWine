@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.zip.ZipInputStream
@@ -35,7 +36,22 @@ data class RuntimeInstallResult(
  * after every file has been verified.
  */
 class RuntimePackageInstaller(private val context: Context) {
-    suspend fun install(packageUri: Uri): RuntimeInstallResult {
+    suspend fun install(packageUri: Uri): RuntimeInstallResult =
+        installFromSource { context.contentResolver.openInputStream(packageUri) }
+
+    suspend fun installBundled(
+        assetPath: String = "runtime/ramenwine-runtime.zip"
+    ): RuntimeInstallResult = installFromSource {
+        try {
+            context.assets.open(assetPath)
+        } catch (error: IOException) {
+            throw IOException("Bundled runtime asset is missing: " + assetPath, error)
+        }
+    }
+
+    private suspend fun installFromSource(
+        openSource: () -> InputStream?
+    ): RuntimeInstallResult {
         val runtimeRoot = File(context.filesDir, "runtime/current")
         val backendsRoot = File(runtimeRoot, "backends")
         if (!backendsRoot.exists() && !backendsRoot.mkdirs()) {
@@ -61,8 +77,8 @@ class RuntimePackageInstaller(private val context: Context) {
             var totalBytes = 0L
             var lastStorageCheckBytes = 0L
 
-            val source = context.contentResolver.openInputStream(packageUri)
-                ?: throw IOException("Could not open the selected runtime package.")
+            val source = openSource()
+                ?: throw IOException("Could not open the runtime package source.")
 
             source.use { rawInput ->
                 ZipInputStream(BufferedInputStream(rawInput)).use { zip ->

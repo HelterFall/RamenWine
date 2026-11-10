@@ -1,4 +1,4 @@
-name: Android CI
+name: Android CI · Prebuilt runtime APK
 
 on:
   push:
@@ -17,11 +17,19 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Enable ARM64 containers for Debian rootfs
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,6 +38,12 @@ jobs:
 
       - name: Test runtime packager
         run: python -m unittest discover -s tools/tests -v
+
+      - name: Assemble runtime from prebuilt PRoot, Box64 and Wine
+        shell: bash
+        run: |
+          chmod +x tools/prepare_prebuilt_runtime.sh
+          tools/prepare_prebuilt_runtime.sh
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -55,11 +69,19 @@ jobs:
         run: |
           gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug lintDebug
 
+      - name: Confirm APK contains the prebuilt runtime payload
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
+          unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" | unzip -t -
+
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ramenwine-debug-apk
+          name: ramenwine-debug-apk-prebuilt-runtime
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

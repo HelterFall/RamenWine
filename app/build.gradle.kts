@@ -41,6 +41,10 @@ android {
             useLegacyPackaging = false
         }
     }
+
+    androidResources {
+        noCompress += "zip"
+    }
 }
 
 kotlin {
