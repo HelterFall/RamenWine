@@ -15,6 +15,15 @@ class ProotWineCommandBuilderTest {
         try {
             val command = ProotWineCommandBuilder.build(fixture.request())
 
+            assertEquals("fixture-runtime-1", command.runtimeVersion)
+            assertEquals(
+                fixture.rootfs.canonicalFile,
+                command.guestRootfsDirectory
+            )
+            assertEquals(
+                File(fixture.filesDirectory, "prefixes/" + fixture.gameId).canonicalFile,
+                command.hostPrefixDirectory
+            )
             assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/env"))
@@ -62,6 +71,58 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsWinebootInitCommandForNewPrefix() {
+        val fixture = Fixture()
+        try {
+            val command = ProotWineCommandBuilder.buildWinebootCommand(
+                ProotWineCommandBuilder.build(fixture.request()),
+                updateExistingPrefix = false
+            )
+            assertEquals(
+                "/usr/lib/wine/x86_64-windows/wineboot.exe",
+                command.guestExecutablePath
+            )
+            assertEquals("-i", command.arguments.last())
+            assertEquals("/usr/bin/box64", command.arguments[command.arguments.size - 4])
+            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 3])
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsWinebootUpdateCommandForExistingPrefix() {
+        val fixture = Fixture()
+        try {
+            val command = ProotWineCommandBuilder.buildWinebootCommand(
+                ProotWineCommandBuilder.build(fixture.request()),
+                updateExistingPrefix = true
+            )
+            assertEquals("-u", command.arguments.last())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesPrefixInitializationWhenWinebootIsMissing() {
+        val fixture = Fixture()
+        try {
+            File(fixture.rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe").delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.buildWinebootCommand(
+                    ProotWineCommandBuilder.build(fixture.request()),
+                    updateExistingPrefix = false
+                )
+            }.exceptionOrNull()
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wineboot.exe"))
         } finally {
             fixture.cleanup()
         }
@@ -147,9 +208,13 @@ class ProotWineCommandBuilderTest {
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        File(backendRoot, "runtime.properties").writeText(
+            "backendId=glibc-proot-box64\nhostAbi=arm64-v8a\nruntimeVersion=fixture-runtime-1\n"
+        )
         val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {

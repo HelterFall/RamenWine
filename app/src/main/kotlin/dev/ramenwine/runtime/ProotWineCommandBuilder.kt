@@ -29,7 +29,10 @@ data class ProotWineCommand(
     val guestEnvironment: Map<String, String>,
     val unsetEnvironment: Set<String>,
     val guestExecutablePath: String,
-    val guestRuntimeDirectory: String
+    val guestRuntimeDirectory: String,
+    val guestRootfsDirectory: File,
+    val hostPrefixDirectory: File,
+    val runtimeVersion: String
 )
 
 /**
@@ -65,6 +68,30 @@ object ProotWineCommandBuilder {
         val rootfs = File(backendRoot, "rootfs").canonicalFile
         requireContained(backendRoot, rootfs, "Linux rootfs")
         requireDirectory(rootfs, "Linux rootfs")
+
+        val runtimePropertiesFile = File(backendRoot, "runtime.properties")
+        if (!runtimePropertiesFile.isFile) {
+            throw IOException("Runtime metadata is missing.")
+        }
+        val runtimeMetadata = try {
+            java.util.Properties().apply {
+                runtimePropertiesFile.inputStream().use { load(it) }
+            }
+        } catch (error: Exception) {
+            throw IOException("Runtime metadata could not be read.", error)
+        }
+        if (runtimeMetadata.getProperty("backendId") !=
+            RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
+        ) {
+            throw IOException("Runtime metadata backend ID does not match the selected backend.")
+        }
+        if (runtimeMetadata.getProperty("hostAbi") != "arm64-v8a") {
+            throw IOException("The installed PRoot runtime is not built for arm64-v8a.")
+        }
+        val runtimeVersion = runtimeMetadata.getProperty("runtimeVersion")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= 128 }
+            ?: throw IOException("Runtime version is missing from runtime.properties.")
 
         val proot = executableFile(backendRoot, "host/bin/proot")
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
@@ -199,11 +226,45 @@ object ProotWineCommandBuilder {
             guestEnvironment = guestEnvironment,
             unsetEnvironment = HOST_ONLY_ENVIRONMENT_KEYS,
             guestExecutablePath = guestExecutable,
-            guestRuntimeDirectory = guestRuntimeDirectory
+            guestRuntimeDirectory = guestRuntimeDirectory,
+            guestRootfsDirectory = rootfs,
+            hostPrefixDirectory = prefixDirectory,
+            runtimeVersion = runtimeVersion
         )
     }
 
 
+    fun buildWinebootCommand(
+        gameCommand: ProotWineCommand,
+        updateExistingPrefix: Boolean
+    ): ProotWineCommand {
+        val rootfs = gameCommand.guestRootfsDirectory.canonicalFile
+        val candidates = listOf(
+            "usr/lib/wine/x86_64-windows/wineboot.exe",
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+        )
+        val selected = candidates.firstNotNullOfOrNull { relative ->
+            val file = File(rootfs, relative).canonicalFile
+            if (file.isFile && file.canRead() &&
+                file.path.startsWith(rootfs.path + File.separator)
+            ) relative else null
+        } ?: throw IOException(
+            "Wine prefix initializer wineboot.exe is missing from the runtime package."
+        )
+
+        // build() ends in /usr/bin/box64 /usr/bin/wine <game-exe>.
+        // Replace only that final guest command and retain all validated binds.
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/box64",
+            "/usr/bin/wine",
+            "/" + selected,
+            if (updateExistingPrefix) "-u" else "-i"
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "/" + selected
+        )
+    }
     private fun ensureGuestDirectory(rootfs: File, guestAbsolutePath: String) {
         if (!guestAbsolutePath.startsWith('/')) {
             throw IOException("Guest mount target must be absolute.")

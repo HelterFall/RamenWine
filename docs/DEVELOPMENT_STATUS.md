@@ -17,7 +17,8 @@
 - Runtime backend inventory for Bionic ARM64EC/FEX, Bionic x64/Box64 and glibc/PRoot/Box64 package families.
 - Offline runtime ZIP installer with bounded streaming extraction, SHA-256 payload checks, executable flags, safe path/symlink validation, staged activation and rollback after failed post-install inventory.
 - Python runtime package builder with manifest, hashes, executable flags and symlink metadata.
-- PRoot/Wine command builder that validates paths and runtime executables, prepares per-game directories and creates an argument-vector without a shell.
+- PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, prepares per-game directories and creates an argument-vector without a shell.
+- WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
 - Wawona native-library inventory that verifies every manifest-listed arm64-v8a shared object and SHA-256 directly inside the installed APK, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
@@ -48,7 +49,7 @@ The current glibc/PRoot path has a command builder and process supervisor, coord
 - ProotWineCommandBuilder checks the imported game ID and EXE path, validates the runtime rootfs and host PRoot executable, requires Box64 and the unified Wine 11 loader at rootfs/usr/bin/wine, prepares bind mount targets and constructs the environment/argument vector.
 - ProotWineProcessSupervisor starts that command without a shell, streams diagnostics and waits for the PRoot process. GameSessionCoordinator connects it to the Compose per-game launch flow and owns display/process teardown.
 
-The builder requires a Wayland socket before it will create a command. It maps the supplied host runtime directory to /run/user/<uid> inside the rootfs. Per-game prefix/home/temp directories are prepared, but first-time Wine prefix initialization and child-process-tree supervision have not been validated on a device.
+The builder requires a Wayland socket before it will create a command. It maps the supplied host runtime directory to /run/user/<uid> inside the rootfs. Per-game prefix/home/temp directories are prepared. WinePrefixManager now runs wineboot.exe -i or -u through Box64/Wine before the game starts and writes a version marker only after the registry files exist. This is source-level implementation and has not yet been validated with a real Wine package or on a device. Child-process-tree supervision remains unproven.
 
 ## Display backend decision
 
@@ -66,7 +67,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - No real Windows EXE has been launched by RamenWine.
 - The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
 - The generated Wawona native libraries are not present in a clean checkout until tools/build_wawona_android.sh is run; therefore no in-process Wayland server or Android display socket is running in the current APK.
-- No Android game surface is attached to Wine; no per-game Wine prefix is initialized with wineboot.
+- No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No production input, IME, audio, save-management, pause/resume or child-process lifecycle bridge exists.
 - No physical Android device has been validated by this bootstrap.

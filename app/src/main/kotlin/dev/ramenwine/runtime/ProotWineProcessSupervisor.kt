@@ -19,6 +19,62 @@ import kotlinx.coroutines.withContext
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
 class ProotWineProcessSupervisor {
+    /**
+     * Runs a short setup command such as wineboot and waits for its full exit.
+     * Output is drained concurrently so the child cannot block on a full pipe.
+     */
+    suspend fun runToCompletion(
+        command: ProotWineCommand,
+        onOutput: (String) -> Unit
+    ): Int = withContext(Dispatchers.IO) {
+        val process = createProcess(command)
+        val outputJob = launch {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        withContext(Dispatchers.Main.immediate) {
+                            onOutput(line)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // The setup process can close its stream during shutdown.
+            }
+        }
+
+        try {
+            val exitCode = process.waitFor()
+            outputJob.join()
+            exitCode
+        } catch (error: Throwable) {
+            if (process.isAlive) process.destroyForcibly()
+            outputJob.cancel()
+            throw error
+        }
+    }
+
+    private fun createProcess(command: ProotWineCommand): Process {
+        if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
+            throw IOException("The PRoot host executable is missing or not executable.")
+        }
+        if (!command.hostWorkingDirectory.isDirectory) {
+            throw IOException("The PRoot working directory does not exist.")
+        }
+
+        val commandLine = buildList {
+            add(command.prootExecutable.absolutePath)
+            addAll(command.arguments)
+        }
+        val builder = ProcessBuilder(commandLine)
+            .directory(command.hostWorkingDirectory)
+            .redirectErrorStream(true)
+        val environment = builder.environment()
+        command.unsetEnvironment.forEach { environment.remove(it) }
+        environment.putAll(command.environment)
+        return builder.start()
+    }
+
     suspend fun start(
         command: ProotWineCommand,
         onOutput: (String) -> Unit,
@@ -31,20 +87,7 @@ class ProotWineProcessSupervisor {
             throw IOException("The PRoot working directory does not exist.")
         }
 
-        val commandLine = buildList {
-            add(command.prootExecutable.absolutePath)
-            addAll(command.arguments)
-        }
-
-        val builder = ProcessBuilder(commandLine)
-            .directory(command.hostWorkingDirectory)
-            .redirectErrorStream(true)
-
-        val environment = builder.environment()
-        command.unsetEnvironment.forEach { environment.remove(it) }
-        environment.putAll(command.environment)
-
-        val process = builder.start()
+        val process = createProcess(command)
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,

@@ -91,6 +91,11 @@ class GameSessionCoordinator(
                 ProotWineCommandBuilder.build(request)
             }
 
+            WinePrefixManager(processSupervisor).ensureInitialized(
+                gameCommand = command,
+                onOutput = onOutput
+            )
+
             val process = processSupervisor.start(
                 command = command,
                 onOutput = onOutput,

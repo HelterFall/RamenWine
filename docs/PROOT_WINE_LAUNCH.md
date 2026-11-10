@@ -15,6 +15,7 @@ This document describes the first Windows-process launch route using the glibc r
       rootfs/
         usr/bin/box64             # ARM64 Linux/glibc Box64
         usr/bin/wine              # Wine 11 unified loader
+        usr/lib/wine/x86_64-windows/wineboot.exe
         ...                       # Wine PE/Unix drivers and guest libraries
 
 The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
@@ -29,7 +30,7 @@ The Wine build must include and load a compatible Wayland driver for the Windows
 | cacheDir/wine-tmp/<id> | /tmp | Per-game temporary files |
 | Wawona runtime directory | /run/user/<Android UID> | Wayland socket directory |
 
-The command builder prepares private directories and mount targets. It does not run wineboot or prove that a newly created prefix has been initialized.
+The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. It records a private marker only after wineboot exits successfully and system.reg/user.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
 
 ## Command and environment
 
@@ -40,6 +41,7 @@ The builder requires:
 - rootfs/usr/bin/env, used to create a clean guest environment;
 - the ARM64 glibc and x86-64 library directories expected by the guest environment;
 - rootfs/usr/bin/box64 and rootfs/usr/bin/wine, both executable;
+- wineboot.exe in the package's x86_64-windows Wine PE directory;
 - an app-private Wayland runtime directory containing the selected socket;
 - a socket path below the Android AF_UNIX sun_path limit.
 
@@ -52,6 +54,8 @@ The two environments are deliberately separate:
 
 This split matters: Box64 uses BOX64_LD_LIBRARY_PATH to find x86-64 shared libraries, while ordinary LD_LIBRARY_PATH is used for the guest's native ARM64/glibc libraries. The Android host library path must not be reused as Wine's guest library path. See the [Box64 environment-variable reference](https://github.com/ptitSeb/box64/blob/main/docs/USAGE.md) and [PRoot-Distro guest-environment documentation](https://github.com/termux/proot-distro#guest-environment) for the corresponding environment model.
 
+Wine prefix setup and game launch use separate PRoot processes but the same per-game bind mounts and guest environment. The initialization command replaces the game EXE with the packaged wineboot PE executable and passes -i or -u through the Wine loader.
+
 The command does not use PRoot fake-root mode. The guest process inherits the app's ordinary Android UID and sandbox.
 
 ## Display precondition
@@ -62,7 +66,7 @@ Without an in-process compositor and a reachable Wayland socket, a launch comman
 
 ## Process supervisor
 
-ProotWineProcessSupervisor starts PRoot directly with ProcessBuilder, merges stdout/stderr, dispatches output and exit callbacks to the main dispatcher, and supports a graceful stop followed by forced stop. The current stop grace period is 1.5 seconds, followed by a 1.5-second forced-wait period.
+ProotWineProcessSupervisor starts PRoot directly with ProcessBuilder, merges stdout/stderr, dispatches output and exit callbacks to the main dispatcher, and supports a graceful stop followed by forced stop. It also provides a run-to-completion path for one-shot setup commands such as wineboot. The current stop grace period is 1.5 seconds, followed by a 1.5-second forced-wait period.
 
 The supervisor currently supervises the Process returned by ProcessBuilder. It has not been proven that all Wine/Box64 descendants terminate in every failure or Android lifecycle scenario. A production GameSession coordinator must own and verify the complete process tree.
 
