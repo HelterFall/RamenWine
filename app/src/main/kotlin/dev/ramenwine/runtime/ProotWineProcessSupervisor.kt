@@ -153,6 +153,9 @@ class ProotWineProcessSession internal constructor(
     private val processExit = CompletableDeferred<Int>()
     private val callbackCompleted = CompletableDeferred<Unit>()
     private val stopMutex = Mutex()
+    // Natural process exit and a user-triggered stop can reach completion together.
+    // Only one path may drain output and deliver the final callback.
+    private val outputDrainMutex = Mutex()
     private val outputJob: Job
 
     init {
@@ -220,23 +223,32 @@ class ProotWineProcessSession internal constructor(
         }
 
     private suspend fun completeAfterOutputDrain(exitCode: Int) {
-        val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
-            outputJob.join()
-            true
-        } ?: false
+        outputDrainMutex.withLock {
+            // The process watcher and stop() may both observe the same exit.
+            // Reuse the first completion instead of draining/closing the pipe twice.
+            if (finished.get()) {
+                callbackCompleted.await()
+                return@withLock
+            }
 
-        if (!drained) {
-            // Wine descendants can inherit PRoot's output pipe. Do not hold the
-            // game screen open forever waiting for an unrelated inherited FD.
-            runCatching { process.inputStream.close() }
-            val closed = withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) {
+            val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
                 outputJob.join()
                 true
             } ?: false
-            if (!closed) outputJob.cancel()
-        }
 
-        notifyExit(exitCode)
+            if (!drained) {
+                // Wine descendants can inherit PRoot's output pipe. Do not hold the
+                // game screen open forever waiting for an unrelated inherited FD.
+                runCatching { process.inputStream.close() }
+                val closed = withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) {
+                    outputJob.join()
+                    true
+                } ?: false
+                if (!closed) outputJob.cancel()
+            }
+
+            notifyExit(exitCode)
+        }
     }
 
     private suspend fun notifyExit(exitCode: Int) {
