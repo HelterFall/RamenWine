@@ -65,7 +65,7 @@ class PeHeaderInspectorTest {
     }
 
     private fun peFixture(machine: Int, peOffset: Int = 0x80): ByteArray {
-        val bytes = ByteArray(512)
+        val bytes = ByteArray(maxOf(512, peOffset + 24))
         bytes[0] = 0x4D
         bytes[1] = 0x5A
 
