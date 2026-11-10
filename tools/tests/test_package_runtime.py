@@ -79,6 +79,7 @@ class RuntimePackagerTests(unittest.TestCase):
             self.create_glibc_runtime(root)
 
             library = root / "host" / "lib" / "libwine.so.1"
+            library.parent.mkdir(parents=True, exist_ok=True)
             library.write_bytes(b"library")
             (root / "host" / "lib" / "libwine.so").symlink_to("libwine.so.1")
 
@@ -121,16 +122,24 @@ class RuntimePackagerTests(unittest.TestCase):
 
             self.assertEqual(target, resolved)
 
-    def test_rootfs_symlink_cannot_escape_into_host_payload(self) -> None:
+    def test_rootfs_absolute_symlink_stays_in_guest_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "root"
-            (root / "rootfs/bin").mkdir(parents=True)
-            (root / "host/bin").mkdir(parents=True)
-            (root / "host/bin/proot").write_bytes(b"host executable")
-            link = root / "rootfs/bin/escape"
+            guest_binary = root / "rootfs/host/bin/proot"
+            host_binary = root / "host/bin/proot"
+            guest_binary.parent.mkdir(parents=True)
+            host_binary.parent.mkdir(parents=True)
+            guest_binary.write_bytes(b"guest executable")
+            host_binary.write_bytes(b"Android-host executable")
+            link = root / "rootfs/bin/guest-proot"
+            link.parent.mkdir(parents=True)
 
-            with self.assertRaises(ValueError):
-                package_runtime.resolve_symlink_inside(root, link, "/host/bin/proot")
+            resolved = package_runtime.resolve_symlink_inside(
+                root, link, "/host/bin/proot"
+            )
+
+            self.assertEqual(guest_binary, resolved)
+            self.assertNotEqual(host_binary, resolved)
 
     def test_rejects_backslash_and_nul_in_symlink_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -196,10 +205,6 @@ class RuntimePackagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "root"
             root.mkdir()
-            executable = root / "host/bin/proot"
-            executable.parent.mkdir(parents=True)
-            executable.write_bytes(b"proot")
-            executable.chmod(0o755)
             files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
 
             with self.assertRaisesRegex(ValueError, "required executable"):

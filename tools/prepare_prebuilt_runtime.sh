@@ -24,7 +24,6 @@ WINE_URL="https://github.com/Kron4ek/Wine-Builds/releases/download/11.21/wine-11
 WINE_SHA256="33f3c5b56b1deb8f6725539ea006f27b5d781b3b4ae6a8a1f492d8af4fb9dc83"
 
 BOX64_DEBIAN_VERSION="0.3.4+dfsg-1"
-DEBIAN_IMAGE="debian:trixie-slim"
 
 fail() {
   echo "ERROR: $*" >&2
@@ -35,7 +34,7 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
-for command in curl sha256sum unzip tar docker readelf python3; do
+for command in curl sha256sum unzip tar docker readelf python3 readlink; do
   require_command "$command"
 done
 
@@ -84,99 +83,29 @@ while IFS= read -r loader_file; do
   install -m 0755 "$loader_file" "$RUNTIME_ROOT/host/libexec/proot/${loader_name}"
 done < <(find "$PROOT_DIR" -type f \( -name loader -o -name loader-m32 \) -print)
 
-# Build an ARM64 Debian Trixie rootfs by extracting prebuilt Debian packages.
-# Debian's ARM64 Box64 binary and the x86-64 Wine library dependencies are
-# installed with apt; no native component source is compiled here.
-rm -rf "$ROOTFS"
-mkdir -p "$ROOTFS"
-ROOTFS_CID=""
-cleanup_container() {
-  if [[ -n "$ROOTFS_CID" ]]; then
-    docker rm --force "$ROOTFS_CID" >/dev/null 2>&1 || true
-    ROOTFS_CID=""
-  fi
-}
-trap cleanup_container EXIT
-
-ROOTFS_CID="$(docker create --platform linux/arm64 "$DEBIAN_IMAGE" /bin/bash -euc '
-  export DEBIAN_FRONTEND=noninteractive
-  dpkg --add-architecture amd64
-  apt-get update
-  apt-get install -y --no-install-recommends \
-    box64:arm64=0.3.4+dfsg-1 \
-    ca-certificates \
-    fontconfig \
-    fonts-dejavu-core \
-    fonts-liberation \
-    fonts-wine \
-    libc6:amd64 \
-    libgcc-s1:amd64 \
-    libstdc++6:amd64 \
-    libasound2t64:amd64 \
-    libavcodec61:amd64 \
-    libavformat61:amd64 \
-    libavutil59:amd64 \
-    libcapi20-3t64:amd64 \
-    libfontconfig1:amd64 \
-    libfreetype6:amd64 \
-    libglib2.0-0t64:amd64 \
-    libgphoto2-6t64:amd64 \
-    libgphoto2-port12t64:amd64 \
-    libgstreamer-plugins-base1.0-0:amd64 \
-    libgstreamer1.0-0:amd64 \
-    libpcap0.8t64:amd64 \
-    libpcsclite1:amd64 \
-    libpulse0:amd64 \
-    libopenal1:amd64 \
-    libudev1:amd64 \
-    libunwind8:amd64 \
-    libusb-1.0-0:amd64 \
-    libwayland-client0:amd64 \
-    libwayland-cursor0:amd64 \
-    libwayland-egl1:amd64 \
-    libx11-6:amd64 \
-    libx11-xcb1:amd64 \
-    libxext6:amd64 \
-    libxkbcommon0:amd64 \
-    libxkbregistry0:amd64 \
-    libxcomposite1:amd64 \
-    libxcursor1:amd64 \
-    libxfixes3:amd64 \
-    libxi6:amd64 \
-    libxinerama1:amd64 \
-    libxrandr2:amd64 \
-    libxrender1:amd64 \
-    libxxf86vm1:amd64 \
-    ocl-icd-libopencl1:amd64 \
-    gstreamer1.0-plugins-good:amd64 \
-    libasound2-plugins:amd64 \
-    libcups2t64:amd64 \
-    libdbus-1-3:amd64 \
-    libegl1:amd64 \
-    libgl1:amd64 \
-    libgl1-mesa-dri:amd64 \
-    libgnutls30t64:amd64 \
-    libgssapi-krb5-2:amd64 \
-    libkrb5-3:amd64 \
-    libodbc2:amd64 \
-    libosmesa6:amd64 \
-    libsdl2-2.0-0:amd64 \
-    libv4l-0t64:amd64 \
-    libvulkan1:amd64
-  test -x /usr/bin/env
-  test -x /usr/bin/box64
-  test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-  apt-get clean
-  rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-')"
-[[ -n "$ROOTFS_CID" ]] || fail "Could not create the Debian ARM64 rootfs container."
-docker start --attach "$ROOTFS_CID"
-docker export "$ROOTFS_CID" | tar --extract --file=- --directory "$ROOTFS"
-docker rm "$ROOTFS_CID" >/dev/null
-ROOTFS_CID=""
+# Use the Buildx-exported Debian ARM64 guest rootfs. CI builds this from
+# runtime-rootfs.Dockerfile and caches the expensive apt layer between runs.
+# The fallback keeps this preparation script usable outside GitHub Actions.
+if [[ ! -x "$ROOTFS/usr/bin/env" || ! -x "$ROOTFS/usr/bin/box64" ]] || \
+   { [[ ! -e "$ROOTFS/lib64/ld-linux-x86-64.so.2" ]] && \
+     [[ ! -e "$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2" ]]; }; then
+  rm -rf "$ROOTFS"
+  mkdir -p "$ROOTFS"
+  echo "Building Debian ARM64 guest rootfs from the pinned package recipe"
+  docker buildx build \
+    --platform linux/arm64 \
+    --file "$ROOT_DIR/tools/runtime-rootfs.Dockerfile" \
+    --output "type=local,dest=$ROOTFS" \
+    "$ROOT_DIR"
+else
+  echo "Using prepared Debian ARM64 guest rootfs"
+fi
 
 [[ -x "$ROOTFS/usr/bin/env" ]] || fail "Debian rootfs is missing /usr/bin/env."
 [[ -x "$ROOTFS/usr/bin/box64" ]] || fail "Debian rootfs is missing /usr/bin/box64."
+[[ -e "$ROOTFS/lib64/ld-linux-x86-64.so.2" || \
+   -e "$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2" ]] || \
+  fail "Debian rootfs is missing the x86-64 glibc loader."
 readelf -h "$ROOTFS/usr/bin/box64" | grep -q 'AArch64' || \
   fail "Debian Box64 package is not an AArch64 ELF binary."
 
@@ -220,7 +149,15 @@ ln -sfn "/opt/kron4ek-wine/${WINE_ELF_RELATIVE}" "$ROOTFS/usr/bin/wine"
 ln -sfn "/opt/kron4ek-wine/${WINEBOOT_RELATIVE}" \
   "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe"
 
-readelf -h "$(readlink -f "$ROOTFS/usr/bin/wine")" | \
+# Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
+# host-side readlink -f on /usr/bin/wine: it would resolve /opt against the
+# GitHub runner instead of $ROOTFS.
+GUEST_WINE_LAUNCHER="$ROOTFS/opt/kron4ek-wine/${WINE_ELF_RELATIVE}"
+[[ -f "$GUEST_WINE_LAUNCHER" ]] || \
+  fail "The copied Kron4ek Wine launcher is missing from the guest rootfs."
+[[ "$(readlink "$ROOTFS/usr/bin/wine")" == "/opt/kron4ek-wine/${WINE_ELF_RELATIVE}" ]] || \
+  fail "The guest Wine launcher link does not match the selected distribution file."
+readelf -h "$GUEST_WINE_LAUNCHER" | \
   grep -q 'Advanced Micro Devices X86-64' || \
   fail "The selected Kron4ek Wine launcher is not x86-64."
 

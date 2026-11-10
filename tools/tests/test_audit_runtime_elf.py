@@ -11,6 +11,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import audit_runtime_elf
 
 
+def elf64(machine: int) -> bytes:
+    data = bytearray(64)
+    data[:4] = b"\x7fELF"
+    data[4:7] = bytes((2, 1, 1))
+    struct.pack_into(
+        "<HHIQQQIHHHHHH",
+        data,
+        16,
+        2, machine, 1, 0, 0, 0, 0, 64, 56, 0, 0, 0, 0
+    )
+    return bytes(data)
+
+
 def dynamic_elf64(machine: int, needed: str) -> bytes:
     data = bytearray(768)
     data[:4] = b"\x7fELF"
@@ -70,7 +83,7 @@ class RuntimeElfAuditTests(unittest.TestCase):
             )
             lib = rootfs / "usr/local/runtime-libs/libdummy.so"
             lib.parent.mkdir(parents=True)
-            lib.write_bytes(b"dummy")
+            lib.write_bytes(elf64(183))
 
             self.assertTrue(
                 audit_runtime_elf._dependency_exists(rootfs, info, "libdummy.so")
@@ -104,7 +117,7 @@ class RuntimeElfAuditTests(unittest.TestCase):
             executable.write_bytes(dynamic_elf64(183, "libbox-test.so.1"))
             library = rootfs / "usr/lib/aarch64-linux-gnu/libbox-test.so.1"
             library.parent.mkdir(parents=True)
-            library.write_bytes(b"test library")
+            library.write_bytes(elf64(183))
 
             report = audit_runtime_elf.audit_rootfs(rootfs)
 

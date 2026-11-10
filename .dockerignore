@@ -1,0 +1,9 @@
+.git
+.github
+.gradle
+**/.gradle
+**/build
+**/.idea
+**/.kotlin
+*.apk
+*.aab
