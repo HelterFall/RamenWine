@@ -3,14 +3,18 @@ package dev.ramenwine.runtime
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val OUTPUT_DRAIN_MILLIS = 500L
 private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
@@ -25,7 +29,9 @@ private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
  * This is a process boundary only; an Android display backend must already be
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
-class ProotWineProcessSupervisor {
+class ProotWineProcessSupervisor(
+    private val callbackDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+) {
     /**
      * Runs a short setup command such as wineboot and waits for its full exit.
      * Output is drained concurrently so the child cannot block on a full pipe.
@@ -42,8 +48,15 @@ class ProotWineProcessSupervisor {
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
-                        withContext(Dispatchers.Main.immediate) {
-                            onOutput(line)
+                        try {
+                            withContext(callbackDispatcher) {
+                                onOutput(line)
+                            }
+                        } catch (error: kotlinx.coroutines.CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // A UI/log consumer failure must not stop pipe draining
+                            // and block Wine/PRoot on a full output pipe.
                         }
                     }
                 }
@@ -123,7 +136,8 @@ class ProotWineProcessSupervisor {
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,
-            onExit = onExit
+            onExit = onExit,
+            callbackDispatcher = callbackDispatcher
         )
     }
 }
@@ -131,12 +145,14 @@ class ProotWineProcessSupervisor {
 class ProotWineProcessSession internal constructor(
     private val process: Process,
     private val onOutput: (String) -> Unit,
-    private val onExit: (Int) -> Unit
+    private val onExit: (Int) -> Unit,
+    private val callbackDispatcher: CoroutineDispatcher
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val finished = AtomicBoolean(false)
-
+    private val processExit = CompletableDeferred<Int>()
+    private val callbackCompleted = CompletableDeferred<Unit>()
+    private val stopMutex = Mutex()
     private val outputJob: Job
 
     init {
@@ -145,8 +161,14 @@ class ProotWineProcessSession internal constructor(
                 process.inputStream.bufferedReader().use { reader ->
                     while (true) {
                         val line = reader.readLine() ?: break
-                        withContext(Dispatchers.Main.immediate) {
-                            onOutput(line)
+                        try {
+                            withContext(callbackDispatcher) {
+                                onOutput(line)
+                            }
+                        } catch (error: kotlinx.coroutines.CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // Keep draining even if a UI/log callback fails.
                         }
                     }
                 }
@@ -155,6 +177,8 @@ class ProotWineProcessSession internal constructor(
             }
         }
 
+        // Exactly one coroutine observes process termination. Manual stop waits
+        // on this deferred instead of racing a second Process.waitFor().
         scope.launch {
             val exitCode = try {
                 process.waitFor()
@@ -162,17 +186,8 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
-            // Drain final output briefly. A descendant may inherit the pipe,
-            // so the display/session must not wait forever after PRoot exits.
-            val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
-                outputJob.join()
-                true
-            } ?: false
-            if (!drained) {
-                runCatching { process.inputStream.close() }
-                withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) { outputJob.join() }
-            }
-            notifyExit(exitCode)
+            processExit.complete(exitCode)
+            completeAfterOutputDrain(exitCode)
         }
     }
 
@@ -182,27 +197,61 @@ class ProotWineProcessSession internal constructor(
         withContext(Dispatchers.IO) {
             require(gracePeriodMillis >= 0L) { "Grace period cannot be negative." }
 
-            if (process.isAlive) {
-                process.destroy()
-                if (!process.waitFor(gracePeriodMillis, TimeUnit.MILLISECONDS)) {
-                    process.destroyForcibly()
-                    process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+            stopMutex.withLock {
+                val exitCode = if (!process.isAlive) {
+                    processExit.await()
+                } else {
+                    process.destroy()
+                    withTimeoutOrNull(gracePeriodMillis) {
+                        processExit.await()
+                    } ?: run {
+                        process.destroyForcibly()
+                        withTimeoutOrNull(FORCE_STOP_WAIT_MILLIS) {
+                            processExit.await()
+                        } ?: throw IOException(
+                            "PRoot did not exit after graceful and forced termination."
+                        )
+                    }
                 }
-            }
 
-            val exitCode = runCatching { process.exitValue() }
-                .getOrDefault(UNKNOWN_EXIT_CODE)
-            notifyExit(exitCode)
-            scope.cancel()
-            exitCode
+                completeAfterOutputDrain(exitCode)
+                exitCode
+            }
         }
+
+    private suspend fun completeAfterOutputDrain(exitCode: Int) {
+        val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
+            outputJob.join()
+            true
+        } ?: false
+
+        if (!drained) {
+            // Wine descendants can inherit PRoot's output pipe. Do not hold the
+            // game screen open forever waiting for an unrelated inherited FD.
+            runCatching { process.inputStream.close() }
+            val closed = withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) {
+                outputJob.join()
+                true
+            } ?: false
+            if (!closed) outputJob.cancel()
+        }
+
+        notifyExit(exitCode)
+    }
 
     private suspend fun notifyExit(exitCode: Int) {
-        if (!finished.compareAndSet(false, true)) return
-        withContext(Dispatchers.Main.immediate) {
-            onExit(exitCode)
+        if (finished.compareAndSet(false, true)) {
+            try {
+                withContext(callbackDispatcher) {
+                    onExit(exitCode)
+                }
+            } finally {
+                callbackCompleted.complete(Unit)
+                scope.cancel()
+            }
+        } else {
+            callbackCompleted.await()
         }
-        scope.cancel()
     }
 
     companion object {
