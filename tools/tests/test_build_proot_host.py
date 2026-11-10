@@ -161,14 +161,14 @@ class BuildProotHostTests(unittest.TestCase):
                 root / "work",
                 root / "artifacts" / "proot-host",
             )
-            self.assertEqual(root / "work", work)
-            self.assertEqual(root / "artifacts" / "proot-host", output)
+            self.assertEqual(root.resolve() / "work", work)
+            self.assertEqual(root.resolve() / "artifacts" / "proot-host", output)
 
     def test_build_uses_pinned_termux_revision_and_assembles_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            work = root / "work"
-            output = root / "output"
+            work = (root / "work").resolve()
+            output = (root / "output").resolve()
             commands: list[tuple[list[str], Path | None, dict[str, str] | None]] = []
 
             def record_run(command, cwd=None, extra_env=None):

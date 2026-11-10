@@ -52,14 +52,14 @@ class BuildFullRuntimeTests(unittest.TestCase):
                 root / "work",
                 root / "artifacts" / "runtime.zip",
             )
-            self.assertEqual(root / "work", work)
-            self.assertEqual(root / "artifacts" / "runtime.zip", output)
+            self.assertEqual(root.resolve() / "work", work)
+            self.assertEqual(root.resolve() / "artifacts" / "runtime.zip", output)
 
     def test_runs_both_stages_in_order_and_forwards_build_options(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            work = root / "work"
-            output = root / "artifacts" / "runtime.zip"
+            work = (root / "work").resolve()
+            output = (root / "artifacts" / "runtime.zip").resolve()
             commands: list[list[str]] = []
 
             def fake_run(command: list[str]) -> None:
@@ -87,7 +87,7 @@ class BuildFullRuntimeTests(unittest.TestCase):
             ):
                 result = build_full_runtime.build(args)
 
-            self.assertEqual(output, result)
+            self.assertEqual(output.resolve(), result)
             self.assertEqual(2, len(commands))
             self.assertEqual(str(build_full_runtime.PROOT_BUILDER), commands[0][1])
             self.assertEqual(str(build_full_runtime.GLIBC_BUILDER), commands[1][1])
