@@ -201,8 +201,13 @@ class GameSession internal constructor(
         return try {
             process.stop()
         } finally {
-            withContext(Dispatchers.Main.immediate) {
-                releaseDisplay()
+            // Keep the compositor and Android Surface alive if PRoot resisted
+            // both termination attempts. The user must retain a way to retry
+            // stopping the still-running game instead of being left on a dead screen.
+            if (!process.isAlive()) {
+                withContext(Dispatchers.Main.immediate) {
+                    releaseDisplay()
+                }
             }
         }
     }
