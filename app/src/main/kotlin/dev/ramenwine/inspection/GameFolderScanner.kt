@@ -3,7 +3,6 @@ package dev.ramenwine.inspection
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
-import java.io.InputStream
 import java.util.ArrayDeque
 import java.util.Locale
 
@@ -135,7 +134,7 @@ class GameFolderScanner(private val context: Context) {
                                     null
                                 } else {
                                     input.use {
-                                        PeHeaderInspector.inspect(it.readPrefix(MAX_HEADER_BYTES))
+                                        PeHeaderInspector.inspect(it)
                                     }
                                 }
                             } catch (error: Exception) {
@@ -195,19 +194,6 @@ class GameFolderScanner(private val context: Context) {
         if (size < MAX_WARNINGS) add(message)
     }
 
-    private fun InputStream.readPrefix(maxBytes: Int): ByteArray {
-        val output = ByteArray(maxBytes)
-        var total = 0
-
-        while (total < maxBytes) {
-            val read = read(output, total, maxBytes - total)
-            if (read <= 0) break
-            total += read
-        }
-
-        return output.copyOf(total)
-    }
-
     private data class DirectoryEntry(
         val document: DocumentFile,
         val depth: Int,
@@ -217,7 +203,6 @@ class GameFolderScanner(private val context: Context) {
     private companion object {
         const val MAX_DEPTH = 32
         const val MAX_VISITED_ENTRIES = 100_000
-        const val MAX_HEADER_BYTES = 64 * 1024
         const val MAX_CANDIDATES = 500
         const val MAX_WARNINGS = 30
     }
