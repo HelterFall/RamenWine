@@ -14,7 +14,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.UUID
@@ -224,7 +223,7 @@ class GameFolderImporter(private val context: Context) {
             }
 
             val peInspection = FileInputStream(selectedExecutable).use { input ->
-                PeHeaderInspector.inspect(input.readPrefix(PE_HEADER_READ_BYTES))
+                PeHeaderInspector.inspect(input)
             }
 
             if (peInspection?.isValidPe != true) {
@@ -273,7 +272,7 @@ class GameFolderImporter(private val context: Context) {
         val input = context.contentResolver.openInputStream(uri)
             ?: throw IOException("Could not open the selected EXE for architecture inspection.")
         val inspection = input.use {
-            PeHeaderInspector.inspect(it.readPrefix(PE_HEADER_READ_BYTES))
+            PeHeaderInspector.inspect(it)
         }
 
         if (inspection?.isValidPe != true) {
@@ -288,17 +287,6 @@ class GameFolderImporter(private val context: Context) {
                     "The selected EXE is " + inspection.architecture.displayName + "."
             )
         }
-    }
-
-    private fun InputStream.readPrefix(maxBytes: Int): ByteArray {
-        val prefix = ByteArray(maxBytes)
-        var total = 0
-        while (total < prefix.size) {
-            val read = read(prefix, total, prefix.size - total)
-            if (read <= 0) break
-            total += read
-        }
-        return prefix.copyOf(total)
     }
 
     private fun ensureFreeSpace(nextChunkBytes: Long) {
@@ -320,7 +308,6 @@ class GameFolderImporter(private val context: Context) {
         const val MAX_DEPTH = 32
         const val MAX_ENTRIES = 100_000
         const val COPY_BUFFER_BYTES = 256 * 1024
-        const val PE_HEADER_READ_BYTES = 64 * 1024
         const val MAX_TITLE_LENGTH = 512
         const val MIN_FREE_SPACE_RESERVE = 128L * 1024L * 1024L
         const val STORAGE_CHECK_INTERVAL = 4L * 1024L * 1024L
