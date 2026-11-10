@@ -232,11 +232,12 @@ The Android host scaffold currently includes:
 - offline runtime ZIP installation with SHA-256 payload verification, staged activation, symlink/path checks and rollback;
 - a Python runtime package builder and automated Python/JVM tests;
 - a PRoot/Wine command builder and process supervisor for the first glibc + PRoot + Box64 + Wine path;
-- Wawona support-asset integrity verification and JVM tests;
+- a Wawona display adapter, native JNI contract wrapper and Android SurfaceView host;
+- Wawona support-asset integrity verification, library inventory, JNI adapter, SurfaceView host and JVM tests;
 - GitHub Actions for Android build, tests, lint and debug APK artifacts.
 
 **Wine/Box64/FEX/PRoot binaries are not bundled, and imported games cannot be launched from the Android UI yet.** The command builder requires an existing Wayland socket, and no Wawona compositor is integrated to provide it. The process supervisor is not wired to a Play action and has not been validated against a physical device or complete Wine child-process teardown. Runtime file checks are not proof of execution. No game EXE is run during scanning or import.
 
 See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md) and [PRoot Wine Launch](docs/PROOT_WINE_LAUNCH.md).
 
-Wawona is the selected display/compositor research candidate. The upstream project is MIT-licensed at its root and uses a Rust Wayland core with an Android Kotlin/JNI host. The reviewed upstream snapshot is pinned in [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md). RamenWine currently has only a Wawona asset-integrity helper; it does not bundle the upstream native libraries or start a compositor.
+Wawona is the selected display/compositor research candidate. The upstream project is MIT-licensed at its root and uses a Rust Wayland core with an Android Kotlin/JNI host. The reviewed upstream snapshot is pinned in [Android Display Backend](docs/ANDROID_DISPLAY_BACKEND.md). RamenWine now has a narrow Kotlin/JNI adapter and SurfaceView host for the pinned upstream API, but it does not bundle the upstream native libraries yet. The adapter therefore refuses to start until the expected native libraries are packaged.

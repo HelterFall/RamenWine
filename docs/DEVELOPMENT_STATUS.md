@@ -20,6 +20,7 @@
 - PRoot/Wine command builder that validates paths and runtime executables, prepares per-game directories and creates an argument-vector without a shell.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
+- Wawona native-library inventory, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
 ## Current Android user flow
@@ -80,9 +81,9 @@ The last explicitly documented successful Android build/test/lint run passed on 
 
 ## Next engineering steps
 
-1. Add a narrow DisplayBackend/GameSession boundary in RamenWine, independent of Wawona-specific JNI details.
-2. Pin and build the Wawona Android native core for arm64-v8a; identify the smallest compatible set of JNI, renderer, Vulkan and support libraries.
-3. Implement the in-process Wawona host lifecycle: initialize compositor, attach/detach Android Surface, observe Wayland socket readiness, resize and shut down safely.
+1. Build and stage the pinned Wawona Android native libraries for arm64-v8a, including the exact ANGLE/JNI dependency closure.
+2. Verify native loading, compositor readiness and the actual app-private Wayland socket on an Android device.
+3. Add a GameSession coordinator that owns the Wawona display session and PRoot/Wine process lifecycle.
 4. Connect the Wawona socket endpoint to ProotWineCommandBuilder and start an original Win32 GDI test application only after both compositor and surface are ready.
 5. Verify pause/resume, surface recreation, IME/input and complete process teardown on a physical ARM64 device.
 6. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.

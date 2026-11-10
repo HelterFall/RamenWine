@@ -52,15 +52,21 @@ Implemented:
 - ProotWineCommandBuilder accepts a WaylandDisplayEndpoint, checks that the supplied socket path exists, checks the Unix socket path length and binds the host runtime directory into the guest at /run/user/<uid>.
 - ProotWineProcessSupervisor starts the PRoot argument vector and forwards merged stdout/stderr.
 - WawonaAssetIntegrity maps selected APK-relative xkb/font/Weston asset paths into an app-private support tree and checks their SHA-256 hashes.
-- WawonaAssetIntegrityTest covers matching assets, missing/modified data, traversal and symlink escape.
+- WawonaLibraryInventory checks for the three native library files used by the pinned upstream Android host: libEGL_angle.so, libGLESv2_angle.so and libwawona.so.
+- WawonaNative declares the minimal upstream JNI method set using the exact upstream package/class symbol name and loads libraries in the upstream order.
+- WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
+- WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and provides an explicit stop operation.
+- WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
+- JVM tests cover the expected native-library inventory.
 
 Not implemented:
-- No Wawona native libraries or generated JNI bindings are present in RamenWine.
-- No Wawona Kotlin host classes or compositor SurfaceView are integrated.
-- No pinned Wawona APK/source archive or provenance manifest is bundled.
-- WawonaAssetIntegrity is only a verifier; it does not extract assets and is not connected to the runtime installer.
-- No in-process Wayland compositor starts and no RamenWine code creates the Wayland socket.
-- No Wine process is currently launched from the Android UI.
+- The Wawona native libraries are not packaged in the RamenWine APK, so availability() reports missing files and start() fails closed.
+- No reproducible Wawona Nix/NDK build output or pinned native binary archive is staged into jniLibs.
+- No pinned asset provenance manifest or extraction pipeline is bundled; WawonaAssetIntegrity is only a verifier and is not connected to an installer.
+- The Wawona adapter and SurfaceView are not yet called by a GameSession coordinator or the Compose UI.
+- No actual Wayland client or Wine process has connected to the socket through RamenWine.
+- Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
+- No physical-device Vulkan presentation or pause/resume test has been completed.
 
 ## RamenWine-owned abstraction
 
@@ -81,11 +87,10 @@ The DisplayBackend API should describe capabilities and lifecycle, not expose up
 
 ## Integration sequence
 
-1. Pin the exact Wawona source revision and record its license and third-party dependency inventory.
-2. Build the arm64-v8a Android native output from that revision using a reproducible toolchain; do not extract unidentified native libraries from a random APK.
-3. Identify the minimal library/asset closure for compositor core, JNI, Android Surface presentation, Vulkan/ANGLE selection and XKB support.
-4. Add a thin RamenWine JNI/Kotlin adapter. Prefer explicit JNI registration over copying the entire upstream application package; keep upstream changes isolated and traceable.
-5. Start the compositor on the app cache path, wait for compositor-ready and verify that the Wayland socket is actually connectable before exposing a session.
+1. Build the arm64-v8a Android native output from the pinned revision using a reproducible toolchain; do not extract unidentified native libraries from a random APK.
+2. Identify and stage the minimal library/asset closure for compositor core, JNI, Android Surface presentation, Vulkan/ANGLE selection and XKB support.
+3. Load the native library closure in RamenWine and resolve any missing JNI or ELF dependencies.
+4. Start the compositor on the app cache path, wait for compositor-ready and verify that the Wayland socket is actually connectable before exposing a session.
 6. Attach a RamenWine SurfaceView, test create/change/destroy and Activity pause/resume, and ensure surface teardown does not stop a newer surface.
 7. Launch an original Wayland client smoke program, then a Wine Win32 GDI test program through the existing PRoot builder.
 8. Verify IME, touch, mouse, hardware keyboard, orientation, focus, exit and complete cleanup on a physical ARM64 device.
