@@ -1,6 +1,6 @@
 # Wawona Android compositor integration
 
-**Status (2026-11-10):** the pinned Wawona native payload is included in a successfully built RamenWine debug APK. The first Android 16 device smoke test reaches asset installation but fails before compositor rendering because the original app-side provenance allow-list omitted the optional Vulkan ICD manifest. The source fix and regression test are committed; rebuilding and retesting the APK on the phone remain outstanding.  
+**Status (2026-11-10):** the pinned Wawona native payload is included in a successfully built RamenWine debug APK. The first Android 16 device smoke test reached asset installation but failed before compositor rendering because the original app-side provenance allow-list omitted the optional Vulkan ICD manifest. The source fix and regression test are committed. A replacement APK was successfully built and package-verified in [Actions run #42733393190](https://github.com/HelterFall/RamenWine/actions/runs/42733393190), commit `0c9c5699eab460c2b14a30acd3d9d50875c0cc15`; its SHA-256 is `6ea3be1926ce3028b54dd5b9a5b82df9f3b32d835bad70f392584b6dbc9d24dc`. The new APK contains the Vulkan ICD asset and no Wine/Box64/PRoot guest runtime. **Physical-device SHM rendering retest remains outstanding.**  
 **Reviewed upstream revision:** `d298ddd25726fec0977285aa5f57181110c966a6` on Wawona's `development` branch (2026-11-09).
 
 ## Why this is not an AAR dependency
@@ -218,10 +218,11 @@ The source fix:
 
 The backend currently selects Android's `system` Vulkan driver, so this
 manifest is retained as an optional pinned asset; the source fix does not claim
-that SwiftShader fallback is already configured or working. A new APK must be
-built and the SHM preview must be retested on the phone. Until the test window
-actually appears on the Android Surface, compositor rendering remains
-unverified.
+that SwiftShader fallback is already configured or working. The replacement
+APK now includes the corrected asset installer and has passed APK-level
+verification. Install that APK and retest the SHM preview on the phone. Until
+the test window actually appears on the Android Surface, compositor rendering
+remains unverified.
 
 ## Licensing and release obligations
 
@@ -250,7 +251,8 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 - [ ] Install the APK on Android 8+ (RamenWine minSdk 26).
 - [ ] Start Wawona from an actual Android SurfaceView and confirm the compositor socket stays under app cache storage.
-- [ ] Rebuild the APK containing the Vulkan ICD provenance fix, then open the debug-only “Wawona / Wayland” preview and confirm the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
+- [x] Build and package the APK containing the Vulkan ICD provenance fix; verify that the APK provenance contains the ICD manifest.
+- [ ] Install that replacement APK and open the debug-only “Wawona / Wayland” preview. Confirm that the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
 - [ ] Run an independent original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
 - [ ] Exercise resize, touch, keyboard and mouse input.
 - [ ] Confirm that surface destruction precedes compositor shutdown and that a second session can start after close.
