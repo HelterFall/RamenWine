@@ -111,7 +111,7 @@ def resolve_symlink_inside(root: Path, link_path: Path, target: str) -> Path:
 
     try:
         real_probe = probe.resolve(strict=True)
-        real_probe.relative_to(root_real)
+        real_probe.relative_to(domain_root)
     except (OSError, ValueError, RuntimeError) as exc:
         raise ValueError(
             f"symlink escapes runtime root or has a broken parent: {link_path} -> {target}"
@@ -289,6 +289,7 @@ def make_manifest(
     if backend not in BACKENDS:
         raise ValueError(f"unsupported runtime backend: {backend}")
     validate_backend_payload(backend, files, symlinks)
+    manifest = {
         "schemaVersion": 1,
         "backendId": backend,
         "hostAbi": "arm64-v8a",
