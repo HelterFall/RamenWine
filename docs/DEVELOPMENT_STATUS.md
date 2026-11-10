@@ -32,7 +32,7 @@
 - A Compose Surface host and initial per-game display/Play flow that only enables launch after the native Surface is attached and the compositor socket is ready.
 - Per-game Wine locale profiles persisted in the app-private library; Japanese is the default, with English, Russian, Simplified/Traditional Chinese and Korean choices. Older library entries migrate to the Japanese default.
 - The Debian guest package generates the selected UTF-8 locales and bundles Noto CJK fonts, so Japanese/Chinese/Korean glyph coverage does not depend on a user-installed font pack.
-- JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
+- JVM/Python tests and GitHub Actions workflow for runtime source/package validation and optional Android APK packaging.
 
 ## Audio backend
 
@@ -90,6 +90,13 @@ The upstream root MIT license does not make every transitive native dependency M
 - The bundled DirectAudio output bridge is integrated into the runtime and game-session lifecycle; real-device audio playback is not yet verified.
 - Save-management, pause/resume and full child-process-tree lifecycle handling remain incomplete.
 - No physical Android device has been validated by this bootstrap.
+
+## CI execution policy
+
+- Commits pushed directly to `main` do not trigger builds automatically; routine code changes should not start long APK pipelines.
+- Pull requests targeting `main` run the pinned DirectAudio native build and ABI checks. Documentation-only and README-only pull requests are ignored by this workflow.
+- The full Debian rootfs assembly, Android unit-test stage and debug APK packaging are available through **Actions → Android CI → Run workflow** with `build_android=true`. The default manual-dispatch value is false.
+- A green DirectAudio job proves native driver/helper compilation and architecture checks only. It does not prove audio playback or game launch on a physical device.
 
 ## Build toolchain
 
