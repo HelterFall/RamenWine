@@ -45,6 +45,7 @@ import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
+import dev.ramenwine.inspection.PeArchitecture
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.GameLocaleProfile
 import dev.ramenwine.library.GameStorageManager
@@ -233,6 +234,7 @@ fun RamenWineApp() {
                         treeUri = folderUri,
                         gameTitle = title,
                         selectedExecutableRelativePath = candidate.relativePath,
+                        selectedExecutableUri = candidate.uri,
                         onProgress = { progress ->
                             scope.launch {
                                 importProgress = progress
@@ -770,6 +772,8 @@ private fun SelectedExecutableCard(
     onImport: () -> Unit
 ) {
     val isValidPe = candidate.peInspection?.isValidPe == true
+    val isSupportedArchitecture = candidate.peInspection?.architecture in
+        setOf(PeArchitecture.X86, PeArchitecture.X86_64)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -798,6 +802,15 @@ private fun SelectedExecutableCard(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
+            } else if (!isSupportedArchitecture) {
+                Text(
+                    "Этот EXE собран для " +
+                        (candidate.peInspection?.architecture?.displayName ?: "неизвестной архитектуры") +
+                        ". Сейчас доступны только Windows x86 и x86-64. " +
+                        "Файлы игры не будут копироваться.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             if (!canImport) {
                 Text(
@@ -812,7 +825,7 @@ private fun SelectedExecutableCard(
             Button(
                 onClick = onImport,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = isValidPe && canImport && !importing
+                enabled = isValidPe && isSupportedArchitecture && canImport && !importing
             ) {
                 Text(if (importing) "Импортирование…" else "Импортировать игру")
             }
