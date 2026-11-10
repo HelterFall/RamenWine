@@ -16,6 +16,7 @@ private const val OUTPUT_DRAIN_MILLIS = 500L
 private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
 private const val SETUP_COMMAND_TIMEOUT_MILLIS = 5 * 60 * 1000L
 private const val SETUP_COMMAND_STOP_WAIT_MILLIS = 1_500L
+private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
 
 /**
  * Starts a previously validated PRoot command without a shell.
@@ -57,7 +58,7 @@ class ProotWineProcessSupervisor {
                 process.destroy()
                 if (!process.waitFor(SETUP_COMMAND_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
-                    process.waitFor(FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+                    process.waitFor(SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)
                 }
                 throw IOException(
                     "Wine prefix setup timed out after $timeoutMillis ms. " +
