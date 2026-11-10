@@ -86,10 +86,19 @@ jobs:
       - name: Confirm APK contains the prebuilt runtime payload
         shell: bash
         run: |
+          set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          RUNTIME_ZIP="$RUNNER_TEMP/ramenwine-runtime.zip"
+
           test -s "$APK"
           unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
-          unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" | unzip -t -
+
+          # Info-ZIP validates a named archive file; it does not accept an
+          # archive streamed to stdin via "unzip -t -".
+          unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
+          test -s "$RUNTIME_ZIP"
+          unzip -t "$RUNTIME_ZIP"
+          unzip -Z1 "$RUNTIME_ZIP" | grep -Fx "runtime-manifest.json"
 
       - name: Upload debug APK
         if: success()
