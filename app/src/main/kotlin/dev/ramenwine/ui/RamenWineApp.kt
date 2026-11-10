@@ -163,6 +163,9 @@ fun RamenWineApp() {
                 runtimeInspection = RuntimeLayout.inspect(context.filesDir)
                 runtimePackageNotice = result.runtimeVersion +
                     " · " + result.installedFileCount + " файлов"
+                // The shared runtime is installed after the initial storage
+                // snapshot. Refresh the summary so it never keeps showing 0 B.
+                refreshLibraryStorage()
             } catch (error: Exception) {
                 runtimePackageError = error.message ?: error.javaClass.simpleName
                 runtimeInspection = RuntimeLayout.inspect(context.filesDir)
