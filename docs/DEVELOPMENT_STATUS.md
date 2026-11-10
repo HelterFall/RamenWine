@@ -1,7 +1,7 @@
 # RamenWine development status
 
 **Snapshot:** 2026-11-10  
-**Current milestone:** Android host, safe game import, offline runtime package installation, PRoot/Wine launch scaffolding and Wawona display integration research.
+**Current milestone:** Android host, safe game import, offline runtime package installation, PRoot/Wine launch scaffolding, Wawona display adapter and per-game launch-flow integration.
 
 ## Implemented
 
