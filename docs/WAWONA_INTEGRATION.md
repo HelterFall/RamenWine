@@ -1,6 +1,6 @@
 # Wawona Android compositor integration
 
-**Status:** RamenWine-owned adapter and pinned APK extractor added; native payload build and physical-device validation remain outstanding.  
+**Status (2026-11-10):** the pinned Wawona native payload is included in a successfully built RamenWine debug APK. The first Android 16 device smoke test reaches asset installation but fails before compositor rendering because the original app-side provenance allow-list omitted the optional Vulkan ICD manifest. The source fix and regression test are committed; rebuilding and retesting the APK on the phone remain outstanding.  
 **Reviewed upstream revision:** `d298ddd25726fec0977285aa5f57181110c966a6` on Wawona's `development` branch (2026-11-09).
 
 ## Why this is not an AAR dependency
@@ -130,7 +130,7 @@ The other 16 entries are not part of this runtime closure; they include standalo
 The adapter is split across:
 
 - `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`; the debug smoke screen also exposes upstream's `nativeRunWestonSimpleSHM` / stop / running methods.
-`WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets. The generated provenance manifest contains a SHA-256 for every selected asset; the Android installer validates the full inventory on each compositor startup and restores any missing or modified file before Wawona initializes. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
+`WawonaRuntimeAssets.kt`: installs XKB, fonts, optional Weston data and the optional `vulkan/icd.d` manifest into app-private storage. It does not copy Wawona shell or unrelated application assets. The generated provenance manifest contains a SHA-256 for every selected asset; the Android installer validates the full inventory on each compositor startup and restores any missing or modified file before Wawona initializes. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
 - `WawonaDisplayBackend.kt`: starts the compositor, verifies its live socket, attaches an Android `Surface`, and returns a `GameDisplaySession`.
 - `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events only after `bindSession()` receives a Wawona-owned session. Every event is serialized through that session's process-wide lease; stale Surface events are ignored after the lease is released.
 - `WawonaPreviewActivity.kt` (debug source set only): a separate compositor diagnostic screen. It starts Wawona on a Surface, launches the pinned upstream `weston-simple-shm` client and reports its native running state while active. It sends a stop request before releasing the Surface/core; it never starts Wine or imported EXE files.
@@ -183,7 +183,45 @@ The adapter source establishes a concrete startup/shutdown path and a live Wayla
 
 The basic input view maps one finger to a single left-click stream, ignores additional fingers to avoid duplicate VN advances, forwards Android key-down/up, and supports hardware mouse motion/buttons and scroll. The click sequence hit-tests the Wayland window first, then gives that window keyboard focus before pressing the button. The debug-only SHM preview can exercise a real in-process Wayland client against the host compositor. Upstream's SHM stop JNI method only sets a running flag and resets its counter; its client runs on a detached pthread and upstream provides no join/completion API. RamenWine records whether a client was launched, sends at most one stop request per session, and applies a short best-effort grace window before surface/core teardown. The native running flag is meaningful while the client is active, but a false value after stop is **not** proof that the detached thread has exited. Device-side teardown must still be validated. The preview is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
 
-The Wawona display adapter is connected to the library's **Играть** action through `GamePlayerActivity` and `GameLaunchCoordinator`. When the required runtime package is installed, the game screen starts Wawona on its Android Surface before launching the PRoot process. However, RamenWine still has no built and installed PRoot/Box64/Wine Linux rootfs package or staged Wawona native payload. The source-level connection is not proof that Wine boots or that an imported Windows game can launch.
+The Wawona display adapter is connected to the library's **Играть** action through `GamePlayerActivity` and `GameLaunchCoordinator`. When the required runtime package is installed, the game screen starts Wawona on its Android Surface before launching the PRoot process. The Wawona JNI libraries and support assets are now staged in the successful debug APK. The complete PRoot/Box64/Wine Linux rootfs package is still not built or installed, so the source-level launch connection is not proof that Wine boots or that an imported Windows game can launch.
+
+
+## First Android device test and provenance fix
+
+The first phone test used Android 16 / arm64-v8a. The Android Surface was
+valid (1200×2001), but Wawona failed immediately with:
+
+```text
+Wawona asset provenance contains an unsafe or invalid entry.
+```
+
+Inspection of the exact APK that had been installed showed 107 selected
+provenance assets: 75 XKB files, 8 font files, 23 Weston files and one optional
+Vulkan ICD manifest:
+
+```text
+wawona/vulkan/icd.d/vk_swiftshader_icd.json
+```
+
+The packager included and SHA-256-recorded this file, but the original
+`WawonaRuntimeAssets.isAllowedAssetPath()` and
+`WawonaAssetIntegrity.mapAssetPath()` accepted only XKB/fonts/Weston. The
+manifest therefore failed closed before `nativeInit`; this was an asset
+allow-list mismatch, not yet evidence of a Vulkan/GPU rendering failure.
+
+The source fix:
+- explicitly allows only the `wawona/vulkan/icd.d/` asset subtree;
+- maps it to app-private `usr/share/vulkan/icd.d`;
+- copies it through the same bounded, app-private asset copier;
+- includes it in the exact SHA-256 inventory check;
+- adds JVM regression coverage for the ICD path and rejects other Vulkan roots.
+
+The backend currently selects Android's `system` Vulkan driver, so this
+manifest is retained as an optional pinned asset; the source fix does not claim
+that SwiftShader fallback is already configured or working. A new APK must be
+built and the SHM preview must be retested on the phone. Until the test window
+actually appears on the Android Surface, compositor rendering remains
+unverified.
 
 ## Licensing and release obligations
 
@@ -202,7 +240,7 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 ### Build/package checks
 
-- [ ] Build the pinned Wawona APK with Nix and record its store path.
+- [x] Package the reviewed pinned Wawona APK artifact into the RamenWine debug APK; the successful package run is recorded above.
 - [ ] Run the extractor; inspect `provenance.json` and the exact native closure.
 - [ ] Run Python packager tests.
 - [ ] Run Gradle JVM tests and `:app:assembleDebug`.
@@ -212,7 +250,7 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 - [ ] Install the APK on Android 8+ (RamenWine minSdk 26).
 - [ ] Start Wawona from an actual Android SurfaceView and confirm the compositor socket stays under app cache storage.
-- [ ] Open the debug-only “Wawona / Wayland” preview and confirm the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
+- [ ] Rebuild the APK containing the Vulkan ICD provenance fix, then open the debug-only “Wawona / Wayland” preview and confirm the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
 - [ ] Run an independent original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
 - [ ] Exercise resize, touch, keyboard and mouse input.
 - [ ] Confirm that surface destruction precedes compositor shutdown and that a second session can start after close.
