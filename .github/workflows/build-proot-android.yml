@@ -29,12 +29,15 @@ jobs:
 
       - name: Set up Android SDK tools
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install pinned Android NDK
         shell: bash
         run: |
-          sdkmanager --install "ndk;30.0.16248370"
-          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT/ndk/30.0.16248370" >> "$GITHUB_ENV"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          "\$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="\$SDK_ROOT" --install "ndk;30.0.16248370"
+          echo "ANDROID_NDK_HOME=\$SDK_ROOT/ndk/30.0.16248370" >> "\$GITHUB_ENV"
 
       - name: Fetch checksum-pinned source inputs
         run: |
