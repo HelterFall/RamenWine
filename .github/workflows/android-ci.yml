@@ -84,13 +84,13 @@ jobs:
           wget -q "https://github.com/bylaws/llvm-mingw/releases/download/20250920/${LLVM_MINGW}.tar.xz"
           tar -xf "${LLVM_MINGW}.tar.xz"
 
-      - name: Generate Wine build files
+      - name: Regenerate Wine configure script
         working-directory: wine
         run: |
           set -euo pipefail
-          python3 dlls/winevulkan/make_vulkan -x vk.xml -X video.xml
-          tools/make_specfiles || true
-          tools/make_requests
+          # This job only builds the Wine audio driver. The pinned upstream
+          # Wine source already contains its generated headers; Vulkan code
+          # generation is unrelated and requires external vk.xml inputs.
           autoreconf -f
 
       - name: Build native Wine tools
