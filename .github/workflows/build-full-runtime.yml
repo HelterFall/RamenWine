@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      RUNTIME_JOBS: ${{ inputs.jobs || '2' }}
+      RUNTIME_JOBS: ${{ github.event.inputs.jobs || '2' }}
       RUNTIME_VERSION: ubuntu24.04.5-wine11.0-box64-v0.4.4-${{ github.sha }}
       RUNTIME_WORK: ${{ runner.temp }}/ramenwine-full-runtime
       RUNTIME_ZIP: ${{ runner.temp }}/ramenwine-runtime.zip
@@ -164,7 +164,7 @@ jobs:
           retention-days: 30
 
       - name: Publish immutable prerelease for app-managed provisioning
-        if: ${{ inputs.publish_prerelease == true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_prerelease == 'true' }}
         env:
           RUNTIME_TAG: runtime-preview-${{ github.sha }}
         run: |
