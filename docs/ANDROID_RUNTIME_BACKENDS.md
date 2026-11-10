@@ -225,3 +225,39 @@ Ed25519) and the app must verify the signature before extraction.
 The installer limits ZIP entries, manifest size, uncompressed bytes, and
 available disk reserve. It does not execute any runtime or game binary during
 installation. Presence of installed files is still not proof that Wine starts.
+
+
+## Pinned source acquisition
+
+The first glibc/PRoot/Box64 source set is tracked in \`tools/runtime-sources.lock.json\`.
+Run \`python3 tools/fetch_runtime_sources.py\` from a development/build environment to
+download its archives and check out its Git sources into \`build/runtime-sources/\`.
+The fetcher verifies SHA-256 for release archives and verifies the full 40-character
+Git commit for repositories. It writes \`fetched-sources.json\` as local provenance.
+It does not compile any binary, construct the guest rootfs, resolve Wine's runtime
+library closure, or produce a runtime ZIP.
+
+Pinned first-pass inputs:
+
+| Component | Pin | Role |
+|---|---|---|
+| Termux PRoot | \`termux/proot\` commit \`52d65a4d…\` | Android/Bionic host process |
+| Box64 | \`ptitSeb/box64\` commit \`c415ed7a…\` | ARM64 glibc guest x86-64 translator |
+| talloc | 2.5.0, SHA-256 in lock file | PRoot build dependency; build target intends static linking |
+| Wine | 11.21 \`amd64-wow64\`, SHA-256 in lock file | Third-party Vanilla x86-64 new-WoW64 distribution |
+
+The Wine archive is from Kron4ek's third-party Wine-Builds project, not a WineHQ
+binary release. Its README describes the Vanilla build as compiled from WineHQ
+sources and states that ordinary Wine runtime dependencies are still required.
+The WOW64 variant removes the need for a separate 32-bit Unix library stack; it
+does not make Wine self-contained. The rootfs assembly step must therefore resolve
+and include the actual x86-64 shared-library dependencies before the package can
+be considered complete.
+
+The Android NDK pin in the lock is \`30.0.16248370\`. The source fetcher intentionally
+does not download the NDK; the native build stage must use that exact installed SDK
+package and record its version in build provenance. These are initial reproducible
+inputs, not a production release guarantee. Before runtime distribution, RamenWine
+must review upstream licenses/notices, generate a dependency closure, run the
+binary/package checks, sign the release metadata and move the player flow away from
+manual ZIP selection to an app-managed component download.

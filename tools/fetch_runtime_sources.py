@@ -130,20 +130,25 @@ def download_archive(entry: dict[str, Any], destination: Path) -> dict[str, Any]
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as output:
-            while True:
-                block = response.read(CHUNK_BYTES)
-                if not block:
-                    break
-                total += len(block)
-                if total > MAX_ARCHIVE_BYTES:
-                    raise SourceFetchError(
-                        f"{entry['name']} exceeds the {MAX_ARCHIVE_BYTES}-byte download limit."
-                    )
-                digest.update(block)
-                output.write(block)
-            output.flush()
-            os.fsync(output.fileno())
+        with urllib.request.urlopen(request, timeout=60) as response:
+            if not response.geturl().startswith("https://"):
+                raise SourceFetchError(
+                    f"Refusing non-HTTPS redirect while downloading {entry['name']}."
+                )
+            with partial.open("wb") as output:
+                while True:
+                    block = response.read(CHUNK_BYTES)
+                    if not block:
+                        break
+                    total += len(block)
+                    if total > MAX_ARCHIVE_BYTES:
+                        raise SourceFetchError(
+                            f"{entry['name']} exceeds the {MAX_ARCHIVE_BYTES}-byte download limit."
+                        )
+                    digest.update(block)
+                    output.write(block)
+                output.flush()
+                os.fsync(output.fileno())
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         partial.unlink(missing_ok=True)
         raise SourceFetchError(f"Could not download {entry['name']}: {error}") from error

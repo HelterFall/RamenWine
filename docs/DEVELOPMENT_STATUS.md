@@ -20,6 +20,7 @@
 - ELF/PE ABI inspection for the PRoot/Wine package: requires AArch64 ELF for Android PRoot, guest env and Box64, x86-64 ELF for Wine, and AMD64 PE32+ for wineboot. The Python packager and Android post-install inventory perform the same header checks without executing the files.
 - Rootfs-aware absolute symlink handling: Linux absolute links inside rootfs resolve from the guest root, remain confined to rootfs and are rewritten as app-private relative links; absolute host-payload links are rejected.
 - Python runtime package builder with manifest, hashes, executable flags, symlink metadata and glibc/PRoot launch-prerequisite validation.
+- Pinned runtime source acquisition: exact Termux PRoot and Box64 commits plus checksum-verified talloc and Wine WOW64 archives; fetcher emits local source provenance but does not build binaries.
 - PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, prepares per-game directories and creates an argument-vector without a shell.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.
@@ -92,11 +93,12 @@ The last explicitly documented successful Android build/test/lint run passed on 
 ## Next engineering steps
 
 1. Run tools/build_wawona_android.sh on a Nix-capable build host and build the RamenWine APK with the generated Wawona native bundle.
-2. Build and install a matching glibc + PRoot + Box64 + Wine runtime ZIP that satisfies the package contract; the package builder only packages already-built binaries and does not produce them.
-3. Verify native loading, compositor readiness and the actual app-private Wayland socket on a physical ARM64 Android device.
-4. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
-5. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.
-6. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.
+2. Implement the pinned-source build and ARM64/x86-64 dependency-rootfs assembly; Wine's WOW64 archive is not self-contained and requires its Linux library closure.
+3. Build and install a matching glibc + PRoot + Box64 + Wine runtime ZIP that satisfies the package contract; the package builder only packages already-built binaries and does not produce them.
+4. Verify native loading, compositor readiness and the actual app-private Wayland socket on a physical ARM64 Android device.
+5. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
+6. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.
+7. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.
 
 ## Engineering rules
 
