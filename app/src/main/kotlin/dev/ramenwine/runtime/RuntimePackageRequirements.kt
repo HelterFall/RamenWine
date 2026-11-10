@@ -70,6 +70,8 @@ internal object RuntimePackageRequirements {
         if (hostLibraries == null || !hostLibraries.isDirectory) {
             errors += "Missing PRoot host library directory: host/lib"
         }
+
+        errors += RuntimeBinaryValidator.inspectInstalled(backend, backendRoot)
         return errors
     }
 

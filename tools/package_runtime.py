@@ -233,6 +233,39 @@ def resolve_manifest_file(
     return None
 
 
+def read_elf_identity(path: Path) -> tuple[int, int, int] | None:
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if (
+        len(header) < 20 or
+        header[:4] != b"\x7fELF" or
+        header[4] != 2 or
+        header[5] != 1
+    ):
+        return None
+    machine = int.from_bytes(header[18:20], "little")
+    return (header[4], header[5], machine)
+
+
+def is_x86_64_pe32_plus(path: Path) -> bool:
+    with path.open("rb") as stream:
+        dos_header = stream.read(64)
+        if len(dos_header) < 64 or dos_header[:2] != b"MZ":
+            return False
+        pe_offset = int.from_bytes(dos_header[0x3C:0x40], "little")
+        if pe_offset < 64 or pe_offset > 16 * 1024 * 1024:
+            return False
+        stream.seek(pe_offset)
+        pe_header = stream.read(26)
+
+    return (
+        len(pe_header) == 26 and
+        pe_header[:4] == b"PE\x00\x00" and
+        int.from_bytes(pe_header[4:6], "little") == 0x8664 and
+        int.from_bytes(pe_header[24:26], "little") == 0x20B
+    )
+
+
 def validate_backend_payload(
     backend: str,
     files: Iterable[PackageFile],
@@ -247,27 +280,40 @@ def validate_backend_payload(
     links_by_path = {item.relative_path: item for item in link_items}
 
     required_executables = (
-        "host/bin/proot",
-        "rootfs/usr/bin/env",
-        "rootfs/usr/bin/box64",
-        "rootfs/usr/bin/wine",
+        ("host/bin/proot", 183, "AArch64 Android-host PRoot"),
+        ("rootfs/usr/bin/env", 183, "AArch64 guest env"),
+        ("rootfs/usr/bin/box64", 183, "AArch64 Box64"),
+        ("rootfs/usr/bin/wine", 62, "x86-64 Wine loader for Box64"),
     )
-    for path in required_executables:
+    for path, expected_machine, label in required_executables:
         item = resolve_manifest_file(path, files_by_path, links_by_path)
         if item is None:
             raise ValueError(f"runtime is missing required executable: {path}")
         if not item.executable:
             raise ValueError(f"runtime file is not executable: {path}")
+        identity = read_elf_identity(item.source_path)
+        if identity != (2, 1, expected_machine):
+            raise ValueError(
+                f"{label} must be a 64-bit little-endian ELF with machine "
+                f"{expected_machine}; got {identity!r} at {path}"
+            )
 
     wineboot_candidates = (
         "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",
         "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
     )
-    if not any(
-        resolve_manifest_file(path, files_by_path, links_by_path) is not None
-        for path in wineboot_candidates
-    ):
+    wineboot = next(
+        (
+            resolve_manifest_file(path, files_by_path, links_by_path)
+            for path in wineboot_candidates
+            if resolve_manifest_file(path, files_by_path, links_by_path) is not None
+        ),
+        None,
+    )
+    if wineboot is None:
         raise ValueError("runtime is missing Wine prefix initializer (wineboot.exe)")
+    if not is_x86_64_pe32_plus(wineboot.source_path):
+        raise ValueError("Wine prefix initializer must be an x86-64 PE32+ executable")
 
     has_host_library_payload = (
         any(item.relative_path.startswith("host/lib/") for item in file_items) or
