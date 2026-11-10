@@ -48,6 +48,12 @@ OPTIONAL_MODULE_DEPENDENCIES = {
         "libavutil.so.56": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavformat.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavcodec.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
+        "libavutil.so.58": "optional DirectShow DMO / FFmpeg 6 integration",
+        "libavformat.so.60": "optional DirectShow DMO / FFmpeg 6 integration",
+        "libavcodec.so.60": "optional DirectShow DMO / FFmpeg 6 integration",
+    },
+    "opt/ramenwine-wine/x86_64-unix/wineopenxr.so": {
+        "libopenxr_loader.so.1": "optional OpenXR / virtual-reality integration",
     },
 }
 

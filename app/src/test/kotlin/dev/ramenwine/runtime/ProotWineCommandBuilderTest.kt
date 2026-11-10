@@ -41,7 +41,7 @@ class ProotWineCommandBuilderTest {
             assertEquals("/prefixes/" + fixture.gameId, command.guestEnvironment["WINEPREFIX"])
             assertTrue(command.guestEnvironment["LD_LIBRARY_PATH"]!!.contains("aarch64-linux-gnu"))
             assertTrue(command.guestEnvironment["BOX64_LD_LIBRARY_PATH"]!!.startsWith(
-                "/opt/kron4ek-wine/x86_64-unix:"
+                "/opt/ramenwine-wine/x86_64-unix:"
             ))
             assertTrue(command.guestEnvironment["BOX64_LD_LIBRARY_PATH"]!!.contains("x86_64-linux-gnu"))
             assertTrue(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))

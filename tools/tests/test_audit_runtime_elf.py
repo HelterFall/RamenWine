@@ -165,7 +165,17 @@ class RuntimeElfAuditTests(unittest.TestCase):
             wine_unix.mkdir(parents=True)
             (wine_unix / "sane.so").write_bytes(dynamic_elf64(62, "libsane.so.1"))
             (wine_unix / "wpcap.so").write_bytes(dynamic_elf64(62, "libpcap.so.1"))
-            (wine_unix / "winedmo.so").write_bytes(dynamic_elf64(62, "libavcodec.so.58"))
+            (wine_unix / "winedmo.so").write_bytes(
+                dynamic_elf64(
+                    62,
+                    "libavutil.so.58",
+                    "libavformat.so.60",
+                    "libavcodec.so.60",
+                )
+            )
+            (wine_unix / "wineopenxr.so").write_bytes(
+                dynamic_elf64(62, "libopenxr_loader.so.1")
+            )
 
             report = audit_runtime_elf.audit_rootfs(rootfs)
 
@@ -178,7 +188,10 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 {
                     ("opt/ramenwine-wine/x86_64-unix/sane.so", "libsane.so.1"),
                     ("opt/ramenwine-wine/x86_64-unix/wpcap.so", "libpcap.so.1"),
-                    ("opt/ramenwine-wine/x86_64-unix/winedmo.so", "libavcodec.so.58"),
+                    ("opt/ramenwine-wine/x86_64-unix/winedmo.so", "libavutil.so.58"),
+                    ("opt/ramenwine-wine/x86_64-unix/winedmo.so", "libavformat.so.60"),
+                    ("opt/ramenwine-wine/x86_64-unix/winedmo.so", "libavcodec.so.60"),
+                    ("opt/ramenwine-wine/x86_64-unix/wineopenxr.so", "libopenxr_loader.so.1"),
                 },
                 warnings,
             )
