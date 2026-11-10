@@ -1,6 +1,7 @@
 package dev.ramenwine.runtime
 
 import dev.ramenwine.library.ImportedGame
+import dev.ramenwine.library.GameLocaleProfile
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -16,6 +17,8 @@ class ProotWineCommandBuilderTest {
             val command = ProotWineCommandBuilder.build(fixture.request())
 
             assertEquals("fixture-runtime-1", command.runtimeVersion)
+            assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LANG"])
+            assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LC_ALL"])
             assertEquals(
                 fixture.rootfs.canonicalFile,
                 command.guestRootfsDirectory
@@ -74,6 +77,38 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun appliesAnExplicitPerGameLocaleToWine() {
+        val fixture = Fixture()
+        try {
+            val command = ProotWineCommandBuilder.build(
+                fixture.request().copy(locale = "ru_RU.UTF-8")
+            )
+            assertEquals("ru_RU.UTF-8", command.guestEnvironment["LANG"])
+            assertEquals("ru_RU.UTF-8", command.guestEnvironment["LC_ALL"])
+            assertTrue(command.arguments.contains("LANG=ru_RU.UTF-8"))
+            assertTrue(command.arguments.contains("LC_ALL=ru_RU.UTF-8"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsLocaleThatIsNotBundledInTheGuestRootfs() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request().copy(locale = "xx_XX.UTF-8")
+                )
+            }.exceptionOrNull()
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("locale"))
         } finally {
             fixture.cleanup()
         }

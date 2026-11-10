@@ -1,6 +1,7 @@
 package dev.ramenwine.runtime
 
 import dev.ramenwine.library.ImportedGame
+import dev.ramenwine.library.GameLocaleProfile
 import dev.ramenwine.inspection.SafeGamePath
 import java.io.File
 import java.io.IOException
@@ -16,7 +17,7 @@ data class ProotWineLaunchRequest(
     val game: ImportedGame,
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
-    val locale: String = "C.UTF-8"
+    val locale: String = GameLocaleProfile.DEFAULT_LOCALE
 )
 
 data class ProotWineCommand(
@@ -48,7 +49,9 @@ object ProotWineCommandBuilder {
         require(request.game.relativeDirectory == "games/" + request.game.id) {
             "Imported game directory does not match its ID."
         }
-        require(LOCALE_PATTERN.matches(request.locale)) { "Invalid locale name." }
+        if (!GameLocaleProfile.isSupported(request.locale)) {
+            throw IOException("The selected game locale is not included in this runtime.")
+        }
 
         val executableRelativePath = SafeGamePath.normalizeRelativePath(
             request.game.executableRelativePath
@@ -375,5 +378,4 @@ object ProotWineCommandBuilder {
 
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
-    private val LOCALE_PATTERN = Regex("[A-Za-z0-9_.@-]{1,64}")
 }

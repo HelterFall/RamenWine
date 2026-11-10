@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -16,6 +17,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +46,7 @@ import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.library.GameLibraryStore
+import dev.ramenwine.library.GameLocaleProfile
 import dev.ramenwine.library.GameStorageManager
 import dev.ramenwine.library.GameStorageUsage
 import dev.ramenwine.library.ImportedGame
@@ -347,6 +351,22 @@ fun RamenWineApp() {
         }
     }
 
+    fun changeGameLocale(game: ImportedGame, locale: String) {
+        if (!GameLocaleProfile.isSupported(locale)) return
+        val updatedGame = game.copy(locale = locale)
+        try {
+            libraryStore.add(updatedGame)
+            importedGames = importedGames.map { current ->
+                if (current.id == game.id) updatedGame else current
+            }
+            storageError = null
+            storageNotice = "Язык среды Wine для «" + game.title +
+                "» сохранён. Изменение применяется при следующем запуске."
+        } catch (error: Exception) {
+            storageError = error.message ?: error.javaClass.simpleName
+        }
+    }
+
     fun deleteImportedGame(game: ImportedGame) {
         if (preparingGame || importing ||
             selectedDisplayGame?.id == game.id ||
@@ -528,7 +548,8 @@ fun RamenWineApp() {
                                 activeGameSession?.game?.id != game.id
                         },
                         onPrepareGame = ::prepareGame,
-                        onDeleteGame = { pendingDeletionGame = it }
+                        onDeleteGame = { pendingDeletionGame = it },
+                        onChangeLocale = ::changeGameLocale
                     )
                 }
 
@@ -893,7 +914,8 @@ private fun LibraryCard(
     deletingGameId: String?,
     canDeleteGame: (ImportedGame) -> Boolean,
     onPrepareGame: (ImportedGame) -> Unit,
-    onDeleteGame: (ImportedGame) -> Unit
+    onDeleteGame: (ImportedGame) -> Unit,
+    onChangeLocale: (ImportedGame, String) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -902,6 +924,7 @@ private fun LibraryCard(
         ) {
             Text("Библиотека", fontWeight = FontWeight.Bold)
             games.forEach { game ->
+                var localeMenuExpanded by remember(game.id) { mutableStateOf(false) }
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(game.title, fontWeight = FontWeight.Medium)
                     Text(
@@ -909,6 +932,26 @@ private fun LibraryCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Box {
+                        TextButton(onClick = { localeMenuExpanded = true }) {
+                            Text("Язык среды Wine: " + GameLocaleProfile.labelFor(game.locale))
+                        }
+                        DropdownMenu(
+                            expanded = localeMenuExpanded,
+                            onDismissRequest = { localeMenuExpanded = false }
+                        ) {
+                            GameLocaleProfile.options.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    enabled = option.locale != game.locale,
+                                    onClick = {
+                                        localeMenuExpanded = false
+                                        onChangeLocale(game, option.locale)
+                                    }
+                                )
+                            }
+                        }
+                    }
                     val usage = storageUsage[game.id] ?: GameStorageUsage(
                         gameFilesBytes = game.totalBytes
                     )

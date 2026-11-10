@@ -1,6 +1,6 @@
 # RamenWine development status
 
-**Snapshot:** 2026-11-10  
+**Snapshot:** 2026-11-11  
 **Current milestone:** Android host, safe game import, offline runtime package installation, PRoot/Wine launch scaffolding, Wawona display adapter and per-game launch-flow integration.
 
 ## Implemented
@@ -22,7 +22,7 @@
 - Python runtime package builder with manifest, hashes, executable flags, symlink metadata and glibc/PRoot launch-prerequisite validation.
 - Pinned runtime source acquisition: exact Termux PRoot and Box64 commits plus checksum-verified talloc and Wine WOW64 archives; fetcher emits local source provenance but does not build binaries.
 - Static guest ELF dependency audit: package generation checks ARM64/x86-64 ELF interpreters and direct DT_NEEDED libraries, including architecture-specific paths, before emitting a glibc/PRoot ZIP.
-- PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, prepares per-game directories and creates an argument-vector without a shell.
+- PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, applies a validated per-game locale, prepares per-game directories and creates an argument-vector without a shell.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
@@ -30,6 +30,8 @@
 - A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
 - A checksum-pinned official Wawona v26.8.12 release downloader/importer that stages all arm64-v8a native libraries plus XKB/font/Weston assets and generates a SHA-256 provenance manifest; the importer also checks required JNI exports.
 - A Compose Surface host and initial per-game display/Play flow that only enables launch after the native Surface is attached and the compositor socket is ready.
+- Per-game Wine locale profiles persisted in the app-private library; Japanese is the default, with English, Russian, Simplified/Traditional Chinese and Korean choices. Older library entries migrate to the Japanese default.
+- The Debian guest package generates the selected UTF-8 locales and bundles Noto CJK fonts, so Japanese/Chinese/Korean glyph coverage does not depend on a user-installed font pack.
 - JVM/Python tests and GitHub Actions workflow for Android build, tests, lint and debug APK artifacts.
 
 ## Current Android user flow
@@ -74,7 +76,9 @@ The upstream root MIT license does not make every transitive native dependency M
 - The generated Wawona native libraries are intentionally not committed. Android CI downloads the official v26.8.12 release APK, verifies the published asset digest, extracts the ARM64 JNI libraries and required support assets, then verifies the final APK contains the full SHA-256 inventory. No Wawona compilation or Nix setup occurs in CI. The APK shown in the 2026-11-10 device screenshots predates this packaging change and is missing the bundle; even a successful package check does not prove device-side compositor or game startup.
 - No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
-- No production input, IME, audio, save-management, pause/resume or child-process lifecycle bridge exists.
+- Basic Android touch-to-pointer and text-input/IME forwarding are implemented, but still need real-game validation.
+- No Android audio output bridge is integrated yet; the existing ALSA/PulseAudio/OpenAL client libraries do not by themselves send Wine audio to Android.
+- Save-management, pause/resume and full child-process-tree lifecycle handling remain incomplete.
 - No physical Android device has been validated by this bootstrap.
 
 ## Build toolchain

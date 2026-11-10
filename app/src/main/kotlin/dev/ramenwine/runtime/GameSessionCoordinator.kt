@@ -85,7 +85,8 @@ class GameSessionCoordinator(
                 cacheDirectory = appContext.cacheDir,
                 game = game,
                 display = display.endpoint,
-                hostUid = Process.myUid()
+                hostUid = Process.myUid(),
+                locale = game.locale
             )
             val command = withContext(Dispatchers.IO) {
                 ProotWineCommandBuilder.build(request)

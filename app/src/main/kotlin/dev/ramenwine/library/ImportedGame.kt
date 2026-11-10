@@ -7,5 +7,6 @@ data class ImportedGame(
     val executableRelativePath: String,
     val architecture: String,
     val totalBytes: Long,
-    val importedAtEpochMillis: Long
+    val importedAtEpochMillis: Long,
+    val locale: String = GameLocaleProfile.DEFAULT_LOCALE
 )
