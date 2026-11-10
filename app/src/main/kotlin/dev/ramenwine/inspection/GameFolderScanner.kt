@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.io.InputStream
 import java.util.ArrayDeque
+import java.util.Locale
 
 data class ExecutableCandidate(
     val displayName: String,
@@ -19,8 +20,12 @@ data class FolderScanResult(
     val executableCandidates: List<ExecutableCandidate>,
     val visitedFiles: Int,
     val wasTruncated: Boolean,
-    val warnings: List<String>
-)
+    val warnings: List<String>,
+    val hasBlockingIssues: Boolean = false
+) {
+    val canImport: Boolean
+        get() = !wasTruncated && !hasBlockingIssues
+}
 
 /**
  * Read-only, bounded SAF tree scanner. It only reads a small prefix of .exe
@@ -34,12 +39,26 @@ class GameFolderScanner(private val context: Context) {
                 executableCandidates = emptyList(),
                 visitedFiles = 0,
                 wasTruncated = false,
-                warnings = listOf("Android did not provide a readable document tree.")
+                warnings = listOf("Android did not provide a readable document tree."),
+                hasBlockingIssues = true
             )
+
+        if (!root.isDirectory) {
+            return FolderScanResult(
+                folderName = root.name ?: "Selected folder",
+                executableCandidates = emptyList(),
+                visitedFiles = 0,
+                wasTruncated = false,
+                warnings = listOf("The selected document is not a folder."),
+                hasBlockingIssues = true
+            )
+        }
 
         val queue = ArrayDeque<DirectoryEntry>()
         val candidates = mutableListOf<ExecutableCandidate>()
         val warnings = mutableListOf<String>()
+        val visitedPaths = HashSet<String>()
+        var hasBlockingIssues = false
         var visitedFiles = 0
         var visitedEntries = 0
         var wasTruncated = false
@@ -52,9 +71,10 @@ class GameFolderScanner(private val context: Context) {
                 current.document.listFiles()
             } catch (error: Exception) {
                 warnings.addBounded(
-                    "Could not list " + (current.document.name ?: "a directory") +
+                    "Could not list " + (current.relativePath.ifBlank { root.name ?: "game folder" }) +
                         ": " + error.javaClass.simpleName
                 )
+                hasBlockingIssues = true
                 continue
             }
 
@@ -69,8 +89,9 @@ class GameFolderScanner(private val context: Context) {
                 val segment = SafeGamePath.validateSegment(child.name)
                 if (segment == null) {
                     warnings.addBounded(
-                        "Skipped an entry with an unsafe or unsupported file name."
+                        "An entry has a filename that cannot be represented safely in a Windows game folder."
                     )
+                    hasBlockingIssues = true
                     continue
                 }
 
@@ -78,6 +99,14 @@ class GameFolderScanner(private val context: Context) {
                     segment
                 } else {
                     current.relativePath + "/" + segment
+                }
+
+                if (!visitedPaths.add(relativePath.lowercase(Locale.ROOT))) {
+                    warnings.addBounded(
+                        "Duplicate Windows path (names differ only by letter case): " + relativePath
+                    )
+                    hasBlockingIssues = true
+                    continue
                 }
 
                 when {
@@ -99,13 +128,21 @@ class GameFolderScanner(private val context: Context) {
                         visitedFiles++
                         if (segment.endsWith(".exe", ignoreCase = true)) {
                             val inspection = try {
-                                context.contentResolver.openInputStream(child.uri)?.use {
-                                    PeHeaderInspector.inspect(it.readPrefix(MAX_HEADER_BYTES))
+                                val input = context.contentResolver.openInputStream(child.uri)
+                                if (input == null) {
+                                    warnings.addBounded("Could not open EXE for inspection: " + relativePath)
+                                    hasBlockingIssues = true
+                                    null
+                                } else {
+                                    input.use {
+                                        PeHeaderInspector.inspect(it.readPrefix(MAX_HEADER_BYTES))
+                                    }
                                 }
                             } catch (error: Exception) {
                                 warnings.addBounded(
                                     "Could not inspect $relativePath: " + error.javaClass.simpleName
                                 )
+                                hasBlockingIssues = true
                                 null
                             }
 
@@ -126,6 +163,11 @@ class GameFolderScanner(private val context: Context) {
                             }
                         }
                     }
+
+                    else -> {
+                        warnings.addBounded("Unsupported folder entry: " + relativePath)
+                        hasBlockingIssues = true
+                    }
                 }
             }
         }
@@ -144,7 +186,8 @@ class GameFolderScanner(private val context: Context) {
             ),
             visitedFiles = visitedFiles,
             wasTruncated = wasTruncated,
-            warnings = warnings
+            warnings = warnings,
+            hasBlockingIssues = hasBlockingIssues
         )
     }
 
@@ -172,8 +215,8 @@ class GameFolderScanner(private val context: Context) {
     )
 
     private companion object {
-        const val MAX_DEPTH = 16
-        const val MAX_VISITED_ENTRIES = 15_000
+        const val MAX_DEPTH = 32
+        const val MAX_VISITED_ENTRIES = 100_000
         const val MAX_HEADER_BYTES = 64 * 1024
         const val MAX_CANDIDATES = 500
         const val MAX_WARNINGS = 30

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -20,6 +21,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +43,8 @@ import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.library.GameLibraryStore
+import dev.ramenwine.library.GameStorageManager
+import dev.ramenwine.library.GameStorageUsage
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.GameSession
 import dev.ramenwine.runtime.GameSessionCoordinator
@@ -49,6 +53,7 @@ import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
 import dev.ramenwine.runtime.RuntimeState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,11 +65,22 @@ fun RamenWineApp() {
     val libraryStore = remember(context.filesDir) {
         GameLibraryStore(context.applicationContext)
     }
+    val storageManager = remember(context.filesDir) {
+        GameStorageManager(context.filesDir, context.cacheDir, libraryStore::remove)
+    }
 
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
     var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
     var importedGames by remember { mutableStateOf(libraryStore.list()) }
+    var gameStorageUsage by remember {
+        mutableStateOf<Map<String, GameStorageUsage>>(emptyMap())
+    }
+    var sharedRuntimeBytes by remember { mutableStateOf(0L) }
+    var pendingDeletionGame by remember { mutableStateOf<ImportedGame?>(null) }
+    var deletingGameId by remember { mutableStateOf<String?>(null) }
+    var storageError by remember { mutableStateOf<String?>(null) }
+    var storageNotice by remember { mutableStateOf<String?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var importProgress by remember { mutableStateOf(ImportProgress(0, 0L)) }
@@ -95,8 +111,32 @@ fun RamenWineApp() {
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
     var processOutput by remember { mutableStateOf("") }
 
+    suspend fun refreshLibraryStorage() {
+        val snapshot = withContext(Dispatchers.IO) {
+            val games = libraryStore.list()
+            val usage = games.associate { game ->
+                game.id to storageManager.usage(game)
+            }
+            Triple(games, usage, storageManager.sharedRuntimeBytes())
+        }
+        importedGames = snapshot.first
+        gameStorageUsage = snapshot.second
+        sharedRuntimeBytes = snapshot.third
+    }
 
     LaunchedEffect(context.filesDir) {
+        try {
+            withContext(Dispatchers.IO) {
+                releaseUnusedPersistedTreePermissions(context)
+                storageManager.cleanupAbandonedData(
+                    libraryStore.list().map { it.id }.toSet()
+                )
+            }
+            refreshLibraryStorage()
+        } catch (error: Exception) {
+            storageError = error.message ?: error.javaClass.simpleName
+        }
+
         val installedBackend = RuntimeLayout.inspect(context.filesDir)
             .backends
             .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
@@ -125,6 +165,14 @@ fun RamenWineApp() {
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
+            selectedFolder?.let { previous ->
+                runCatching {
+                    context.contentResolver.releasePersistableUriPermission(
+                        previous,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
             selectedFolder = uri
             scanResult = null
             selectedExecutable = null
@@ -178,8 +226,19 @@ fun RamenWineApp() {
                         }
                     )
                 }
-                importedGames = libraryStore.list()
+                runCatching {
+                    context.contentResolver.releasePersistableUriPermission(
+                        folderUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                selectedFolder = null
+                selectedExecutable = null
+                scanResult = null
+                refreshLibraryStorage()
                 importNotice = "Игра импортирована: " + imported.title
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 importError = error.message ?: error.javaClass.simpleName
             } finally {
@@ -281,6 +340,32 @@ fun RamenWineApp() {
         }
     }
 
+    fun deleteImportedGame(game: ImportedGame) {
+        if (preparingGame || importing ||
+            selectedDisplayGame?.id == game.id ||
+            activeGameSession?.game?.id == game.id
+        ) {
+            storageError = "Сначала закрой экран этой игры, затем удаляй её."
+            return
+        }
+        deletingGameId = game.id
+        storageError = null
+        storageNotice = null
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    storageManager.deleteGame(game)
+                }
+                refreshLibraryStorage()
+                storageNotice = "Игра и её сохранения удалены. Общий runtime оставлен для остальных игр."
+            } catch (error: Exception) {
+                storageError = error.message ?: error.javaClass.simpleName
+            } finally {
+                deletingGameId = null
+            }
+        }
+    }
+
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -315,6 +400,18 @@ fun RamenWineApp() {
                     runtimeInspection = runtimeInspection,
                     nativeDiagnostic = nativeDiagnostic
                 )
+
+                StorageSummaryCard(
+                    games = importedGames,
+                    usage = gameStorageUsage,
+                    sharedRuntimeBytes = sharedRuntimeBytes
+                )
+                storageError?.let {
+                    Text("Хранилище: " + it, color = MaterialTheme.colorScheme.error)
+                }
+                storageNotice?.let {
+                    Text(it, color = MaterialTheme.colorScheme.secondary)
+                }
 
                 if (installingRuntime) {
                     Text(
@@ -378,6 +475,7 @@ fun RamenWineApp() {
                     SelectedExecutableCard(
                         candidate = candidate,
                         importing = importing,
+                        canImport = scanResult?.canImport == true,
                         onImport = ::startImport
                     )
                 }
@@ -412,10 +510,18 @@ fun RamenWineApp() {
                 if (importedGames.isNotEmpty()) {
                     LibraryCard(
                         games = importedGames,
+                        storageUsage = gameStorageUsage,
                         canPrepareGame = activeDisplaySession == null &&
                             activeGameSession?.isRunning != true && !preparingGame,
                         preparingGame = preparingGame,
-                        onPrepareGame = ::prepareGame
+                        deletingGameId = deletingGameId,
+                        canDeleteGame = { game ->
+                            deletingGameId == null && !importing && !preparingGame &&
+                                selectedDisplayGame?.id != game.id &&
+                                activeGameSession?.game?.id != game.id
+                        },
+                        onPrepareGame = ::prepareGame,
+                        onDeleteGame = { pendingDeletionGame = it }
                     )
                 }
 
@@ -500,6 +606,65 @@ fun RamenWineApp() {
                 )
             }
         }
+
+        pendingDeletionGame?.let { game ->
+            AlertDialog(
+                onDismissRequest = { pendingDeletionGame = null },
+                title = { Text("Удалить «" + game.title + "»?") },
+                text = {
+                    Text(
+                        "Будут удалены копия игры, сохранения и настройки Wine, " +
+                            "а также временные файлы. Исходная папка, которую ты выбрал " +
+                            "при импорте, не изменится. Общий runtime останется для других игр."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingDeletionGame = null
+                            deleteImportedGame(game)
+                        }
+                    ) {
+                        Text("Удалить игру и сохранения")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeletionGame = null }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun StorageSummaryCard(
+    games: List<ImportedGame>,
+    usage: Map<String, GameStorageUsage>,
+    sharedRuntimeBytes: Long
+) {
+    val gameBytes = games.fold(0L) { total, game ->
+        val bytes = usage[game.id]?.totalBytes ?: game.totalBytes
+        if (bytes > 0L && total > Long.MAX_VALUE - bytes) Long.MAX_VALUE
+        else total + bytes
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text("Память RamenWine", fontWeight = FontWeight.Bold)
+            Text("Игры, сохранения и временные данные: " + formatFileSize(gameBytes))
+            Text("Общий runtime: " + formatFileSize(sharedRuntimeBytes))
+            Text(
+                "Данные находятся в приватной памяти приложения. Удалять папки через " +
+                    "файловый менеджер не нужно: для каждой игры есть отдельная очистка ниже.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -570,6 +735,7 @@ private fun RuntimeStatusCard(
 private fun SelectedExecutableCard(
     candidate: ExecutableCandidate,
     importing: Boolean,
+    canImport: Boolean,
     onImport: () -> Unit
 ) {
     val isValidPe = candidate.peInspection?.isValidPe == true
@@ -602,11 +768,20 @@ private fun SelectedExecutableCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            if (!canImport) {
+                Text(
+                    "Импорт пока заблокирован: сканирование обнаружило недоступные, " +
+                        "неподдерживаемые или непроверенные элементы. Выбери более узкую " +
+                        "папку игры или исправь указанные проблемы и просканируй снова.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
 
             Button(
                 onClick = onImport,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = isValidPe && !importing
+                enabled = isValidPe && canImport && !importing
             ) {
                 Text(if (importing) "Импортирование…" else "Импортировать игру")
             }
@@ -632,12 +807,19 @@ private fun ScanResultCard(
 
             if (result.wasTruncated) {
                 Text(
-                    "Достигнут лимит сканирования. Часть папки не проверена.",
-                    color = MaterialTheme.colorScheme.tertiary
+                    "Достигнут лимит сканирования. Часть папки не проверена; импорт отключён.",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (result.hasBlockingIssues) {
+                Text(
+                    "Есть ошибки чтения или несовместимые имена/элементы. " +
+                        "Импорт отключён, чтобы не получить неполную копию игры.",
+                    color = MaterialTheme.colorScheme.error
                 )
             }
 
-            result.executableCandidates.take(MAX_VISIBLE_CANDIDATES).forEach { candidate ->
+            result.executableCandidates.forEach { candidate ->
                 ExecutableRow(
                     candidate = candidate,
                     isSelected = selectedExecutable?.uri == candidate.uri,
@@ -698,9 +880,13 @@ private fun ExecutableRow(
 @Composable
 private fun LibraryCard(
     games: List<ImportedGame>,
+    storageUsage: Map<String, GameStorageUsage>,
     canPrepareGame: Boolean,
     preparingGame: Boolean,
-    onPrepareGame: (ImportedGame) -> Unit
+    deletingGameId: String?,
+    canDeleteGame: (ImportedGame) -> Boolean,
+    onPrepareGame: (ImportedGame) -> Unit,
+    onDeleteGame: (ImportedGame) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -716,9 +902,18 @@ private fun LibraryCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val usage = storageUsage[game.id] ?: GameStorageUsage(
+                        gameFilesBytes = game.totalBytes
+                    )
                     Text(
-                        text = formatFileSize(game.totalBytes) +
-                            " · запуск через Windows runtime",
+                        text = "Файлы игры: " + formatFileSize(usage.gameFilesBytes),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Сохранения и настройки Wine: " +
+                            formatFileSize(usage.wineDataBytes) +
+                            " · временные файлы: " + formatFileSize(usage.temporaryBytes),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -728,6 +923,16 @@ private fun LibraryCard(
                         enabled = canPrepareGame
                     ) {
                         Text(if (preparingGame) "Подготовка…" else "Открыть игровой экран")
+                    }
+                    Button(
+                        onClick = { onDeleteGame(game) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = canDeleteGame(game)
+                    ) {
+                        Text(
+                            if (deletingGameId == game.id) "Удаляю данные…"
+                            else "Удалить игру и сохранения"
+                        )
                     }
                 }
                 HorizontalDivider()
@@ -744,4 +949,19 @@ private fun formatFileSize(sizeBytes: Long): String {
     }
 }
 
-private const val MAX_VISIBLE_CANDIDATES = 100
+private fun releaseUnusedPersistedTreePermissions(context: android.content.Context) {
+    context.contentResolver.persistedUriPermissions.forEach { permission ->
+        var flags = 0
+        if (permission.isReadPermission) {
+            flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
+        }
+        if (permission.isWritePermission) {
+            flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        }
+        if (flags != 0) {
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(permission.uri, flags)
+            }
+        }
+    }
+}

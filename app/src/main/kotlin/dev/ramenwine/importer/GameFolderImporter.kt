@@ -98,9 +98,12 @@ class GameFolderImporter(private val context: Context) {
                         throw IOException("The game folder contains more than $MAX_ENTRIES entries.")
                     }
 
+                    val rawName = child.name ?: "<unnamed entry>"
                     val name = SafeGamePath.validateSegment(child.name)
                         ?: throw IOException(
-                            "The game contains a filename that cannot be represented safely in a Windows game folder."
+                            "The game contains an unsupported Windows filename in " +
+                                current.relativePath.ifBlank { root.name ?: "the selected folder" } +
+                                ": " + rawName
                         )
 
                     val relativePath = if (current.relativePath.isEmpty()) {
@@ -162,11 +165,8 @@ class GameFolderImporter(private val context: Context) {
                                         if (read == 0) continue
 
                                         val nextTotal = copiedBytes + read.toLong()
-                                        if (nextTotal < copiedBytes || nextTotal > MAX_TOTAL_BYTES) {
-                                            throw IOException(
-                                                "The game exceeds the import safety limit of " +
-                                                    MAX_TOTAL_BYTES + " bytes."
-                                            )
+                                        if (nextTotal < copiedBytes) {
+                                            throw IOException("The game folder is too large to measure safely.")
                                         }
 
                                         if (nextTotal - lastStorageCheckBytes >= STORAGE_CHECK_INTERVAL) {
@@ -236,7 +236,8 @@ class GameFolderImporter(private val context: Context) {
 
             val imported = ImportedGame(
                 id = gameId,
-                title = gameTitle.ifBlank { root.name ?: "Visual novel" },
+                title = gameTitle.trim().take(MAX_TITLE_LENGTH)
+                    .ifBlank { (root.name ?: "Visual novel").take(MAX_TITLE_LENGTH) },
                 relativeDirectory = "games/" + gameId,
                 executableRelativePath = executablePath,
                 architecture = peInspection.architecture.displayName,
@@ -278,7 +279,7 @@ class GameFolderImporter(private val context: Context) {
         const val MAX_ENTRIES = 100_000
         const val COPY_BUFFER_BYTES = 256 * 1024
         const val PE_HEADER_READ_BYTES = 64 * 1024
-        const val MAX_TOTAL_BYTES = 64L * 1024L * 1024L * 1024L
+        const val MAX_TITLE_LENGTH = 512
         const val MIN_FREE_SPACE_RESERVE = 128L * 1024L * 1024L
         const val STORAGE_CHECK_INTERVAL = 4L * 1024L * 1024L
         const val PROGRESS_INTERVAL_BYTES = 16L * 1024L * 1024L

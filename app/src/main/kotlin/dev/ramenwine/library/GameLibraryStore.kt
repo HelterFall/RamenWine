@@ -73,13 +73,23 @@ class GameLibraryStore(context: Context) {
             "Game title is too long."
         }
 
+        val updatedGames = list().filterNot { it.id == game.id } + game
+        writeLibrary(updatedGames)
+    }
+
+    @Synchronized
+    fun remove(gameId: String) {
+        require(gameId.matches(ID_PATTERN)) { "Invalid game ID." }
+        writeLibrary(list().filterNot { it.id == gameId })
+    }
+
+    private fun writeLibrary(games: List<ImportedGame>) {
         if (!gamesRoot.exists() && !gamesRoot.mkdirs()) {
             error("Could not create the private games directory.")
         }
 
-        val updatedGames = list().filterNot { it.id == game.id } + game
         val array = JSONArray()
-        updatedGames.sortedByDescending { it.importedAtEpochMillis }.forEach { item ->
+        games.sortedByDescending { it.importedAtEpochMillis }.forEach { item ->
             array.put(
                 JSONObject()
                     .put("id", item.id)
@@ -105,9 +115,7 @@ class GameLibraryStore(context: Context) {
                 stream.flush()
                 stream.fd.sync()
             }
-
-            // Both files are in the same app-private directory, so POSIX rename
-            // replaces the previous index atomically on Android/Linux.
+            // Both files live in the same private directory; rename is atomic.
             Os.rename(temporaryFile.absolutePath, libraryFile.absolutePath)
         } catch (error: Throwable) {
             temporaryFile.delete()
