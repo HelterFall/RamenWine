@@ -16,11 +16,11 @@
 
 ## Пользовательский сценарий
 
-1. Пользователь выбирает папку или архив с игрой.
+1. Пользователь выбирает папку с игрой.
 2. RamenWine безопасно импортирует и индексирует содержимое.
 3. Детектор находит кандидатов на запуск, анализирует PE-архитектуру, зависимости и маркеры движка.
 4. Пользователь выбирает предложенный EXE либо указывает другой файл вручную.
-5. Runtime Manager подготавливает профиль игры и выбирает конфигурацию совместимости.
+5. Runtime Manager автоматически проверяет общую игровую среду; если её ещё нет, RamenWine самостоятельно загружает, проверяет и устанавливает нужный runtime в закрытую папку приложения, затем подготавливает профиль игры. Игрок не выбирает runtime-архив.
 6. Игра запускается напрямую, без рабочего стола Windows и без необходимости вручную работать с оболочкой Wine.
 7. Игровая сессия отображается внутри Android-приложения; пользователь может вернуться в библиотеку.
 
@@ -161,7 +161,7 @@ DXVK не является универсальным графическим р�
 - стабильность аудио/видео;
 - размер игровых prefixes и кэшей.
 
-Базовая установка должна быть компактной, а необязательные backend и зависимости — подключаемыми локальными пакетами. При этом пользователь должен иметь возможность подготовить нужные компоненты заранее; запуск игры не должен требовать скачивания их из сети.
+Базовый Windows runtime должен сохранять широкую совместимость. Размер сокращается за счёт отсутствия Windows Desktop/Explorer и build-only файлов, а не за счёт удаления случайных Windows API. Большие runtime-компоненты доставляются и устанавливаются самим RamenWine в app-private storage: игрок не выбирает ZIP и не устанавливает отдельные приложения. После первой подготовки уже установленный runtime может работать офлайн. См. [Runtime Delivery](docs/RUNTIME_DELIVERY.md).
 
 ## План разработки
 
@@ -220,21 +220,18 @@ RamenWine может повторно использовать полезные 
 
 
 
-## Current implementation status
+## Current implementation status (2026-11-10)
 
-The Android host scaffold currently includes:
+The Android app currently has folder import, bounded EXE/PE inspection, main-file selection, app-private game storage, library metadata, runtime inventory, Wine/Box64/PRoot launch orchestration source, per-game prefix initialization logic and the Wawona Android compositor adapter.
 
-- Jetpack Compose app and ARM64 NDK/JNI bridge;
-- SAF folder selection, bounded EXE/PE inspection and manual EXE selection;
-- streamed import into private app storage with live progress;
-- local JSON game library with atomic metadata persistence;
-- runtime inventory for Bionic ARM64EC/FEX, Bionic + Box64 and glibc + PRoot + Box64;
-- offline runtime ZIP installation with SHA-256 payload verification, staged activation and rollback;
-- a Python runtime package builder, automated Python/JVM tests, PRoot process supervision and host-tested per-game Wine-prefix initialization with cross-coordinator locking;
-- Focused GitHub Actions checks for Python runtime-packager tests and JVM unit tests; APK packaging, lint, NDK/CMake and artifact uploads are deferred.
+A final debug APK was successfully assembled and its contents verified by GitHub Actions run [#42725634203](https://github.com/HelterFall/RamenWine/actions/runs/42725634203). That APK contains the Wawona native graphics payload and assets. It does **not** contain the Wine/Box64/PRoot guest runtime.
 
-**Wine/Box64/FEX binaries are not bundled and imported games cannot be launched yet.** Runtime package file checks are not a proof of execution. No game EXE is run during scanning or import.
+The first phone test confirmed that a game folder can be scanned and imported, and the x86 `SaDisticBloOD.exe` candidate is selected. **Играть** remains unavailable because the Windows runtime is not installed. The first Wawona test failed before rendering because its provenance validator rejected the optional Vulkan ICD manifest. The source fix now accepts, copies and hash-verifies that exact asset category. A replacement debug APK was successfully built and its package inventory verified in [GitHub Actions run #42733393190](https://github.com/HelterFall/RamenWine/actions/runs/42733393190); the physical-device SHM retest is still pending.
 
-See [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md) and [Android Display Backend Research](docs/ANDROID_DISPLAY_BACKEND.md).
+The Android UI no longer offers a manual runtime ZIP picker. Runtime ZIP remains an internal build/install format only. The intended player workflow is automatic app-owned provisioning: the app downloads a signed, versioned runtime package, verifies it, installs it into private storage and then launches the selected EXE. That downloader, signed release channel and complete runtime artifact have **not** been implemented yet.
 
-Wawona is used through a RamenWine-owned JNI adapter and a pinned Nix-built native dependency payload; it is not consumed as a Gradle library. Adapter source is present, but the generated native payload and physical ARM64 rendering still need validation. See [Wawona Integration](docs/WAWONA_INTEGRATION.md). Piperella remains a separate GPL-3.0/API-36 research reference and is not a direct dependency.
+No real Windows EXE or visual novel has been launched successfully on the phone. Runtime file checks and a successful APK build are not proof of game execution.
+
+See [Runtime Delivery](docs/RUNTIME_DELIVERY.md), [Development Status](docs/DEVELOPMENT_STATUS.md), [Android Runtime Backends](docs/ANDROID_RUNTIME_BACKENDS.md), [PRoot/Wine Launch](docs/PROOT_WINE_LAUNCH.md) and [Wawona Integration](docs/WAWONA_INTEGRATION.md).
+
+**Product rule:** the player chooses a game folder and presses **Играть**. RamenWine owns Wine, Box64, PRoot, graphics components, runtime updates and per-game prefixes. No Windows desktop and no manual runtime ZIP workflow.

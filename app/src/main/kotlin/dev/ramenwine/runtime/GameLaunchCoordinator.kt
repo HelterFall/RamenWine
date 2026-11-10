@@ -3,11 +3,15 @@ package dev.ramenwine.runtime
 import android.content.Context
 import android.os.Process
 import android.view.Surface
+import java.io.File
 import dev.ramenwine.display.GameDisplayBackend
 import dev.ramenwine.display.GameDisplaySession
 import dev.ramenwine.library.ImportedGame
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -20,6 +24,9 @@ class GameLaunchCoordinator(
     private val processSupervisor: ProotWineProcessSupervisor = ProotWineProcessSupervisor()
 ) {
     private val appContext = context.applicationContext
+    // Wawona JNI shutdown may wait for detached clients and must never run on
+    // the Android main thread from the process-exit callback.
+    private val displayCleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val prefixInitializer = WinePrefixInitializer(
         filesDirectory = appContext.filesDir,
         processSupervisor = processSupervisor
@@ -33,11 +40,23 @@ class GameLaunchCoordinator(
         onOutput: (String) -> Unit,
         onExit: (Int) -> Unit,
         hostUid: Int = Process.myUid(),
-        locale: String = "C.UTF-8"
+        locale: String = "C.UTF-8",
+        operation: ProotWineOperation = ProotWineOperation.RUN_GAME
     ): GameLaunchSession {
         require(surface.isValid) { "The Android game surface is not ready." }
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
         require(hostUid >= 0) { "Invalid Android UID." }
+
+        // Catch damaged or incorrectly-architected packages before starting
+        // the compositor or PRoot. This also covers runtimes installed before
+        // the installer gained its device-side ABI validation.
+        withContext(Dispatchers.IO) {
+            val backendDirectory = File(
+                appContext.filesDir,
+                "runtime/current/backends/" + RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
+            )
+            GlibcRuntimeAbiValidator.validate(backendDirectory)
+        }
 
         // The compositor must own a live socket before the command builder
         // validates it and maps its runtime directory into the PRoot guest.
@@ -51,7 +70,8 @@ class GameLaunchCoordinator(
                 game = game,
                 display = displaySession.endpoint,
                 hostUid = hostUid,
-                locale = locale
+                locale = locale,
+                operation = operation
             )
             // Never launch the game in an empty or partially-created prefix.
             // The initializer is a no-op once both Wine registry files exist.
@@ -64,15 +84,20 @@ class GameLaunchCoordinator(
                 command = command,
                 onOutput = onOutput,
                 onExit = { exitCode ->
-                    // Do not let compositor cleanup prevent the consumer from
-                    // receiving the process exit event.
-                    displayLease.close()
-                    onExit(exitCode)
+                    // Process callbacks default to Main.immediate. Move Wawona's
+                    // potentially blocking native teardown off that thread, then
+                    // preserve the public callback's main-thread delivery.
+                    displayCleanupScope.launch {
+                        displayLease.closeOnIo()
+                        withContext(Dispatchers.Main.immediate) {
+                            onExit(exitCode)
+                        }
+                    }
                 }
             )
             return GameLaunchSession(processSession, displayLease)
         } catch (error: Throwable) {
-            displayLease.close()
+            displayLease.closeOnIo()
             throw error
         }
     }
@@ -84,6 +109,10 @@ class GameLaunchSession internal constructor(
 ) {
     val isAlive: Boolean
         get() = processSession.isAlive()
+
+    /** The active Wawona session is exposed only so the SurfaceView can bind its input lease. */
+    val displaySession: GameDisplaySession
+        get() = displayLease.displaySession
 
     val displayCleanupError: Throwable?
         get() = displayLease.closeFailure
@@ -100,7 +129,7 @@ class GameLaunchSession internal constructor(
             // Always release the Android surface/compositor, even if the
             // process cannot be stopped or the caller is being cancelled.
             withContext(NonCancellable) {
-                displayLease.close()
+                displayLease.closeOnIo()
             }
         }
     }
@@ -114,6 +143,9 @@ internal class DisplaySessionLease(
     @Volatile
     private var failure: Throwable? = null
 
+    val displaySession: GameDisplaySession
+        get() = session
+
     val closeFailure: Throwable?
         get() = failure
 
@@ -121,6 +153,16 @@ internal class DisplaySessionLease(
     fun resize(widthPx: Int, heightPx: Int) {
         check(!closed) { "The game display session is already closed." }
         session.resize(widthPx, heightPx)
+    }
+
+    /**
+     * Native compositor teardown can block while it stops clients and releases
+     * Vulkan state. Keep that work off the caller's thread (especially Main).
+     */
+    suspend fun closeOnIo() {
+        withContext(Dispatchers.IO + NonCancellable) {
+            close()
+        }
     }
 
     @Synchronized

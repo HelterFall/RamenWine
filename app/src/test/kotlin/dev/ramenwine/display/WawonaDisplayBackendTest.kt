@@ -3,7 +3,9 @@ package dev.ramenwine.display
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.security.MessageDigest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -189,4 +191,125 @@ class WawonaDisplayBackendTest {
             base.deleteRecursively()
         }
     }
+
+    @Test
+    fun verifiesExactXkbFontWestonAndVulkanIcdAssetHashes() {
+        val root = Files.createTempDirectory("ramenwine-wawona-assets").toFile()
+        try {
+            val assetContents = mapOf(
+                "wawona/xkb/rules/evdev" to "rules",
+                "wawona/fonts/truetype/test.ttf" to "font",
+                "wawona/weston/sign_close.png" to "decoration",
+                "wawona/vulkan/icd.d/vk_swiftshader_icd.json" to "icd manifest"
+            )
+            val hashes = assetContents.mapValues { (path, content) ->
+                writeIntegrityFixture(root, path, content)
+                integritySha256(content)
+            }
+
+            assertTrue(WawonaAssetIntegrity.matches(root, hashes))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun detectsMissingAndModifiedWawonaAssets() {
+        val root = Files.createTempDirectory("ramenwine-wawona-assets").toFile()
+        try {
+            val asset = File(root, "usr/share/X11/xkb/rules/evdev")
+            asset.parentFile.mkdirs()
+            asset.writeText("original")
+            val hashes = mapOf("wawona/xkb/rules/evdev" to integritySha256("original"))
+
+            assertTrue(WawonaAssetIntegrity.matches(root, hashes))
+            asset.writeText("modified")
+            assertFalse(WawonaAssetIntegrity.matches(root, hashes))
+            asset.delete()
+            assertFalse(WawonaAssetIntegrity.matches(root, hashes))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun rejectsTraversalUnknownRootsAndMalformedHashes() {
+        val root = Files.createTempDirectory("ramenwine-wawona-assets").toFile()
+        try {
+            assertFalse(WawonaAssetIntegrity.matches(root, emptyMap()))
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
+                    mapOf("../../outside" to "0".repeat(64))
+                )
+            )
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
+                    mapOf("wawona/lib/libwawona.so" to "0".repeat(64))
+                )
+            )
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
+                    mapOf("wawona/vulkan/layers/unsafe.json" to "0".repeat(64))
+                )
+            )
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
+                    mapOf("wawona/xkb/rules/evdev" to "not-a-sha256")
+                )
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun rejectsAssetSymlinkThatEscapesWawonaRootfs() {
+        val base = Files.createTempDirectory("ramenwine-wawona-assets").toFile()
+        val root = File(base, "rootfs")
+        val outside = File(base, "outside")
+        try {
+            val link = File(root, "usr/share/X11/xkb/rules/evdev")
+            link.parentFile.mkdirs()
+            outside.writeText("outside")
+            Files.createSymbolicLink(link.toPath(), outside.toPath())
+
+            assertFalse(
+                WawonaAssetIntegrity.matches(
+                    root,
+                    mapOf("wawona/xkb/rules/evdev" to integritySha256("outside"))
+                )
+            )
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    private fun writeIntegrityFixture(root: File, assetPath: String, content: String) {
+        val relativePath = when {
+            assetPath.startsWith("wawona/xkb/") ->
+                "usr/share/X11/xkb/" + assetPath.removePrefix("wawona/xkb/")
+            assetPath.startsWith("wawona/fonts/") ->
+                "usr/share/fonts/" + assetPath.removePrefix("wawona/fonts/")
+            assetPath.startsWith("wawona/weston/") ->
+                "usr/share/weston/" + assetPath.removePrefix("wawona/weston/")
+            assetPath.startsWith("wawona/vulkan/icd.d/") ->
+                "usr/share/vulkan/icd.d/" +
+                    assetPath.removePrefix("wawona/vulkan/icd.d/")
+            else -> error("Unexpected Wawona asset path in test fixture.")
+        }
+        File(root, relativePath).apply {
+            parentFile.mkdirs()
+            writeText(content)
+        }
+    }
+
+    private fun integritySha256(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
 }

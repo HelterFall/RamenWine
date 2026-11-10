@@ -1,6 +1,6 @@
 # Wawona Android compositor integration
 
-**Status:** RamenWine-owned adapter and pinned APK extractor added; native payload build and physical-device validation remain outstanding.  
+**Status (2026-11-10):** the pinned Wawona native payload is included in a successfully built RamenWine debug APK. The first Android 16 device smoke test reached asset installation but failed before compositor rendering because the original app-side provenance allow-list omitted the optional Vulkan ICD manifest. The source fix and regression test are committed. A replacement APK was successfully built and package-verified in [Actions run #42733393190](https://github.com/HelterFall/RamenWine/actions/runs/42733393190), commit `0c9c5699eab460c2b14a30acd3d9d50875c0cc15`; its SHA-256 is `6ea3be1926ce3028b54dd5b9a5b82df9f3b32d835bad70f392584b6dbc9d24dc`. The new APK contains the Vulkan ICD asset and no Wine/Box64/PRoot guest runtime. **Physical-device SHM rendering retest remains outstanding.**  
 **Reviewed upstream revision:** `d298ddd25726fec0977285aa5f57181110c966a6` on Wawona's `development` branch (2026-11-09).
 
 ## Why this is not an AAR dependency
@@ -16,7 +16,27 @@ The upstream Android JNI is also coupled to Wawona's application package name th
 
 ## Pinned artifact build
 
-Do not use the old prebuilt Wawona APK release. It predates the reviewed source revision and does not provide the provenance used by this integration.
+A reviewed Android APK already exists for the exact Wawona revision used here.
+The upstream Actions artifact is ID `13377766663` from run `41941778312`.
+Its artifact ZIP SHA-256 is `04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953`;
+the contained APK SHA-256 is `60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37`.
+The checked-in packager can consume this archive directly and verifies the outer
+ZIP digest, product manifest revision, and inner APK digest before extracting
+any native files. This avoids rebuilding the pinned Wawona compositor with Nix
+when the reviewed artifact is available.
+
+Download the upstream `product-android-apk` artifact ZIP, then pass its path to Gradle. The `prepareWawonaPayload` task runs automatically before `preBuild`, uses the NDK's host `llvm-readelf`, verifies the pinned outer ZIP, product manifest and inner APK hashes, and writes the generated source set under `app/build/generated/wawona`:
+
+```bash
+gradle --no-daemon :app:assembleDebug \
+  -PwawonaArtifactZip=/path/to/wawona-product-android-apk.zip
+```
+
+The equivalent environment variable is `WAWONA_ARTIFACT_ZIP`. When neither is supplied, this optional task is skipped and a previously generated source set is left intact; clean source/JVM-only builds therefore remain possible without the large native payload.
+
+The Nix build below remains available to rebuild the same pinned source and
+produce a fresh APK for review. Do not use the old prebuilt Wawona APK release:
+it predates the reviewed source revision.
 
 Build the exact upstream revision with Nix (flakes enabled):
 
@@ -57,11 +77,11 @@ app/build/generated/wawona/
     provenance.json
 ```
 
-Only the three required JNI/renderer roots, their recursive ELF `DT_NEEDED` closure, and the optional `libvk_swiftshader.so` are staged. Unrelated executable payloads that upstream stores under `jniLibs` with a `.so` suffix (for example SSH helper executables) are not copied unless they are actually part of the linked native dependency closure. Android system libraries are left to the OS linker. An unresolved non-system dependency is a hard packaging error.
+The three required JNI/renderer roots and their recursive ELF `DT_NEEDED` closure are staged. The packager also reads the dynamic symbol table of `libwawona.so` and requires every JNI method declared by RamenWine's minimal `WawonaNative.kt` adapter; missing or renamed native entry points fail packaging rather than becoming an `UnsatisfiedLinkError` at compositor startup. Two explicit dlopen-only helpers are added when present: `libweston_simple_shm.so` (the debug SHM smoke client) and `libvk_swiftshader.so` (the optional offscreen ICD). The SHM helper is not a `DT_NEEDED` edge from `libwawona.so`; the JNI stub calls `dlopen("libweston_simple_shm.so")`, so the packager treats it as an additional runtime root. Unrelated executable payloads that upstream stores under `jniLibs` with a `.so` suffix (for example SSH helper executables) are not copied unless they are actually part of the linked native dependency closure. Android system libraries are left to the OS linker. An unresolved non-system dependency is a hard packaging error.
 
 The generated directory is ignored by Git and included through the Android `main` source set. A clean checkout can still run JVM/Python tests without the optional generated native payload. The runtime adapter fails clearly when its Wawona assets or libraries are not present.
 
-Before following ELF dependencies, the extractor uses NDK `llvm-readelf` to require ELF64/AArch64 for every selected shared library, including versioned SONAMEs. It calculates the input APK SHA-256 as a stream (without reading the whole APK into memory) and records that hash, the pinned revision supplied by the build command, each staged library SHA-256 and extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
+Before following ELF dependencies, the extractor uses NDK `llvm-readelf` to require ELF64/AArch64 and 16-KB-compatible `PT_LOAD` alignment for every selected shared library, including versioned SONAMEs. Every load segment must have `p_align >= 0x4000` and valid file-offset/virtual-address congruence. A library built only for 4-KB pages is rejected before it enters the Gradle native source set. The packager requests wide program-header output so a wrapped `readelf` table cannot hide alignment fields. It calculates the input APK SHA-256 as a stream (without reading the whole APK into memory) and records that hash, the pinned revision supplied by the build command, the required Android ELF page size, each staged library SHA-256 and extracted asset paths in `assets/wawona/provenance.json`. The revision argument is a build assertion, not cryptographic proof of how an APK was built; retain the Nix build log and store path with release artifacts.
 
 Run the packager tests without Nix:
 
@@ -69,14 +89,51 @@ Run the packager tests without Nix:
 python -m unittest discover -s tools/tests -v
 ```
 
+## Observed artifact for the pinned revision
+
+The Wawona upstream Actions run [`Gate: products` #41941778312](https://github.com/Wawona/Wawona/actions/runs/41941778312) ran on the exact pinned commit `d298ddd25726fec0977285aa5f57181110c966a6`. Its Android-specific child job **Build: Android / Android debug APK** completed successfully, including the upstream Play-safe graphics-bundle verification and artifact upload. The Android emulator ADB runtime smoke child job also completed successfully. The overall multi-platform `Gate: products` run was marked failed because unrelated Linux/macOS/Apple-platform product jobs failed; do not interpret that aggregate result as an Android APK failure.
+
+The published upstream `product-android-apk` artifact (artifact ID `13377766663`) had a ZIP size of 93,193,378 bytes and artifact digest:
+
+```text
+sha256:04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953
+```
+
+The APK inside it was 93,192,914 bytes, with SHA-256:
+
+```text
+60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37
+```
+
+Its `product-manifest.json` records the same upstream revision and Nix store output `/nix/store/z2q69igr3rcnl3vhm32miak4fpiir7qf-wawona-android`.
+
+An independent ELF-header/DT_NEEDED inspection of this real APK found 27 ARM64 shared-object entries. The required roots, recursive dependencies and the two explicit auxiliary roots resolve to 11 libraries (about 83.3 MiB), with no unresolved non-system dependency. Each of the 11 selected libraries was independently checked with `readelf -Wl`; all PT_LOAD segments use `p_align=0x4000` and satisfy 16-KB alignment:
+
+```text
+libEGL_angle.so
+libGLESv2_angle.so
+libanowaw.so
+libvk_swiftshader.so
+libwawona.so
+libwayland-client.so
+libwayland-cursor.so
+libwayland-server.so
+libweston_simple_shm.so
+libxkbcommon.so
+libzstd.so
+```
+
+The other 16 entries are not part of this runtime closure; they include standalone shell, SSH, Niri, Fuzzel, Foot and other desktop/helper binaries. The APK contains 75 XKB asset files, 8 font files, 23 Weston data files and one Vulkan ICD manifest (107 selected files, about 13.4 MiB total). This is the reference closure for future pin updates. It is not evidence that RamenWine itself has rendered the SHM client on a device.
+
 ## Runtime ownership and lifecycle
 
 The adapter is split across:
 
-- `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`.
-`WawonaRuntimeAssets.kt`: installs only XKB, fonts and optional Weston data into app-private storage. It does not copy Wawona shell or unrelated application assets. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
+- `WawonaNative.kt`: the minimal JNI surface, in the upstream package required by native symbol names. It loads `EGL_angle`, `GLESv2_angle`, then `wawona`; the debug smoke screen also exposes upstream's `nativeRunWestonSimpleSHM` / stop / running methods.
+`WawonaRuntimeAssets.kt`: installs XKB, fonts, optional Weston data and the optional `vulkan/icd.d` manifest into app-private storage. It does not copy Wawona shell or unrelated application assets. The generated provenance manifest contains a SHA-256 for every selected asset; the Android installer validates the full inventory on each compositor startup and restores any missing or modified file before Wawona initializes. The native environment preparation then points Wawona's rootfs/XKB/Fontconfig variables at these exact private directories.
 - `WawonaDisplayBackend.kt`: starts the compositor, verifies its live socket, attaches an Android `Surface`, and returns a `GameDisplaySession`.
 - `WawonaSurfaceView.kt`: a SurfaceView host that forwards basic touch, key and mouse events only after `bindSession()` receives a Wawona-owned session. Every event is serialized through that session's process-wide lease; stale Surface events are ignored after the lease is released.
+- `WawonaPreviewActivity.kt` (debug source set only): a separate compositor diagnostic screen. It starts Wawona on a Surface, launches the pinned upstream `weston-simple-shm` client and reports its native running state while active. It sends a stop request before releasing the Surface/core; it never starts Wine or imported EXE files.
 - `GameLaunchCoordinator`: remains the owner that joins a supplied display session with the PRoot process lifecycle.
 
 ### Process-global restriction
@@ -92,7 +149,7 @@ Upstream separates Vulkan surface cleanup from Rust compositor shutdown. RamenWi
 1. Start the Rust Wayland core and create its socket.
 2. Verify the socket is a real AF_UNIX socket.
 3. Dump the Android host keymap before `nativeInit`, then call `nativeReloadHostKeymap()` after the Rust core is ready (matching upstream `MainActivity`).
-4. Set display density and the Android multi-touch seat mode.
+4. Set display density and disable Wawona's native touch-to-pointer emulation; RamenWine maps a single finger to one left-click stream itself.
 5. Attach the Android `Surface` to the upstream Vulkan renderer.
 6. Synchronize the initial logical output size with `nativeSyncOutputSize(width, height)`.
 7. Apply the Wawona clean-install graphics defaults (system Vulkan WSI, ANGLE, automatic compositor backend).
@@ -124,9 +181,48 @@ The existing PRoot command builder independently verifies that the socket exists
 
 The adapter source establishes a concrete startup/shutdown path and a live Wayland endpoint contract. The upstream `nativeIsCompositorReady()` reports the Rust core state. The upstream `nativeSetSurface()` returns `void`; it does not expose an explicit success result for Vulkan surface/swapchain creation. A ready socket and core therefore do **not** prove that pixels are successfully presented to the Android surface. Vulkan failures must still be checked in logcat and verified with a real client on hardware.
 
-The basic input view forwards multi-touch, Android key-down/up, mouse motion/buttons and scroll. It is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
+The basic input view maps one finger to a single left-click stream, ignores additional fingers to avoid duplicate VN advances, forwards Android key-down/up, and supports hardware mouse motion/buttons and scroll. The click sequence hit-tests the Wayland window first, then gives that window keyboard focus before pressing the button. The debug-only SHM preview can exercise a real in-process Wayland client against the host compositor. Upstream's SHM stop JNI method only sets a running flag and resets its counter; its client runs on a detached pthread and upstream provides no join/completion API. RamenWine records whether a client was launched, sends at most one stop request per session, and applies a short best-effort grace window before surface/core teardown. The native running flag is meaningful while the client is active, but a false value after stop is **not** proof that the detached thread has exited. Device-side teardown must still be validated. The preview is not yet a complete IME/text-input bridge, gamepad mapping, touchpad gesture implementation, orientation controller or audio router.
 
-The adapter is not yet connected to a user-facing Play action. RamenWine still has no bundled PRoot/Box64/Wine Linux rootfs and no real Wine package. The presence of `GameLaunchCoordinator` plus a display backend is not a claim that imported Windows games can launch.
+The Wawona display adapter is connected to the library's **Играть** action through `GamePlayerActivity` and `GameLaunchCoordinator`. When the required runtime package is installed, the game screen starts Wawona on its Android Surface before launching the PRoot process. The Wawona JNI libraries and support assets are now staged in the successful debug APK. The complete PRoot/Box64/Wine Linux rootfs package is still not built or installed, so the source-level launch connection is not proof that Wine boots or that an imported Windows game can launch.
+
+
+## First Android device test and provenance fix
+
+The first phone test used Android 16 / arm64-v8a. The Android Surface was
+valid (1200×2001), but Wawona failed immediately with:
+
+```text
+Wawona asset provenance contains an unsafe or invalid entry.
+```
+
+Inspection of the exact APK that had been installed showed 107 selected
+provenance assets: 75 XKB files, 8 font files, 23 Weston files and one optional
+Vulkan ICD manifest:
+
+```text
+wawona/vulkan/icd.d/vk_swiftshader_icd.json
+```
+
+The packager included and SHA-256-recorded this file, but the original
+`WawonaRuntimeAssets.isAllowedAssetPath()` and
+`WawonaAssetIntegrity.mapAssetPath()` accepted only XKB/fonts/Weston. The
+manifest therefore failed closed before `nativeInit`; this was an asset
+allow-list mismatch, not yet evidence of a Vulkan/GPU rendering failure.
+
+The source fix:
+- explicitly allows only the `wawona/vulkan/icd.d/` asset subtree;
+- maps it to app-private `usr/share/vulkan/icd.d`;
+- copies it through the same bounded, app-private asset copier;
+- includes it in the exact SHA-256 inventory check;
+- adds JVM regression coverage for the ICD path and rejects other Vulkan roots.
+
+The backend currently selects Android's `system` Vulkan driver, so this
+manifest is retained as an optional pinned asset; the source fix does not claim
+that SwiftShader fallback is already configured or working. The replacement
+APK now includes the corrected asset installer and has passed APK-level
+verification. Install that APK and retest the SHM preview on the phone. Until
+the test window actually appears on the Android Surface, compositor rendering
+remains unverified.
 
 ## Licensing and release obligations
 
@@ -145,7 +241,7 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 ### Build/package checks
 
-- [ ] Build the pinned Wawona APK with Nix and record its store path.
+- [x] Package the reviewed pinned Wawona APK artifact into the RamenWine debug APK; the successful package run is recorded above.
 - [ ] Run the extractor; inspect `provenance.json` and the exact native closure.
 - [ ] Run Python packager tests.
 - [ ] Run Gradle JVM tests and `:app:assembleDebug`.
@@ -155,7 +251,9 @@ The upstream license summary is a starting point, not a substitute for that rele
 
 - [ ] Install the APK on Android 8+ (RamenWine minSdk 26).
 - [ ] Start Wawona from an actual Android SurfaceView and confirm the compositor socket stays under app cache storage.
-- [ ] Run an original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
+- [x] Build and package the APK containing the Vulkan ICD provenance fix; verify that the APK provenance contains the ICD manifest.
+- [ ] Install that replacement APK and open the debug-only “Wawona / Wayland” preview. Confirm that the upstream `weston-simple-shm` window actually appears in the Android Surface (the JNI run flag alone is not proof of pixels).
+- [ ] Run an independent original minimal Wayland `wl_shm` client and confirm pixels reach the Android Surface.
 - [ ] Exercise resize, touch, keyboard and mouse input.
 - [ ] Confirm that surface destruction precedes compositor shutdown and that a second session can start after close.
 - [ ] Bind the Wayland socket into the PRoot rootfs and run an original Win32 GDI/Wine GUI smoke test.

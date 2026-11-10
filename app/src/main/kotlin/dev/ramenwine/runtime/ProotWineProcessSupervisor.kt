@@ -2,6 +2,7 @@ package dev.ramenwine.runtime
 
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -10,7 +11,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,40 +27,86 @@ import kotlinx.coroutines.sync.withLock
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
 class ProotWineProcessSupervisor(
-    private val callbackDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate
+    private val callbackDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    private val processLauncher: (ProcessBuilder) -> Process = { it.start() }
 ) {
+    private val startScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     suspend fun start(
         command: ProotWineCommand,
         onOutput: (String) -> Unit,
         onExit: (Int) -> Unit
-    ): ProotWineProcessSession = withContext(Dispatchers.IO) {
-        if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
-            throw IOException("The PRoot host executable is missing or not executable.")
-        }
-        if (!command.hostWorkingDirectory.isDirectory) {
-            throw IOException("The PRoot working directory does not exist.")
-        }
+    ): ProotWineProcessSession = suspendCancellableCoroutine { continuation ->
+        val pendingSession = AtomicReference<ProotWineProcessSession?>()
+        val stopRequested = AtomicBoolean(false)
 
-        val commandLine = buildList {
-            add(command.prootExecutable.absolutePath)
-            addAll(command.arguments)
+        fun stopIfOwnershipWasCancelled() {
+            val session = pendingSession.get() ?: return
+            if (stopRequested.compareAndSet(false, true)) {
+                session.requestStop()
+            }
         }
 
-        val builder = ProcessBuilder(commandLine)
-            .directory(command.hostWorkingDirectory)
-            .redirectErrorStream(true)
+        // ProcessBuilder.start() is synchronous. Run it outside the caller's
+        // cancellable coroutine, then transfer ownership through this
+        // continuation. If cancellation wins that race, the newly-created
+        // process is stopped instead of being orphaned.
+        continuation.invokeOnCancellation {
+            stopIfOwnershipWasCancelled()
+        }
 
-        val environment = builder.environment()
-        command.unsetEnvironment.forEach { environment.remove(it) }
-        environment.putAll(command.environment)
+        startScope.launch {
+            var startedProcess: Process? = null
+            try {
+                if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
+                    throw IOException("The PRoot host executable is missing or not executable.")
+                }
+                if (!command.hostWorkingDirectory.isDirectory) {
+                    throw IOException("The PRoot working directory does not exist.")
+                }
+                if (!continuation.isActive) return@launch
 
-        val process = builder.start()
-        ProotWineProcessSession(
-            process = process,
-            onOutput = onOutput,
-            onExit = onExit,
-            callbackDispatcher = callbackDispatcher
-        )
+                val commandLine = buildList {
+                    add(command.prootExecutable.absolutePath)
+                    addAll(command.arguments)
+                }
+                val builder = ProcessBuilder(commandLine)
+                    .directory(command.hostWorkingDirectory)
+                    .redirectErrorStream(true)
+
+                val environment = builder.environment()
+                command.unsetEnvironment.forEach { environment.remove(it) }
+                environment.putAll(command.environment)
+
+                val process = processLauncher(builder)
+                startedProcess = process
+                val session = ProotWineProcessSession(
+                    process = process,
+                    onOutput = onOutput,
+                    onExit = onExit,
+                    callbackDispatcher = callbackDispatcher
+                )
+                pendingSession.set(session)
+
+                if (!continuation.isActive) {
+                    stopIfOwnershipWasCancelled()
+                } else {
+                    continuation.resume(session)
+                }
+            } catch (error: Throwable) {
+                startedProcess?.let { process ->
+                    if (process.isAlive) {
+                        runCatching { process.destroy() }
+                        if (process.isAlive) {
+                            runCatching { process.destroyForcibly() }
+                        }
+                    }
+                }
+                if (continuation.isActive) {
+                    continuation.resumeWithException(error)
+                }
+            }
+        }
     }
 }
 
@@ -109,6 +159,12 @@ class ProotWineProcessSession internal constructor(
     }
 
     fun isAlive(): Boolean = process.isAlive
+
+    internal fun requestStop() {
+        scope.launch {
+            runCatching { stop() }
+        }
+    }
 
     suspend fun stop(gracePeriodMillis: Long = DEFAULT_GRACE_PERIOD_MILLIS): Int =
         withContext(Dispatchers.IO) {

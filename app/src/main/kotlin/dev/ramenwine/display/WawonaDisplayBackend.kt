@@ -63,7 +63,9 @@ class WawonaDisplayBackend(context: Context) : GameDisplayBackend {
                 WawonaNative.nativeSetDisplayDensity(
                     appContext.resources.displayMetrics.density
                 )
-                WawonaNative.nativeSetHostSeatMode(0) // Multi-touch seat mode.
+                // Touch is converted to mouse by WawonaSurfaceView; don't emit a
+                // second pointer stream from Wawona's native touch emulation.
+                WawonaNative.nativeSetTouchPointerEmulation(false)
 
                 WawonaNative.nativeSetSurface(surface)
                 // Mirror WawonaSettings' clean-install defaults so the host
@@ -166,12 +168,25 @@ internal interface WawonaInputSessionLease {
     val inputLeaseToken: Any
 }
 
+/** Optional in-process diagnostic client provided by the pinned Wawona build. */
+internal interface WawonaSmokeTestSession {
+    fun startWestonSimpleShm(): Boolean
+    fun stopWestonSimpleShm()
+    fun isWestonSimpleShmRunning(): Boolean
+}
+
 private class WawonaGameDisplaySession(
     private val surface: Surface,
     override val endpoint: WaylandDisplayEndpoint,
     override val inputLeaseToken: Any
-) : GameDisplaySession, WawonaInputSessionLease {
+) : GameDisplaySession, WawonaInputSessionLease, WawonaSmokeTestSession {
+    private companion object {
+        const val SHM_CLIENT_STOP_GRACE_MS = 150L
+    }
+
     private var closed = false
+    private var smokeClientLaunched = false
+    private var smokeStopRequested = false
 
     override fun resize(widthPx: Int, heightPx: Int) {
         require(widthPx > 0 && heightPx > 0) { "Game surface dimensions must be positive." }
@@ -182,11 +197,61 @@ private class WawonaGameDisplaySession(
         }
     }
 
+    override fun startWestonSimpleShm(): Boolean {
+        var started = false
+        WawonaProcessSessionGuard.withLease(inputLeaseToken) {
+            check(!closed) { "The Wawona display session is already closed." }
+            started = WawonaNative.nativeRunWestonSimpleSHM()
+            if (started) {
+                smokeClientLaunched = true
+                smokeStopRequested = false
+            }
+        }
+        return started
+    }
+
+    override fun stopWestonSimpleShm() {
+        WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
+            if (!closed && smokeClientLaunched && !smokeStopRequested) {
+                WawonaNative.nativeStopWestonSimpleSHM()
+                smokeStopRequested = true
+            }
+        }
+    }
+
+    override fun isWestonSimpleShmRunning(): Boolean {
+        var running = false
+        WawonaProcessSessionGuard.runIfActive(inputLeaseToken) {
+            // Upstream clears its atomic counter immediately on a stop request;
+            // false therefore means either naturally exited or stop was requested.
+            running = !closed && smokeClientLaunched && !smokeStopRequested &&
+                WawonaNative.nativeIsWestonSimpleSHMRunning()
+        }
+        return running
+    }
+
     override fun close() {
         WawonaProcessSessionGuard.closeLease(inputLeaseToken) {
             if (closed) return@closeLease
             closed = true
             try {
+                // Upstream's SHM client runs on a detached pthread. Its stop
+                // JNI method only sets the client's running flag and resets a
+                // counter; it does not join the thread. For sessions which
+                // launched it, request stop once and allow a short scheduling
+                // window before tearing down the server.
+                if (smokeClientLaunched) {
+                    if (!smokeStopRequested) {
+                        WawonaNative.nativeStopWestonSimpleSHM()
+                        smokeStopRequested = true
+                    }
+                    try {
+                        Thread.sleep(SHM_CLIENT_STOP_GRACE_MS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                    smokeClientLaunched = false
+                }
                 // Upstream explicitly separates surface teardown from core
                 // shutdown. Destroy the Vulkan surface first, then stop Rust.
                 WawonaNative.nativeDestroySurface(surface)

@@ -1,17 +1,9 @@
-name: Build pinned Wawona Android payload
+name: Package final RamenWine APK (manual, end-of-project only)
 
+# Deliberately manual-only. The installable APK is assembled on request;
+# runtime development checks remain in the separate focused workflow.
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/wawona-native-payload.yml"
-      - "app/build.gradle.kts"
-      - "app/src/main/kotlin/com/aspauldingcode/wawona/**"
-      - "app/src/main/kotlin/dev/ramenwine/display/Wawona*.kt"
-      - "tools/package_wawona_apk.py"
-      - "tools/tests/test_package_wawona_apk.py"
-      - "docs/WAWONA_INTEGRATION.md"
 
 concurrency:
   group: ramenwine-wawona-payload-${{ github.ref }}
@@ -37,7 +29,73 @@ jobs:
       - name: Checkout RamenWine
         uses: actions/checkout@v5
 
-      - name: Install Determinate Nix
+      - name: Download and verify the pinned upstream Wawona APK artifact
+        id: upstream-artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          artifact_zip="dist/wawona-product-android.zip"
+          artifact_url="https://nightly.link/Wawona/Wawona/suites/113654071417/artifacts/13377766663"
+          if curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "$artifact_url" --output "$artifact_zip"; then
+            printf '%s  %s\n' \
+              "04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953" \
+              "$artifact_zip" | shasum -a 256 -c -
+
+            python - <<'PY'
+          import hashlib
+          import json
+          import shutil
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          archive_path = Path("dist/wawona-product-android.zip")
+          apk_path = Path("dist/Wawona-upstream.apk")
+          expected_revision = "d298ddd25726fec0977285aa5f57181110c966a6"
+          expected_apk_sha256 = "60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37"
+
+          with zipfile.ZipFile(archive_path) as artifact:
+              names = artifact.namelist()
+              apk_members = [
+                  name for name in names
+                  if PurePosixPath(name).name.lower() == "wawona.apk"
+              ]
+              manifest_members = [
+                  name for name in names
+                  if PurePosixPath(name).name == "product-manifest.json"
+              ]
+              if len(apk_members) != 1 or len(manifest_members) != 1:
+                  raise SystemExit(
+                      "Expected exactly one Wawona.apk and product-manifest.json "
+                      "in the upstream artifact."
+                  )
+
+              manifest = json.loads(artifact.read(manifest_members[0]))
+              manifest_text = json.dumps(manifest, sort_keys=True)
+              if expected_revision not in manifest_text or "wawona-android" not in manifest_text:
+                  raise SystemExit("Upstream product manifest does not match the pinned Android revision.")
+
+              with artifact.open(apk_members[0]) as source, apk_path.open("wb") as target:
+                  shutil.copyfileobj(source, target)
+
+          digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+          if digest != expected_apk_sha256:
+              raise SystemExit(f"Unexpected upstream APK SHA-256: {digest}")
+          if apk_path.stat().st_size != 93192914:
+              raise SystemExit(f"Unexpected upstream APK size: {apk_path.stat().st_size}")
+          print(f"Verified pinned Wawona APK: {apk_path} ({apk_path.stat().st_size} bytes)")
+          PY
+            echo "build_from_source=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pinned upstream artifact is unavailable/expired; falling back to the reproducible Nix build."
+            rm -f "$artifact_zip"
+            echo "build_from_source=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Determinate Nix (source-build fallback)
+        if: steps.upstream-artifact.outputs.build_from_source == 'true'
         uses: DeterminateSystems/nix-installer-action@v22
         with:
           determinate: true
@@ -47,10 +105,12 @@ jobs:
             max-jobs = auto
             cores = 0
 
-      - name: Configure FlakeHub binary cache
+      - name: Configure FlakeHub binary cache (source-build fallback)
+        if: steps.upstream-artifact.outputs.build_from_source == 'true'
         uses: DeterminateSystems/flakehub-cache-action@v3
 
-      - name: Build pinned upstream Wawona Android APK
+      - name: Build pinned upstream Wawona Android APK from source
+        if: steps.upstream-artifact.outputs.build_from_source == 'true'
         run: |
           nix build "github:Wawona/Wawona/${WAWONA_REVISION}#wawona-android" \
             --print-build-logs \
@@ -80,8 +140,13 @@ jobs:
             "ndk;30.0.16248370" \
             "cmake;3.22.1"
           NDK_ROOT="$ANDROID_HOME/ndk/30.0.16248370"
-          READELF="$(find "$NDK_ROOT/toolchains/llvm/prebuilt" -type f -name llvm-readelf -print -quit)"
-          test -n "$READELF"
+          READELF="$(find "$NDK_ROOT/toolchains/llvm/prebuilt" -name llvm-readelf -print -quit)"
+          if [[ -z "$READELF" || ! -x "$READELF" ]]; then
+            echo "::error::Could not find an executable llvm-readelf in the installed Android NDK."
+            find "$NDK_ROOT/toolchains/llvm/prebuilt" -maxdepth 5 -name '*readelf*' -print || true
+            exit 1
+          fi
+          "$READELF" --version
           echo "WAWONA_LLVM_READELF=$READELF" >> "$GITHUB_ENV"
 
       - name: Extract the reviewed native dependency closure and assets
@@ -129,6 +194,7 @@ jobs:
               "lib/arm64-v8a/libwawona.so",
               "lib/arm64-v8a/libEGL_angle.so",
               "lib/arm64-v8a/libGLESv2_angle.so",
+              "lib/arm64-v8a/libweston_simple_shm.so",
               "assets/wawona/provenance.json",
               "assets/wawona/xkb",
               "assets/wawona/fonts",
@@ -144,7 +210,9 @@ jobs:
               packaged_libraries = {
                   Path(name).name
                   for name in names
-                  if name.startswith("lib/arm64-v8a/") and name.endswith(".so")
+                  if name.startswith("lib/arm64-v8a/") and (
+                      name.endswith(".so") or ".so." in Path(name).name
+                  )
               }
               expected_libraries = set(provenance["bundledLibraries"])
               missing_libraries = sorted(expected_libraries - packaged_libraries)

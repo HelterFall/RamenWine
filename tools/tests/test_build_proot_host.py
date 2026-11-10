@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+TOOLS_DIR = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location(
+    "build_proot_host",
+    TOOLS_DIR / "build_proot_host.py",
+)
+assert spec is not None and spec.loader is not None
+build_proot_host = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = build_proot_host
+spec.loader.exec_module(build_proot_host)
+
+
+def make_pinned_proot_source(root: Path) -> Path:
+    files = {
+        "src/cli/proot.h": "\\n".join(
+            f'.name = "{option}"' for option in build_proot_host.REQUIRED_PROOT_CLI_OPTIONS
+        ) + "\\nstatic int handle_option_kill_on_exit(Tracee *, const Cli *, const char *);\\n",
+        "src/cli/proot.c": "tracee->killall_on_exit = true;\\n",
+        "src/execve/enter.c": 'getenv("PROOT_LOADER");\\nPROOT_UNBUNDLE_LOADER\\n',
+        "src/path/temp.c": 'getenv("PROOT_TMP_DIR");\\n',
+        "packages/proot/build.sh": (
+            'TERMUX_PKG_VERSION="5.1.107.102"\n'
+            'TERMUX_PKG_SRCURL=https://github.com/termux/proot/archive/v${TERMUX_PKG_VERSION}.zip\n'
+            'TERMUX_PKG_SHA256=30d12a6e2cc4147123756ff58edea262d3083bbc238c12d0ab9b39e3d1c40852\n'
+            'TERMUX_PKG_DEPENDS="libandroid-shmem, libtalloc"\n'
+            'TERMUX_PKG_EXTRA_MAKE_ARGS="-C src PROOT_WITH_LIBANDROID_SHMEM=true"\n'
+            'export PROOT_UNBUNDLE_LOADER=$TERMUX_PREFIX/libexec/proot\n'
+            'termux_step_pre_configure() {\n'
+            '    CPPFLAGS+=" -DARG_MAX=131072 -DVERSION=stub"\n'
+            '}\n'
+        ),
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return root
+
+
+class BuildProotHostTests(unittest.TestCase):
+    def test_accepts_exact_pinned_proot_cli_and_termux_recipe_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            self.assertTrue(build_proot_host.patch_pinned_proot_recipe(source))
+            self.assertFalse(build_proot_host.patch_pinned_proot_recipe(source))
+            build_proot_host.validate_pinned_proot_source_contract(source)
+
+    def test_patches_sigterm_to_use_the_pinned_proot_tracee_cleanup_handler(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+
+            self.assertTrue(build_proot_host.patch_pinned_proot_recipe(source))
+            patched = recipe.read_text(encoding="utf-8")
+            self.assertIn(build_proot_host.PROOT_SIGTERM_PATCH_MARKER, patched)
+            self.assertIn("case SIGTERM:", patched)
+            self.assertIn("if (signum != SIGQUIT && signum != SIGTERM)", patched)
+
+    def test_rejects_unexpected_termux_preconfigure_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8").replace("CPPFLAGS+=", "OTHER_FLAGS+="),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "pre-configure function changed"):
+                build_proot_host.patch_pinned_proot_recipe(source)
+
+    def test_rejects_unmarked_partial_sigterm_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8") + chr(10) + "case SIGTERM:" + chr(10),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unmarked or partial"):
+                build_proot_host.patch_pinned_proot_recipe(source)
+
+    def test_rejects_recipe_that_drops_the_extracted_cli_option_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            build_proot_host.patch_pinned_proot_recipe(source)
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8").replace(
+                    "for required_option in --rootfs --bind --pwd --kill-on-exit --link2symlink --sysvipc; do",
+                    "for required_option in --rootfs --bind; do",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "source/cleanup validation is missing"):
+                build_proot_host.validate_pinned_proot_source_contract(source)
+
+    def test_rejects_termux_recipe_without_android_shmem(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = make_pinned_proot_source(Path(temporary))
+            recipe = source / "packages/proot/build.sh"
+            recipe.write_text(
+                recipe.read_text(encoding="utf-8").replace(
+                    'PROOT_WITH_LIBANDROID_SHMEM=true', "PROOT_WITH_LIBANDROID_SHMEM=false"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "required Android build setting"):
+                build_proot_host.validate_pinned_proot_source_contract(source)
+
+    def test_requires_fuse_device_before_starting_docker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fake_fuse = Path(temporary) / "fuse"
+            with (
+                patch.object(build_proot_host, "FUSE_DEVICE", fake_fuse),
+                patch.object(build_proot_host.shutil, "which", return_value="/usr/bin/tool"),
+                patch.object(build_proot_host, "run") as run_command,
+            ):
+                with self.assertRaisesRegex(ValueError, "requires /dev/fuse"):
+                    build_proot_host.require_tools()
+
+            run_command.assert_not_called()
+
+    def test_rejects_overlapping_work_and_output_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = root / "work"
+            work.mkdir()
+            with self.assertRaisesRegex(ValueError, "separate, non-overlapping"):
+                build_proot_host.validate_paths(work, work / "output")
+
+    def test_rejects_non_empty_work_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = root / "work"
+            work.mkdir()
+            (work / "keep.txt").write_text("do not overwrite")
+            with self.assertRaisesRegex(ValueError, "must be empty"):
+                build_proot_host.validate_paths(work, root / "output")
+
+    def test_rejects_non_empty_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            (output / "keep.txt").write_text("do not overwrite")
+            with self.assertRaisesRegex(ValueError, "must not exist or must be an empty directory"):
+                build_proot_host.validate_paths(root / "work", output)
+
+    def test_accepts_separate_empty_build_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work, output = build_proot_host.validate_paths(
+                root / "work",
+                root / "artifacts" / "proot-host",
+            )
+            self.assertEqual(root.resolve() / "work", work)
+            self.assertEqual(root.resolve() / "artifacts" / "proot-host", output)
+
+    def test_build_uses_pinned_termux_revision_and_assembles_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = (root / "work").resolve()
+            output = (root / "output").resolve()
+            commands: list[tuple[list[str], Path | None, dict[str, str] | None]] = []
+
+            def record_run(command, cwd=None, extra_env=None):
+                commands.append((command, cwd, extra_env))
+                if command[:2] == ["git", "init"]:
+                    make_pinned_proot_source(Path(command[2]))
+                if len(command) > 1 and command[1] == str(build_proot_host.ASSEMBLER):
+                    host_payload = output / "host"
+                    host_payload.mkdir(parents=True, exist_ok=True)
+                    (host_payload / "bin").mkdir(parents=True, exist_ok=True)
+                    (host_payload / "bin" / "proot").write_bytes(b"fixture-proot-binary")
+                    (host_payload / "PROVENANCE.json").write_text(
+                        '{"formatVersion":1,"target":"android-bionic-arm64"}',
+                        encoding="utf-8",
+                    )
+
+            def record_subprocess(command, **kwargs):
+                if command[:3] == ["git", "-C", str(work / "termux-packages")]:
+                    return type("Completed", (), {
+                        "stdout": build_proot_host.TERMUX_PACKAGES_COMMIT + "\n"
+                    })()
+                return type("Completed", (), {"stdout": "", "stderr": ""})()
+
+            original_assembler = build_proot_host.ASSEMBLER
+            try:
+                with (
+                    patch.object(build_proot_host, "require_build_host"),
+                    patch.object(build_proot_host, "require_tools"),
+                    patch.object(build_proot_host, "run", side_effect=record_run),
+                    patch.object(build_proot_host.subprocess, "run", side_effect=record_subprocess),
+                ):
+                    result = build_proot_host.build(
+                        type("Args", (), {"work_dir": work, "output_dir": output})()
+                    )
+            finally:
+                build_proot_host.ASSEMBLER = original_assembler
+
+            self.assertEqual(output / "host", result)
+            import json
+            provenance = json.loads((output / "host" / "PROVENANCE.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                build_proot_host.PROOT_SIGTERM_PATCH_ID,
+                provenance["downstreamPatches"]["prootTermination"]["id"],
+            )
+            self.assertEqual(
+                "packages/proot/build.sh",
+                provenance["downstreamPatches"]["prootTermination"]["file"],
+            )
+            self.assertEqual(
+                64,
+                len(provenance["downstreamPatches"]["prootTermination"]["recipeSha256"]),
+            )
+            self.assertEqual(
+                hashlib.sha256((output / "host" / "bin" / "proot").read_bytes()).hexdigest(),
+                provenance["downstreamPatches"]["prootTermination"]["binarySha256"],
+            )
+            self.assertTrue(any(
+                command[:4] == ["git", "-C", str(work / "termux-packages"), "fetch"]
+                and build_proot_host.TERMUX_PACKAGES_COMMIT in command
+                for command, _, _ in commands
+            ))
+            self.assertTrue(any(command[:2] == ["docker", "build"] for command, _, _ in commands))
+            self.assertTrue(any(
+                command[0] == "bash" and "./build-package.sh" in command
+                and command[-1] == "proot"
+                for command, _, _ in commands
+            ))
+            self.assertTrue(any(
+                command[1] == str(build_proot_host.ASSEMBLER)
+                for command, _, _ in commands
+                if len(command) > 1
+            ))
+            self.assertTrue(any(
+                env is not None and env.get("CONTAINER_NAME", "").startswith("ramenwine-proot-host-")
+                for _, _, env in commands
+            ))
+
+
+if __name__ == "__main__":
+    unittest.main()

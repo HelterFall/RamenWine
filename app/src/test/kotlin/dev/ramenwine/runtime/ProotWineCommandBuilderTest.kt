@@ -12,6 +12,24 @@ import org.junit.Test
 
 class ProotWineCommandBuilderTest {
     @Test
+    fun rejectsUnsupportedWindowsArchitectureBeforePreparingRuntimePaths() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(architecture = "ARM64")
+            )
+
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Unsupported Windows executable architecture"))
+            assertFalse(File(fixture.rootfs, "games/" + fixture.gameId).exists())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun buildsProotBox64WineCommandWithPrivateBindsAndWaylandSocket() {
         val fixture = Fixture()
         try {
@@ -25,7 +43,40 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
-            assertFalse(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
+            assertEquals(fixture.prootLoader.absolutePath, command.environment["PROOT_LOADER"])
+            assertEquals(fixture.prootTempDirectory.absolutePath, command.environment["PROOT_TMP_DIR"])
+            assertFalse(command.environment.containsKey("BOX64_LD_LIBRARY_PATH"))
+            assertFalse(command.environment.containsKey("WINEDLLPATH"))
+            assertFalse(command.environment.containsKey("WINEARCH"))
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(envIndex >= 0)
+            assertEquals("-i", command.arguments[envIndex + 1])
+            val guestEnvironment = command.arguments.drop(envIndex + 2)
+                .takeWhile { it.contains("=") }
+                .associate { it.substringBefore("=") to it.substringAfter("=") }
+            assertEquals(
+                "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu",
+                guestEnvironment["LD_LIBRARY_PATH"]
+            )
+            assertEquals(
+                "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
+                    "/usr/lib/box64-x86_64-linux-gnu:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
+                guestEnvironment["BOX64_LD_LIBRARY_PATH"]
+            )
+            assertEquals("1", guestEnvironment["BOX64_PREFER_WRAPPED"])
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix",
+                guestEnvironment["WINEDLLPATH"]
+            )
+            assertEquals("wow64", guestEnvironment["WINEARCH"])
+            assertEquals("/run/user/10123", guestEnvironment["XDG_RUNTIME_DIR"])
+            assertEquals("wayland-0", guestEnvironment["WAYLAND_DISPLAY"])
+            assertEquals("/usr/share/X11/xkb", guestEnvironment["XKB_CONFIG_ROOT"])
+            assertEquals("/prefixes/" + fixture.gameId, guestEnvironment["WINEPREFIX"])
+            assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
@@ -40,13 +91,11 @@ class ProotWineCommandBuilderTest {
                     "--bind=" + fixture.displayDirectory.absolutePath + ":/run/user/10123"
                 )
             )
-            assertEquals("/run/user/10123", command.environment["XDG_RUNTIME_DIR"])
-            assertEquals("wayland-0", command.environment["WAYLAND_DISPLAY"])
             assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "home/ramen").isDirectory)
             assertTrue(File(fixture.rootfs, "run/user/10123").isDirectory)
-            assertEquals("/prefixes/" + fixture.gameId, command.environment["WINEPREFIX"])
+            assertEquals("/prefixes/" + fixture.gameId, guestEnvironment["WINEPREFIX"])
             assertTrue(command.unsetEnvironment.contains("DISPLAY"))
             assertTrue(command.unsetEnvironment.contains("LD_PRELOAD"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
@@ -64,16 +113,207 @@ class ProotWineCommandBuilderTest {
             )
             val command = fixture.build(request)
 
-            assertEquals("/usr/bin/wineboot", command.guestExecutablePath)
             assertEquals(
-                listOf("/usr/bin/box64", "/usr/bin/wineboot", "--init"),
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                command.guestExecutablePath
+            )
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                    "--init"
+                ),
+                command.arguments.takeLast(4)
+            )
+            assertTrue(command.arguments.contains("/usr/bin/wine"))
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(envIndex >= 0)
+            assertEquals("-i", command.arguments[envIndex + 1])
+            assertTrue(
+                command.arguments.drop(envIndex + 2)
+                    .contains("WINEPREFIX=/prefixes/" + fixture.gameId)
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun usesSeparateWinePrefixIdDuringPrefixInitialization() {
+        val fixture = Fixture()
+        try {
+            val stagingPrefixId = "fedcba98-7654-3210-fedc-ba9876543210"
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.INITIALIZE_PREFIX,
+                    prefixId = stagingPrefixId
+                )
+            )
+            val guestPrefix = "/prefixes/" + stagingPrefixId
+
+            val envIndex = command.arguments.indexOf("/usr/bin/env")
+            assertTrue(
+                command.arguments.drop(envIndex + 2)
+                    .contains("WINEPREFIX=" + guestPrefix)
+            )
+            assertTrue(
+                command.arguments.contains(
+                    "--bind=" + File(fixture.filesDirectory, "prefixes/$stagingPrefixId")
+                        .canonicalPath + ":" + guestPrefix
+                )
+            )
+            assertTrue(File(fixture.rootfs, "prefixes/$stagingPrefixId").isDirectory)
+            assertFalse(File(fixture.rootfs, "prefixes/" + fixture.gameId).exists())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsAmd64WaylandProbeCommandWithoutLookingForAnImportedExe() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(
+                    executableRelativePath = "probe-not-in-game-folder.exe",
+                    architecture = "x86-64"
+                ),
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
+            )
+            val command = fixture.build(request)
+
+            assertEquals(
+                "/usr/lib/ramenwine/probes/wayland-probe-x86_64.exe",
+                command.guestExecutablePath
+            )
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
+                ),
                 command.arguments.takeLast(3)
             )
-            assertFalse(command.arguments.contains("/usr/bin/wine"))
-            assertEquals(
-                "/prefixes/" + fixture.gameId,
-                command.environment["WINEPREFIX"]
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsI386WaylandProbeWithTheSameWow64WineLoader() {
+        val fixture = Fixture()
+        try {
+            val request = fixture.request().copy(
+                game = fixture.request().game.copy(
+                    executableRelativePath = "probe-not-in-game-folder.exe",
+                    architecture = "x86"
+                ),
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
             )
+            val command = fixture.build(request)
+
+            assertEquals(
+                "/usr/lib/ramenwine/probes/wayland-probe-i386.exe",
+                command.guestExecutablePath
+            )
+            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+            assertTrue(command.arguments.contains("WINEARCH=wow64"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsSeparateWinebootCommandForTheWaylandProbePrefix() {
+        val fixture = Fixture()
+        try {
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.INITIALIZE_PROBE_PREFIX
+                )
+            )
+
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
+                command.guestExecutablePath
+            )
+            assertEquals("--init", command.arguments.last())
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsPrefixWaylandRegistryCommandWithoutStartingAnImportedGame() {
+        val fixture = Fixture()
+        try {
+            val command = fixture.build(
+                fixture.request().copy(
+                    operation = ProotWineOperation.CONFIGURE_WAYLAND_PREFIX
+                )
+            )
+
+            assertEquals(
+                "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe",
+                command.guestExecutablePath
+            )
+            assertEquals(
+                listOf(
+                    "/usr/bin/box64",
+                    "/usr/bin/wine",
+                    "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe",
+                    "add",
+                    "HKCU\\Software\\Wine\\Drivers",
+                    "/v",
+                    "Graphics",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    "wayland",
+                    "/f"
+                ),
+                command.arguments.takeLast(12)
+            )
+            assertTrue(command.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
+            assertTrue(command.unsetEnvironment.contains("DISPLAY"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWineRegistryCommandForWaylandPrefixConfiguration() {
+        val fixture = Fixture()
+        try {
+            fixture.wineReg.delete()
+            val error = runCatching {
+                fixture.build(
+                    fixture.request().copy(
+                        operation = ProotWineOperation.CONFIGURE_WAYLAND_PREFIX
+                    )
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine registry command"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsMissingWaylandProbeExecutable() {
+        val fixture = Fixture()
+        try {
+            fixture.waylandProbeAmd64.delete()
+            val request = fixture.request().copy(
+                operation = ProotWineOperation.RUN_WAYLAND_PROBE
+            )
+            val error = runCatching { fixture.build(request) }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Windows Wayland probe"))
         } finally {
             fixture.cleanup()
         }
@@ -91,6 +331,141 @@ class ProotWineCommandBuilderTest {
 
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("wineboot"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesProotTempDirectoryWithoutExecutableFileSupport() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request(),
+                    WaylandSocketValidator { it.isFile },
+                    prootTempDirectoryValidator = { false }
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(
+                error?.message.orEmpty().contains(
+                    "PRoot temporary directory does not permit executable files"
+                )
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingBox64BundledLibunwind() {
+        val fixture = Fixture()
+        try {
+            fixture.box64Libunwind.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Box64 bundled libunwind"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWineServerExecutable() {
+        val fixture = Fixture()
+        try {
+            fixture.wineServer.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wineserver"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWinePreloader() {
+        val fixture = Fixture()
+        try {
+            fixture.winePreloader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("wine-preloader"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWineWaylandPeDriver() {
+        val fixture = Fixture()
+        try {
+            fixture.wineWaylandPe.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine x86-64 Wayland PE driver"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWineWaylandI386PeDriver() {
+        val fixture = Fixture()
+        try {
+            fixture.wineWaylandI386Pe.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("Wine 32-bit Wayland PE driver"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingWaylandXkbRegistryLibrary() {
+        val fixture = Fixture()
+        try {
+            fixture.xkbRegistry.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("XKB registry library"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingArm64GlibcLoader() {
+        val fixture = Fixture()
+        try {
+            fixture.arm64GlibcLoader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("ARM64 glibc loader"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsRuntimeMissingX64GlibcLoader() {
+        val fixture = Fixture()
+        try {
+            fixture.glibcLoader.delete()
+            val error = runCatching { fixture.build() }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("x86-64 glibc loader"))
         } finally {
             fixture.cleanup()
         }
@@ -236,10 +611,78 @@ class ProotWineCommandBuilderTest {
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         val proot = executable(backendRoot, "host/bin/proot")
+        val prootLoader = executable(backendRoot, "host/libexec/proot/loader")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        val guestEnv = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
-        val wineboot = executable(rootfs, "usr/bin/wineboot")
+        val wineServer = executable(rootfs, "usr/bin/wineserver")
+        val winePreloader = executable(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
+        )
+        val wineboot = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+        )
+        val wineReg = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
+        )
+        val waylandProbeAmd64 = regular(
+            rootfs,
+            "usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
+        )
+        val waylandProbeI386 = regular(
+            rootfs,
+            "usr/lib/ramenwine/probes/wayland-probe-i386.exe"
+        )
+        val arm64GlibcLoader = regular(rootfs, "lib/ld-linux-aarch64.so.1")
+        val glibcLoader = regular(rootfs, "lib64/ld-linux-x86-64.so.2")
+        val box64Libstdcpp = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libstdc++.so.6"
+        )
+        val box64Libgcc = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libgcc_s.so.1"
+        )
+        val box64Libunwind = regular(
+            rootfs,
+            "usr/lib/box64-x86_64-linux-gnu/libunwind.so.8"
+        )
+        val wineWaylandUnix = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+        )
+        val wineWaylandPe = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+        )
+        val wineWaylandI386Pe = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
+        )
+        val waylandClient = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-client.so.0"
+        )
+        val waylandCursor = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0"
+        )
+        val waylandEgl = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1"
+        )
+        val xkbCommon = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
+        )
+        val xkbRegistry = regular(
+            rootfs,
+            "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
+        )
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {
@@ -247,6 +690,7 @@ class ProotWineCommandBuilderTest {
             writeBytes(byteArrayOf(0x4D, 0x5A))
         }
 
+        val prootTempDirectory = File(cacheDirectory, "proot-tmp/" + gameId).apply { mkdirs() }
         val displayDirectory = File(cacheDirectory, "wawona-runtime").apply { mkdirs() }
 
         init {
@@ -286,6 +730,13 @@ class ProotWineCommandBuilderTest {
             file.parentFile?.mkdirs()
             file.writeText("test binary")
             file.setExecutable(true)
+            return file
+        }
+
+        private fun regular(parent: File, relativePath: String): File {
+            val file = File(parent, relativePath)
+            file.parentFile?.mkdirs()
+            file.writeText("test runtime file")
             return file
         }
     }

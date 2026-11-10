@@ -10,7 +10,10 @@ import java.io.IOException
 
 enum class ProotWineOperation {
     RUN_GAME,
-    INITIALIZE_PREFIX
+    RUN_WAYLAND_PROBE,
+    INITIALIZE_PREFIX,
+    INITIALIZE_PROBE_PREFIX,
+    CONFIGURE_WAYLAND_PREFIX
 }
 
 data class ProotWineLaunchRequest(
@@ -20,7 +23,8 @@ data class ProotWineLaunchRequest(
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
     val locale: String = "C.UTF-8",
-    val operation: ProotWineOperation = ProotWineOperation.RUN_GAME
+    val operation: ProotWineOperation = ProotWineOperation.RUN_GAME,
+    val prefixId: String = game.id
 )
 
 data class ProotWineCommand(
@@ -42,10 +46,12 @@ data class ProotWineCommand(
 object ProotWineCommandBuilder {
     fun build(
         request: ProotWineLaunchRequest,
-        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator
+        socketValidator: WaylandSocketValidator = AndroidWaylandSocketValidator,
+        prootTempDirectoryValidator: (File) -> Boolean = ::supportsExecutableTempFiles
     ): ProotWineCommand {
         require(request.hostUid >= 0) { "Invalid Android UID." }
         require(ID_PATTERN.matches(request.game.id)) { "Invalid imported game ID." }
+        require(ID_PATTERN.matches(request.prefixId)) { "Invalid Wine prefix ID." }
         require(request.game.relativeDirectory == "games/" + request.game.id) {
             "Imported game directory does not match its ID."
         }
@@ -57,6 +63,20 @@ object ProotWineCommandBuilder {
 
         if (!executableRelativePath.endsWith(".exe", ignoreCase = true)) {
             throw IOException("The selected game file is not an EXE.")
+        }
+
+        if (
+            request.operation in setOf(
+                ProotWineOperation.RUN_GAME,
+                ProotWineOperation.RUN_WAYLAND_PROBE,
+                ProotWineOperation.INITIALIZE_PROBE_PREFIX
+            ) &&
+            request.game.architecture !in SUPPORTED_GAME_ARCHITECTURES
+        ) {
+            throw IOException(
+                "Unsupported Windows executable architecture: " + request.game.architecture +
+                    ". The current runtime supports x86 and x86-64 games."
+            )
         }
 
         val filesRoot = request.filesDirectory.canonicalFile
@@ -72,16 +92,87 @@ object ProotWineCommandBuilder {
         requireContained(backendRoot, rootfs, "Linux rootfs")
         requireDirectory(rootfs, "Linux rootfs")
 
+        // The guest rootfs is ARM64 Linux/glibc: Box64 is an ARM64 Linux
+        // executable and needs the ARM64 loader before it can start. Box64 then
+        // loads x86-64 Wine and its guest libraries through the x86-64 loader.
+        // Check both ABI loaders and both halves of Wine's Wayland driver.
+        runtimeFile(
+            rootfs,
+            ARM64_GLIBC_LOADER_PATH,
+            "ARM64 glibc loader"
+        )
+        runtimeFile(
+            rootfs,
+            GLIBC_LOADER_PATH,
+            "x86-64 glibc loader"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_UNIX_DRIVER_PATH,
+            "Wine Wayland Unix driver"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_PE_DRIVER_PATH,
+            "Wine x86-64 Wayland PE driver"
+        )
+        runtimeFile(
+            rootfs,
+            WINE_WAYLAND_I386_PE_DRIVER_PATH,
+            "Wine 32-bit Wayland PE driver"
+        )
+        listOf(
+            WINE_WAYLAND_CLIENT_LIBRARY_PATH to "Wayland client library",
+            WINE_WAYLAND_CURSOR_LIBRARY_PATH to "Wayland cursor library",
+            WINE_WAYLAND_EGL_LIBRARY_PATH to "Wayland EGL library",
+            WINE_XKB_COMMON_LIBRARY_PATH to "XKB common library",
+            WINE_XKB_REGISTRY_LIBRARY_PATH to "XKB registry library"
+        ).forEach { (relativePath, label) ->
+            runtimeFile(rootfs, relativePath, label)
+        }
+
         val proot = executableFile(backendRoot, "host/bin/proot")
+        val prootLoader = executableFile(backendRoot, "host/libexec/proot/loader")
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
+        executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libstdc++.so.6",
+            "Box64 bundled libstdc++",
+        )
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libgcc_s.so.1",
+            "Box64 bundled libgcc_s",
+        )
+        runtimeFile(
+            rootfs,
+            BOX64_X64_LIBRARY_DIRECTORY + "/libunwind.so.8",
+            "Box64 bundled libunwind",
+        )
         executableFile(rootfs, "usr/bin/wine")
-        if (request.operation == ProotWineOperation.INITIALIZE_PREFIX) {
-            // Wine packages expose wineboot as an executable/symlink beside
-            // the unified wine loader.
-            executableFile(rootfs, "usr/bin/wineboot")
+        executableFile(rootfs, WINE_SERVER_PATH)
+        executableFile(rootfs, WINE_PRELOADER_PATH)
+        if (request.operation in setOf(
+                ProotWineOperation.INITIALIZE_PREFIX,
+                ProotWineOperation.INITIALIZE_PROBE_PREFIX
+            )
+        ) {
+            runtimeFile(rootfs, WINEBOOT_PE_RELATIVE_PATH, "wineboot PE program")
+        }
+        if (request.operation == ProotWineOperation.RUN_WAYLAND_PROBE) {
+            val probePath = if (request.game.architecture == "x86") {
+                WINE_WAYLAND_PROBE_I386_PATH
+            } else {
+                WINE_WAYLAND_PROBE_AMD64_PATH
+            }
+            runtimeFile(rootfs, probePath, "Windows Wayland probe")
+        }
+        if (request.operation == ProotWineOperation.CONFIGURE_WAYLAND_PREFIX) {
+            runtimeFile(rootfs, WINE_REG_PE_RELATIVE_PATH, "Wine registry command")
         }
 
         val gamesRoot = File(filesRoot, "games").canonicalFile
@@ -89,17 +180,19 @@ object ProotWineCommandBuilder {
         requireContained(gamesRoot, gameDirectory, "Imported game")
         requireDirectory(gameDirectory, "Imported game")
 
-        val gameExecutable = File(gameDirectory, executableRelativePath).canonicalFile
-        requireContained(gameDirectory, gameExecutable, "Game EXE")
-        if (!gameExecutable.isFile || !gameExecutable.canRead()) {
-            throw IOException("The selected game EXE is missing or unreadable.")
+        if (request.operation == ProotWineOperation.RUN_GAME) {
+            val gameExecutable = File(gameDirectory, executableRelativePath).canonicalFile
+            requireContained(gameDirectory, gameExecutable, "Game EXE")
+            if (!gameExecutable.isFile || !gameExecutable.canRead()) {
+                throw IOException("The selected game EXE is missing or unreadable.")
+            }
         }
 
         val cacheRoot = request.cacheDirectory.canonicalFile
         val prefixDirectory = ensurePrivateDirectory(
             filesRoot,
             File(filesRoot, "prefixes"),
-            request.game.id,
+            request.prefixId,
             "Wine prefix"
         )
         val homeDirectory = ensurePrivateDirectory(
@@ -121,6 +214,16 @@ object ProotWineCommandBuilder {
             "PRoot temporary"
         )
 
+        // The pinned PRoot extracts its ELF loader into PROOT_TMP_DIR and
+        // checks that the extracted file is executable. Catch noexec cache
+        // mounts here rather than failing later inside the child process.
+        if (!prootTempDirectoryValidator(prootTempDirectory)) {
+            throw IOException(
+                "PRoot temporary directory does not permit executable files: " +
+                    prootTempDirectory.absolutePath
+            )
+        }
+
         val displayDirectory = request.display.hostRuntimeDirectory.canonicalFile
         requireContained(cacheRoot, displayDirectory, "Wayland runtime directory")
         requireDirectory(displayDirectory, "Wayland runtime directory")
@@ -141,13 +244,23 @@ object ProotWineCommandBuilder {
         }
 
         val guestGameDirectory = "/games/" + request.game.id
-        val guestPrefixDirectory = "/prefixes/" + request.game.id
+        val guestPrefixDirectory = "/prefixes/" + request.prefixId
         val guestHomeDirectory = "/home/ramen"
         val guestTempDirectory = "/tmp"
         val guestRuntimeDirectory = "/run/user/" + request.hostUid
         val guestExecutable = when (request.operation) {
             ProotWineOperation.RUN_GAME -> guestGameDirectory + "/" + executableRelativePath
-            ProotWineOperation.INITIALIZE_PREFIX -> "/usr/bin/wineboot"
+            ProotWineOperation.RUN_WAYLAND_PROBE -> {
+                val probePath = if (request.game.architecture == "x86") {
+                    WINE_WAYLAND_PROBE_I386_PATH
+                } else {
+                    WINE_WAYLAND_PROBE_AMD64_PATH
+                }
+                "/" + probePath
+            }
+            ProotWineOperation.INITIALIZE_PREFIX,
+            ProotWineOperation.INITIALIZE_PROBE_PREFIX -> "/" + WINEBOOT_PE_RELATIVE_PATH
+            ProotWineOperation.CONFIGURE_WAYLAND_PREFIX -> "/" + WINE_REG_PE_RELATIVE_PATH
         }
 
         // PRoot bind targets must exist in the guest filesystem. Create only
@@ -164,6 +277,34 @@ object ProotWineCommandBuilder {
             ensureGuestDirectory(rootfs, guestPath)
         }
 
+        // PRoot itself is an Android/Bionic host process. Pass its host-only
+        // LD_LIBRARY_PATH through ProcessBuilder, then set a fresh guest
+        // environment with /usr/bin/env so Bionic paths cannot leak into glibc.
+        val guestEnvironment = linkedMapOf(
+            "HOME" to guestHomeDirectory,
+            "WINEPREFIX" to guestPrefixDirectory,
+            "WINEDEBUG" to "err+all",
+            "WAYLAND_DISPLAY" to request.display.socketName,
+            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
+            "XKB_CONFIG_ROOT" to "/usr/share/X11/xkb",
+            "TMPDIR" to guestTempDirectory,
+            "LD_LIBRARY_PATH" to GUEST_ARM64_LIBRARY_PATH,
+            "BOX64_LD_LIBRARY_PATH" to GUEST_X64_LIBRARY_PATH,
+            // The pinned Box64 build otherwise prefers an x86-64 library
+            // when the guest loader passes an absolute path. Prefer its
+            // native ARM64 Wayland/XKB wrappers first, then let Box64 fall
+            // back to emulation for libraries without a wrapper.
+            "BOX64_PREFER_WRAPPED" to "1",
+            "WINEDLLPATH" to GUEST_WINE_DLL_PATH,
+            // Wine 11 reads WINEARCH=wow64 to force its 64-bit WoW64 path.
+            // The resulting prefix is still a 64-bit prefix (#arch=win64).
+            "WINEARCH" to "wow64",
+            "LANG" to request.locale,
+            "LC_ALL" to request.locale,
+            "PATH" to "/usr/local/bin:/usr/bin:/bin",
+            "BOX64_NOBANNER" to "1"
+        )
+
         val arguments = buildList {
             add("--kill-on-exit")
             add("--link2symlink")
@@ -177,32 +318,43 @@ object ProotWineCommandBuilder {
             add("--bind=" + tempDirectory.absolutePath + ":" + guestTempDirectory)
             add("--bind=" + displayDirectory.absolutePath + ":" + guestRuntimeDirectory)
             add("--pwd=" + guestGameDirectory)
+            add("/usr/bin/env")
+            add("-i")
+            guestEnvironment.forEach { (name, value) -> add("$name=$value") }
             add("/usr/bin/box64")
             when (request.operation) {
-                ProotWineOperation.RUN_GAME -> {
+                ProotWineOperation.RUN_GAME,
+                ProotWineOperation.RUN_WAYLAND_PROBE -> {
                     add("/usr/bin/wine")
                     add(guestExecutable)
                 }
-                ProotWineOperation.INITIALIZE_PREFIX -> {
-                    add("/usr/bin/wineboot")
+                ProotWineOperation.INITIALIZE_PREFIX,
+                ProotWineOperation.INITIALIZE_PROBE_PREFIX -> {
+                    add("/usr/bin/wine")
+                    add(guestExecutable)
                     add("--init")
+                }
+                ProotWineOperation.CONFIGURE_WAYLAND_PREFIX -> {
+                    add("/usr/bin/wine")
+                    add(guestExecutable)
+                    add("add")
+                    add("HKCU\\Software\\Wine\\Drivers")
+                    add("/v")
+                    add("Graphics")
+                    add("/t")
+                    add("REG_SZ")
+                    add("/d")
+                    add("wayland")
+                    add("/f")
                 }
             }
         }
 
         val environment = linkedMapOf(
-            "HOME" to guestHomeDirectory,
-            "WINEPREFIX" to guestPrefixDirectory,
-            "WINEDEBUG" to "err+all",
-            "WAYLAND_DISPLAY" to request.display.socketName,
-            "XDG_RUNTIME_DIR" to guestRuntimeDirectory,
-            "TMPDIR" to guestTempDirectory,
-            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
+            // These variables apply to the Android/Bionic PRoot host only.
             "LD_LIBRARY_PATH" to File(backendRoot, "host/lib").canonicalPath,
-            "LANG" to request.locale,
-            "LC_ALL" to request.locale,
-            "PATH" to "/usr/local/bin:/usr/bin:/bin",
-            "BOX64_NOBANNER" to "1"
+            "PROOT_LOADER" to prootLoader.canonicalPath,
+            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
         )
 
         return ProotWineCommand(
@@ -226,6 +378,28 @@ object ProotWineCommandBuilder {
         )
     }
 
+
+    private fun supportsExecutableTempFiles(directory: File): Boolean {
+        if (!directory.isDirectory || !directory.canWrite() || !directory.canExecute()) {
+            return false
+        }
+
+        val probe = try {
+            File.createTempFile("proot-check-", ".tmp", directory)
+        } catch (_: IOException) {
+            return false
+        } catch (_: SecurityException) {
+            return false
+        }
+
+        val executable = try {
+            probe.setExecutable(true, true) && probe.canExecute()
+        } catch (_: SecurityException) {
+            false
+        }
+        val removed = !probe.exists() || probe.delete()
+        return executable && removed
+    }
 
     private fun ensureGuestDirectory(rootfs: File, guestAbsolutePath: String) {
         if (!guestAbsolutePath.startsWith('/')) {
@@ -256,6 +430,17 @@ object ProotWineCommandBuilder {
         requireContained(root, file, "Runtime executable")
         if (!file.isFile || !file.canExecute()) {
             throw IOException("Required runtime executable is missing or not executable: " + relativePath)
+        }
+        return file
+    }
+
+    private fun runtimeFile(root: File, relativePath: String, label: String): File {
+        val normalized = SafeGamePath.normalizeRelativePath(relativePath)
+            ?: throw IOException("Unsafe " + label + " path.")
+        val file = File(root, normalized).canonicalFile
+        requireContained(root, file, label)
+        if (!file.isFile || !file.canRead()) {
+            throw IOException("Required " + label + " is missing or unreadable: " + relativePath)
         }
         return file
     }
@@ -307,6 +492,49 @@ object ProotWineCommandBuilder {
     }
 
     private const val MAX_UNIX_SOCKET_PATH_BYTES = 108
+    private val SUPPORTED_GAME_ARCHITECTURES = setOf("x86", "x86-64")
+
+    private const val ARM64_GLIBC_LOADER_PATH = "lib/ld-linux-aarch64.so.1"
+    private const val GLIBC_LOADER_PATH = "lib64/ld-linux-x86-64.so.2"
+    private const val WINE_WAYLAND_UNIX_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+    private const val WINE_WAYLAND_PE_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+    private const val WINE_WAYLAND_I386_PE_DRIVER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
+    private const val WINE_WAYLAND_CLIENT_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-client.so.0"
+    private const val WINE_WAYLAND_CURSOR_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0"
+    private const val WINE_WAYLAND_EGL_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1"
+    private const val WINE_XKB_COMMON_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0"
+    private const val WINE_XKB_REGISTRY_LIBRARY_PATH =
+        "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0"
+    private const val WINEBOOT_PE_RELATIVE_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+    private const val WINE_REG_PE_RELATIVE_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
+    private const val WINE_WAYLAND_PROBE_AMD64_PATH =
+        "usr/lib/ramenwine/probes/wayland-probe-x86_64.exe"
+    private const val WINE_WAYLAND_PROBE_I386_PATH =
+        "usr/lib/ramenwine/probes/wayland-probe-i386.exe"
+    private const val WINE_SERVER_PATH = "usr/bin/wineserver"
+    private const val WINE_PRELOADER_PATH =
+        "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
+    private const val GUEST_ARM64_LIBRARY_PATH =
+        "/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu"
+    private const val GUEST_X64_LIBRARY_PATH =
+        "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:" +
+            "/usr/lib/box64-x86_64-linux-gnu:" +
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
+    private const val BOX64_X64_LIBRARY_DIRECTORY =
+        "usr/lib/box64-x86_64-linux-gnu"
+    private const val GUEST_WINE_DLL_PATH =
+        "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows:" +
+            "/usr/lib/x86_64-linux-gnu/wine/i386-windows:" +
+            "/usr/lib/x86_64-linux-gnu/wine/x86_64-unix"
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
     private val LOCALE_PATTERN = Regex("[A-Za-z0-9_.@-]{1,64}")

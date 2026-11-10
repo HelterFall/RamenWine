@@ -35,8 +35,19 @@ class WinePrefixInitializerTest {
 
             assertTrue(File(fixture.prefixDirectory, "system.reg").isFile)
             assertTrue(File(fixture.prefixDirectory, "user.reg").isFile)
+            assertTrue(
+                File(fixture.prefixDirectory, "system.reg")
+                    .readText()
+                    .contains("#arch=win64")
+            )
             assertEquals("1", File(fixture.prefixDirectory, "wineboot-count").readText())
+            assertEquals("1", File(fixture.prefixDirectory, "wayland-config-count").readText())
+            assertEquals(
+                "graphics=wayland-v1",
+                File(fixture.prefixDirectory, ".ramenwine-wayland-driver").readText()
+            )
             assertTrue(output.any { it.contains("wineboot finished") })
+            assertTrue(output.any { it.contains("[wine-wayland]") })
         } finally {
             fixture.close()
         }
@@ -52,7 +63,137 @@ class WinePrefixInitializerTest {
 
             assertTrue(error is IOException)
             assertTrue(error?.message.orEmpty().contains("exit code 7"))
-            assertFalse(File(fixture.prefixDirectory, "system.reg").exists())
+            assertFalse(fixture.prefixDirectory.exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun refusesToUseExisting32BitPrefixInWine11Wow64Mode() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win32\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win32\n"
+            )
+
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("not a 64-bit"))
+            assertFalse(File(fixture.prefixDirectory, "wineboot-count").exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun rejectsWinebootSuccessWhenItCreates32BitPrefix() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix-win32")
+        try {
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("#arch=win64"))
+            assertFalse(fixture.prefixDirectory.exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun retriesWinebootAfterFailedStagingAttempt() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix-win32")
+        try {
+            val initializer = fixture.initializer()
+            val firstError = runCatching {
+                initializer.ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(firstError is IOException)
+            assertFalse(fixture.prefixDirectory.exists())
+
+            fixture.useFixtureScript("create-prefix")
+            initializer.ensureInitialized(fixture.request()) {}
+
+            assertTrue(File(fixture.prefixDirectory, "system.reg").isFile)
+            assertTrue(File(fixture.prefixDirectory, "user.reg").isFile)
+            assertTrue(
+                File(fixture.prefixDirectory, "system.reg")
+                    .readText()
+                    .contains("#arch=win64")
+            )
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun configuresAnExistingWin64PrefixForWaylandWithoutRunningWineboot() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+
+            fixture.initializer().ensureInitialized(fixture.request()) {}
+
+            assertFalse(File(fixture.prefixDirectory, "wineboot-count").exists())
+            assertEquals("1", File(fixture.prefixDirectory, "wayland-config-count").readText())
+            assertEquals(
+                "graphics=wayland-v1",
+                File(fixture.prefixDirectory, ".ramenwine-wayland-driver").readText()
+            )
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun skipsWaylandRegistryCommandWhenPrefixMarkerIsCurrent() = runBlocking {
+        val fixture = Fixture(fixtureScript = "create-prefix")
+        try {
+            fixture.prefixDirectory.mkdirs()
+            File(fixture.prefixDirectory, "system.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, "user.reg").writeText(
+                "WINE REGISTRY Version 2\n#arch=win64\n"
+            )
+            File(fixture.prefixDirectory, ".ramenwine-wayland-driver")
+                .writeText("graphics=wayland-v1")
+
+            fixture.initializer().ensureInitialized(fixture.request()) {}
+
+            assertFalse(File(fixture.prefixDirectory, "wayland-config-count").exists())
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun doesNotPromoteStagingPrefixWhenWaylandRegistryCommandFails() = runBlocking {
+        val fixture = Fixture(fixtureScript = "wayland-config-exit-9")
+        try {
+            val error = runCatching {
+                fixture.initializer().ensureInitialized(fixture.request()) {}
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(error?.message.orEmpty().contains("reg.exe exit code 9"))
+            assertFalse(fixture.prefixDirectory.exists())
         } finally {
             fixture.close()
         }
@@ -92,6 +233,7 @@ class WinePrefixInitializerTest {
         ).apply { mkdirs() }
         private val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
         private val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
+        private val prootLoader = executable(backendRoot, "host/libexec/proot/loader")
         private val proot = executable(
             backendRoot,
             "host/bin/proot",
@@ -100,9 +242,44 @@ class WinePrefixInitializerTest {
         private val displayDirectory = File(cacheDirectory, "display").apply { mkdirs() }
 
         init {
+            executable(rootfs, "usr/bin/env")
             executable(rootfs, "usr/bin/box64")
+            regular(rootfs, "usr/lib/box64-x86_64-linux-gnu/libstdc++.so.6")
+            regular(rootfs, "usr/lib/box64-x86_64-linux-gnu/libgcc_s.so.1")
+            regular(rootfs, "usr/lib/box64-x86_64-linux-gnu/libunwind.so.8")
             executable(rootfs, "usr/bin/wine")
-            executable(rootfs, "usr/bin/wineboot")
+            executable(rootfs, "usr/bin/wineserver")
+            executable(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/wine-preloader"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/reg.exe"
+            )
+            regular(rootfs, "lib/ld-linux-aarch64.so.1")
+            regular(rootfs, "lib64/ld-linux-x86-64.so.2")
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv"
+            )
+            regular(
+                rootfs,
+                "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
+            )
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-client.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0")
             File(displayDirectory, "wayland-0").writeText("test socket placeholder")
             val gameDirectory = File(filesDirectory, "games/$gameId").apply { mkdirs() }
             File(gameDirectory, "game.exe").writeBytes(byteArrayOf(0x4D, 0x5A))
@@ -131,8 +308,20 @@ class WinePrefixInitializerTest {
             initializationTimeoutMillis = 5_000L
         )
 
+        fun useFixtureScript(mode: String) {
+            proot.writeText(makeProotScript(mode))
+            check(proot.setExecutable(true))
+        }
+
         override fun close() {
             root.deleteRecursively()
+        }
+
+        private fun regular(parent: File, relativePath: String): File {
+            val file = File(parent, relativePath)
+            file.parentFile?.mkdirs()
+            file.writeText("fixture runtime file")
+            return file
         }
 
         private fun executable(
@@ -157,18 +346,50 @@ class WinePrefixInitializerTest {
                 """.trimIndent() + "\n"
             }
 
-            val escapedPrefix = prefixDirectory.absolutePath
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
             return shebang + """
+                import sys
                 from pathlib import Path
-                prefix = Path('$escapedPrefix')
+                prefix_binding = next(
+                    argument.split("=", 1)[1]
+                    for argument in sys.argv
+                    if argument.startswith("--bind=") and ":/prefixes/" in argument
+                )
+                host_prefix = prefix_binding.rsplit(":/prefixes/", 1)[0]
+                prefix = Path(host_prefix)
                 prefix.mkdir(parents=True, exist_ok=True)
+                if any(argument.endswith("/reg.exe") for argument in sys.argv):
+                    required = [
+                        "add",
+                        "HKCU\\Software\\Wine\\Drivers",
+                        "/v",
+                        "Graphics",
+                        "/t",
+                        "REG_SZ",
+                        "/d",
+                        "wayland",
+                        "/f",
+                    ]
+                    if any(item not in sys.argv for item in required):
+                        print("invalid Wayland registry command", flush=True)
+                        sys.exit(10)
+                    if "$mode" == "wayland-config-exit-9":
+                        print("Wayland registry command failed", flush=True)
+                        sys.exit(9)
+                    config_counter = prefix / "wayland-config-count"
+                    config_count = int(
+                        config_counter.read_text() if config_counter.exists() else "0"
+                    ) + 1
+                    config_counter.write_text(str(config_count))
+                    print("Wayland graphics driver configured", flush=True)
+                    sys.exit(0)
+
                 counter = prefix / "wineboot-count"
                 count = int(counter.read_text() if counter.exists() else "0") + 1
                 counter.write_text(str(count))
-                (prefix / "system.reg").write_text("REGEDIT4")
-                (prefix / "user.reg").write_text("REGEDIT4")
+                arch = "win32" if "$mode" == "create-prefix-win32" else "win64"
+                registry = f"WINE REGISTRY Version 2\n#arch={arch}\n"
+                (prefix / "system.reg").write_text(registry)
+                (prefix / "user.reg").write_text(registry)
                 print("wineboot finished", flush=True)
             """.trimIndent() + "\n"
         }

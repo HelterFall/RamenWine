@@ -1,51 +1,45 @@
 # Android runtime backend decision
 
-**Status:** architecture decision for the first Android runtime prototypes  
+**Status:** first-launch backend selected; alternative backends deferred  
 **Scope:** execution environment selection on ARM64 Android
 
 ## Decision
 
-RamenWine must not hard-code one Android/Linux execution strategy. Keep a backend interface and validate two families:
-
-1. **Bionic-native Wine** — preferred performance experiment because it can run without a glibc rootfs and PRoot syscall interception.
-2. **glibc Linux rootfs + PRoot** — compatibility fallback based on the established Winlator-style Android architecture.
+Keep the backend interface, but do not build several runtimes in parallel. The first end-to-end launch target is **an ARM64 Linux/glibc rootfs + an Android/Bionic PRoot host + ARM64 Linux Box64 + x86-64 glibc Wine 11 WoW64 with the Wayland driver**. The ARM64 rootfs contains both the ARM64 loader for Box64 and the x86-64 loader/library payload for Wine; this is a multi-ABI guest, not an x86-64-only rootfs. Wine connects to the Wawona Wayland socket. Bionic-native Wine remains a later experiment only after the first visual novel launches.
 
 The Bionic path is an experiment, not yet the default production runtime. Current public ARM64EC Proton/Wine packages for Android are explicitly marked as testing builds and may be unstable. The fallback must remain available until a device/game compatibility corpus shows which path is more reliable.
 
-## Why two paths
+## Why this first path
 
-### Bionic-native path
-
-A Wine build targeting Android's Bionic libc can run in the Android app environment without a glibc rootfs and without PRoot. This avoids PRoot's ptrace syscall interception overhead and reduces the amount of Linux userspace that must be shipped.
-
-Two variants should be evaluated separately:
-
-- **ARM64EC + FEX**: ARM64EC Wine build with FEX-based x86/x64 execution. This is a promising compatibility/performance experiment, but needs validation for the exact games, device ABI, Android linker, graphics driver and required support libraries.
-- **x86-64 Wine + Box64**: Wine and Box64 builds that are compatible with Bionic. Do not assume that a generic glibc Box64 binary can be used in this path.
-
-Reference implementation/release:
-- [GameNative/proton-wine releases](https://github.com/GameNative/proton-wine/releases)
-
-Its Android-specific ARM64EC releases document Bionic fixes and FEX integration, but mark the builds as testing/unstable. Treat these as research evidence, not as a production guarantee.
-
-### glibc rootfs + PRoot path
-
-This path packages a Linux root filesystem with Wine and Box64, then enters it through a host-side PRoot executable.
+The PRoot route matches the launch command and Wine-prefix code already present in RamenWine. The guest is a normal ARM64 glibc userspace so its native Box64 executable can run there; the x86-64 Wine loader and libraries are added as a second guest ABI. The Android app separately owns the Android/Bionic PRoot host process and the Wayland socket.
 
 Advantages:
 - Established Android deployment model.
-- Keeps glibc-oriented Linux binaries together in a rootfs.
+- Keeps the Android/Bionic PRoot host separate from the ARM64 Linux/glibc guest.
+- Runs Box64 as an ARM64 Linux/glibc guest process, with x86-64 Wine and its dependencies packaged alongside as a second guest ABI.
 - Allows per-game Wine prefixes and a conventional Linux userspace.
 - Does not require Android root access.
+- Can use Wine's Wayland driver to connect to the Wawona socket without introducing X11/Xwayland in the first milestone.
 
 Costs and limitations:
-- PRoot uses ptrace to intercept guest syscalls and rewrite paths. This has measurable overhead and must be benchmarked.
+- PRoot uses ptrace to intercept guest syscalls and rewrite paths; this adds overhead.
+- The Ubuntu Base 24.04.5 ARM64 seed is pinned by SHA-256, but its apt snapshot and all ARM64/x86-64 runtime package versions still need pinning; the guest also needs a second x86-64 glibc loader/library closure for Wine.
+- Box64 must be built for ARM64 Linux/glibc inside an ARM64 PRoot/chroot environment. Its native Termux/Bionic build is explicitly marked experimental by upstream and documented as not running Linux binaries.
 - Android GPU/audio integration still needs host-side bridges and compatible libraries.
 - A rootfs is larger than a Bionic-native Wine package.
 
 References:
-- [Winlator official site](https://www.winlator.org/) — describes the Android Wine + Box86/Box64 stack and credits PRoot, rootfs, Mesa, DXVK, VKD3D and D8VK.
+- [Winlator official site](https://www.winlator.org/) — describes the Android Wine + Box64 stack and PRoot/rootfs architecture.
 - [Termux PRoot-Distro documentation](https://github.com/termux/proot-distro) — describes PRoot's ptrace-based syscall interception and unprivileged rootfs operation.
+
+## Deferred experiment: Bionic-native Wine
+
+A Wine build targeting Android's Bionic libc can run in the Android app environment without a glibc rootfs and without PRoot. This may reduce package size and PRoot syscall overhead, but its ARM64EC/FEX and x86-64/Box64 variants require separate validation. Do not implement these paths in parallel with the first launch target.
+
+Reference implementation/release:
+- [GameNative/proton-wine releases](https://github.com/GameNative/proton-wine/releases)
+
+Its Android-specific ARM64EC releases document Bionic fixes and FEX integration, but mark the builds as testing/unstable. Treat these as future research inputs, not as a runtime dependency for the first launch.
 
 ## Runtime router contract
 
@@ -55,7 +49,7 @@ The app recognizes backend package IDs:
 |---|---|
 | `bionic-arm64ec-fex` | Bionic-native ARM64EC Wine + FEX execution |
 | `bionic-x64-box64` | Bionic-compatible x86-64 Wine + Box64 |
-| `glibc-proot-box64` | glibc rootfs + PRoot + Box64 + Wine |
+| `glibc-proot-box64` | ARM64 glibc rootfs + Android/Bionic PRoot host + ARM64 Linux Box64 + x86-64 Wine |
 
 The backend inventory is stored under:
 
@@ -91,15 +85,9 @@ executableFiles=bin/wine
 
 A future package installer must validate package SHA-256 digests before extraction and must extract into a staging directory before atomically activating a runtime version. The runtime package manifest is trusted only after its package digest has been verified.
 
-## Prototype and comparison plan
+## First-launch validation plan
 
-Do not select the production backend from theoretical performance alone. Build three small, independently testable prototypes:
-
-1. ARM64EC/FEX Bionic Wine launching an original x86-64 Windows GUI test program.
-2. Bionic-compatible x86-64 Wine + Box64 launching the same program.
-3. glibc rootfs + PRoot + Box64 launching the same program.
-
-For each path, record:
+Do not benchmark alternative backends yet. First prove one original Windows GUI process can start and render through Wawona. For this selected path, record:
 - install size and incremental size for optional components;
 - cold and warm launch time;
 - idle and peak RAM;
@@ -108,7 +96,7 @@ For each path, record:
 - audio startup and long-session stability;
 - behavior across Android pause/resume and process teardown.
 
-Then repeat using original or appropriately licensed visual-novel fixtures:
+Only after the first GUI test passes, repeat using original or appropriately licensed visual-novel fixtures:
 - 32-bit Win32 GUI + GDI;
 - x86-64 Win32 GUI;
 - DirectDraw / Direct3D 8-era renderer;
@@ -130,42 +118,50 @@ Graphics selection remains a separate router:
 
 ## Current implementation status
 
-Implemented in RamenWine:
-- `RuntimeBackendId` for the three package families;
-- a bounded `runtime.properties` inventory reader;
-- an offline ZIP installer with streaming extraction, SHA-256 payload verification, executable flags, safe symlink creation, staged activation and rollback;
-- a Python runtime package builder for manifest-backed ZIP archives;
+Implemented in RamenWine source:
+- `RuntimeBackendId` and a bounded inventory reader for the backend families;
+- an internal offline ZIP extractor with streaming SHA-256 verification, safe path/symlink handling, staging, atomic activation and rollback;
+- a Python runtime package builder and source-build scripts for Android PRoot, Ubuntu/glibc, Box64 and Wine;
 - PRoot/Box64/Wine argument-vector construction and a host-tested Wine-prefix initializer;
-- UI display of backend states;
-- JVM tests for inventory states, path containment, command construction and process lifecycle.
+- ARM64/x86-64 ELF and i386/AMD64 PE architecture/dependency validation;
+- a Wawona Android display adapter and a pinned native payload already included in a successfully packaged debug APK;
+- an Android game surface and touch-to-mouse input wiring.
 
-Not implemented yet:
-- no Wine, FEX, Box64 or PRoot runtime package is bundled;
-- no Linux rootfs is built or installed;
-- runtime metadata is not signed, so SHA-256 does not authenticate the publisher;
-- no real Windows EXE launch has been validated;
-- no graphics backend is integrated;
-- no physical-device performance/compatibility results exist.
+Not ready yet:
+- the complete PRoot + Ubuntu ARM64 + Box64 + Wine runtime has not been assembled, installed or booted on the phone;
+- the in-app download/provisioning manager and signed runtime release catalog do not exist yet;
+- no real Windows EXE or visual novel has launched successfully;
+- the Wawona asset-provenance fix has passed source-level checks, but the fixed APK still needs a physical-device rendering retest.
 
+The manual runtime ZIP picker has been removed from the Android UI. The installer remains an internal implementation primitive; it is not a player feature.
 ## Rule
 
-Bionic-native is the performance-first experiment; glibc + PRoot is the compatibility fallback. Production default is chosen only from reproducible device and game test results.
+The current target is one ARM64 glibc rootfs + Android PRoot + ARM64 Linux Box64 + x86-64 Wine Wayland path. Bionic/FEX remains deferred. Reconsider the backend only if the selected path is blocked by a demonstrated technical limitation or a measured incompatibility with the chosen visual-novel fixture.
 
 
-## Offline runtime package format
+## Internal runtime archive format (not a player action)
 
-The Android app accepts a locally selected ZIP package. It does not fetch runtime
-binaries from the network during installation.
+This ZIP layout is an internal build/transport format. It is not a player-facing file. The normal Android UI must never ask the player to select, browse for or import a runtime ZIP.
+
+The target flow is app-owned provisioning: when a game needs the shared runtime and none is installed, RamenWine fetches a versioned artifact from its pinned distribution channel, verifies signed release metadata and package/file hashes, stages and validates the contents, and atomically activates the new version. The player sees progress and retry/error messages, not an archive picker. Once installed, the shared runtime is reusable by every game and works offline.
+
+The Android app does not yet implement that network provisioner or signed release channel. Until then the Play button remains unavailable when the runtime is missing. The internal installer can only consume an archive supplied by controlled development code.
 
 Expected archive layout:
 
 ```text
 runtime-manifest.json
 payload/
-  bin/
-    wine
-  lib/
-    ...
+  host/
+    bin/proot
+    lib/...
+  rootfs/
+    lib/ld-linux-aarch64.so.1
+    lib64/ld-linux-x86-64.so.2
+    usr/bin/box64
+    usr/bin/wine
+    usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe
+    usr/lib/x86_64-linux-gnu/wine/...
 ```
 
 Example manifest:
@@ -183,6 +179,16 @@ Example manifest:
       "executable": true
     },
     {
+      "path": "rootfs/lib/ld-linux-aarch64.so.1",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
+      "path": "rootfs/lib64/ld-linux-x86-64.so.2",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": true
+    },
+    {
       "path": "rootfs/usr/bin/box64",
       "sha256": "REPLACE_WITH_64_HEX_SHA256",
       "executable": true
@@ -191,6 +197,16 @@ Example manifest:
       "path": "rootfs/usr/bin/wine",
       "sha256": "REPLACE_WITH_64_HEX_SHA256",
       "executable": true
+    },
+    {
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-unix/winewayland.so",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": false
+    },
+    {
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/winewayland.drv",
+      "sha256": "REPLACE_WITH_64_HEX_SHA256",
+      "executable": false
     }
   ],
   "symlinks": [
@@ -199,7 +215,7 @@ Example manifest:
       "target": "usr/bin"
     },
     {
-      "path": "rootfs/usr/bin/wineboot",
+      "path": "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe",
       "target": "wine"
     }
   ]
@@ -222,11 +238,31 @@ and the backup is restored.
 
 **Security boundary:** SHA-256 checks detect a damaged or inconsistent file
 payload, but a manifest stored inside the same ZIP does not authenticate who
-created the package. Until RamenWine adds a pinned signing key and signed
-release metadata, users should install runtime ZIPs only from a source they
-trust. A future release pipeline must sign package metadata (for example with
-Ed25519) and the app must verify the signature before extraction.
+created the package. The planned RamenWine release channel must publish an
+immutable versioned archive and an Ed25519-signed index/manifest. The Android
+app must verify that signature with a public key pinned in the APK before it
+trusts the package digest or extracts any payload. The app must not rely on a
+mutable `latest` URL or on hashes supplied only by the same untrusted ZIP.
 
 The installer limits ZIP entries, manifest size, uncompressed bytes, and
 available disk reserve. It does not execute any runtime or game binary during
 installation. Presence of installed files is still not proof that Wine starts.
+
+## Compatibility scope: broad Windows API, not an engine allow-list
+
+The selected Wine build is the generic Windows compatibility layer. RamenWine
+must not compile a small API subset tied to named visual-novel engines, and it
+must not reject an EXE only because its engine is unknown. Keep the Wine
+components that applications may call directly or indirectly (including COM,
+cryptography, networking, installers, multimedia, fonts, input and system
+libraries) unless a concrete dependency analysis proves they are not part of
+the supported runtime contract.
+
+The product does not need a Windows desktop shell. Removing Explorer, Start
+menu, taskbar, terminal, window manager and unrelated Linux desktop programs is
+a separate decision from removing Wine API support. Optional rendering
+translators such as DXVK/VKD3D or legacy compatibility libraries can be
+versioned app-managed add-ons; the generic Wine runtime remains broad.
+
+See [Runtime Delivery](RUNTIME_DELIVERY.md) for the player-facing contract and
+the planned automatic in-app provisioning lifecycle.

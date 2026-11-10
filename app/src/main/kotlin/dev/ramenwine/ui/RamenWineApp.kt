@@ -30,16 +30,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.ramenwine.BuildConfig
+import dev.ramenwine.GamePlayerActivity
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
 import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
+import dev.ramenwine.inspection.MainExecutableSelector
+import dev.ramenwine.inspection.PeArchitecture
 import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.NativeRuntime
+import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
-import dev.ramenwine.runtime.RuntimePackageInstaller
 import dev.ramenwine.runtime.RuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,6 +60,7 @@ fun RamenWineApp() {
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
     var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
+    var automaticExecutablePath by remember { mutableStateOf<String?>(null) }
     var importedGames by remember { mutableStateOf(libraryStore.list()) }
     var scanning by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
@@ -67,36 +72,7 @@ fun RamenWineApp() {
     var runtimeInspection by remember(context.filesDir) {
         mutableStateOf(RuntimeLayout.inspect(context.filesDir))
     }
-    var installingRuntime by remember { mutableStateOf(false) }
-    var runtimePackageError by remember { mutableStateOf<String?>(null) }
-    var runtimePackageNotice by remember { mutableStateOf<String?>(null) }
     val nativeDiagnostic = remember { NativeRuntime.diagnostic() }
-
-    val runtimePackagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null && !installingRuntime) {
-            installingRuntime = true
-            runtimePackageError = null
-            runtimePackageNotice = null
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        RuntimePackageInstaller(context.applicationContext).install(uri)
-                    }
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                    runtimePackageNotice = result.backend.displayName +
-                        " · " + result.runtimeVersion +
-                        " · " + result.installedFileCount + " файлов"
-                } catch (error: Exception) {
-                    runtimePackageError = error.message ?: error.javaClass.simpleName
-                    runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                } finally {
-                    installingRuntime = false
-                }
-            }
-        }
-    }
 
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -105,6 +81,7 @@ fun RamenWineApp() {
             selectedFolder = uri
             scanResult = null
             selectedExecutable = null
+            automaticExecutablePath = null
             scanError = null
             importError = null
             importNotice = null
@@ -119,8 +96,24 @@ fun RamenWineApp() {
             scanning = true
             scope.launch {
                 try {
-                    scanResult = withContext(Dispatchers.IO) {
+                    val result = withContext(Dispatchers.IO) {
                         GameFolderScanner(context.applicationContext).scan(uri)
+                    }
+                    scanResult = result
+                    val suggestedPath = MainExecutableSelector.select(
+                        candidates = result.executableCandidates.mapNotNull { candidate ->
+                            val inspection = candidate.peInspection ?: return@mapNotNull null
+                            MainExecutableSelector.Hint(
+                                relativePath = candidate.relativePath,
+                                architecture = inspection.architecture,
+                                isValidPe = inspection.isValidPe
+                            )
+                        },
+                        folderName = result.folderName
+                    )
+                    automaticExecutablePath = suggestedPath
+                    selectedExecutable = result.executableCandidates.firstOrNull {
+                        it.relativePath == suggestedPath
                     }
                 } catch (error: Exception) {
                     scanError = error.message ?: error.javaClass.simpleName
@@ -165,6 +158,11 @@ fun RamenWineApp() {
         }
     }
 
+    val prootRuntimeReady = runtimeInspection.backends.any {
+        it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 &&
+            it.state == RuntimeState.FILES_PRESENT
+    }
+
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -189,7 +187,7 @@ fun RamenWineApp() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Development build · Phase 1: import and EXE inspection",
+                        text = "Тестовая сборка · разработка Windows-движка",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -198,35 +196,55 @@ fun RamenWineApp() {
                 RuntimeStatusCard(
                     runtimeInspection = runtimeInspection,
                     nativeDiagnostic = nativeDiagnostic,
-                    installingRuntime = installingRuntime,
-                    onInstallRuntime = {
-                        runtimePackagePicker.launch(
-                            arrayOf(
-                                "application/zip",
-                                "application/x-zip-compressed",
-                                "application/octet-stream"
-                            )
-                        )
-                    }
+                    showDeveloperTools = BuildConfig.DEBUG
                 )
 
-                if (installingRuntime) {
-                    Text(
-                        "Проверяю и устанавливаю локальный runtime-пакет…",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                runtimePackageError?.let {
-                    Text(
-                        text = "Runtime-пакет не установлен: " + it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                runtimePackageNotice?.let {
-                    Text(
-                        text = "Runtime установлен: " + it,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                if (BuildConfig.DEBUG) {
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent().setClassName(
+                                    context.packageName,
+                                    "dev.ramenwine.debug.WawonaPreviewActivity"
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Тест графики Wawona (для разработчиков)")
+                    }
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(
+                                        GamePlayerActivity.EXTRA_WAYLAND_PROBE_ARCHITECTURE,
+                                        "x86-64"
+                                    )
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = prootRuntimeReady
+                    ) {
+                        Text("Тест Windows + Wayland (x64)")
+                    }
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(
+                                        GamePlayerActivity.EXTRA_WAYLAND_PROBE_ARCHITECTURE,
+                                        "x86"
+                                    )
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = prootRuntimeReady
+                    ) {
+                        Text("Тест Windows + Wayland (x86)")
+                    }
                 }
 
                 Button(
@@ -262,6 +280,7 @@ fun RamenWineApp() {
                         selectedExecutable = selectedExecutable,
                         onSelectExecutable = {
                             selectedExecutable = it
+                            automaticExecutablePath = null
                             importError = null
                             importNotice = null
                         }
@@ -271,6 +290,7 @@ fun RamenWineApp() {
                 selectedExecutable?.let { candidate ->
                     SelectedExecutableCard(
                         candidate = candidate,
+                        automaticallySelected = automaticExecutablePath == candidate.relativePath,
                         importing = importing,
                         onImport = ::startImport
                     )
@@ -304,12 +324,21 @@ fun RamenWineApp() {
                 }
 
                 if (importedGames.isNotEmpty()) {
-                    LibraryCard(games = importedGames)
+                    LibraryCard(
+                        games = importedGames,
+                        launchEnabled = prootRuntimeReady,
+                        onLaunch = { selectedGame ->
+                            context.startActivity(
+                                Intent(context, GamePlayerActivity::class.java).apply {
+                                    putExtra(GamePlayerActivity.EXTRA_GAME_ID, selectedGame.id)
+                                }
+                            )
+                        }
+                    )
                 }
 
                 Text(
-                    text = "Текущий этап не запускает EXE. Сначала игра безопасно импортируется, " +
-                        "затем подключим и проверим Windows runtime.",
+                    text = "Папка игры сохраняется в библиотеке приложения. Для запуска требуется установленный игровой движок; в игровом режиме отображается только окно новеллы.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -322,8 +351,7 @@ fun RamenWineApp() {
 private fun RuntimeStatusCard(
     runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
     nativeDiagnostic: String,
-    installingRuntime: Boolean,
-    onInstallRuntime: () -> Unit
+    showDeveloperTools: Boolean
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -376,16 +404,18 @@ private fun RuntimeStatusCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(
-                onClick = onInstallRuntime,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !installingRuntime
-            ) {
-                Text(if (installingRuntime) "Установка…" else "Установить runtime из ZIP")
+            if (showDeveloperTools) {
+                Text(
+                    "Полный Wine/Box64 runtime пока не установлен. В целевой версии RamenWine " +
+                        "сама подготовит игровую среду; выбор ZIP или установка отдельного приложения " +
+                        "не будут частью пользовательского процесса.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider()
+                Text("Native bridge · диагностика", fontWeight = FontWeight.Bold)
+                Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
             }
-            HorizontalDivider()
-            Text("Native bridge", fontWeight = FontWeight.Bold)
-            Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -393,10 +423,15 @@ private fun RuntimeStatusCard(
 @Composable
 private fun SelectedExecutableCard(
     candidate: ExecutableCandidate,
+    automaticallySelected: Boolean,
     importing: Boolean,
     onImport: () -> Unit
 ) {
     val isValidPe = candidate.peInspection?.isValidPe == true
+    val isSupportedArchitecture = candidate.peInspection?.architecture in setOf(
+        PeArchitecture.X86,
+        PeArchitecture.X86_64
+    )
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -408,7 +443,11 @@ private fun SelectedExecutableCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
+            Text(
+                if (automaticallySelected) "Главный файл игры найден автоматически"
+                else "Главный EXE выбран",
+                fontWeight = FontWeight.Bold
+            )
             Text(candidate.relativePath)
             Text(
                 text = "Архитектура: " +
@@ -423,6 +462,13 @@ private fun SelectedExecutableCard(
                 Text(
                     "Заголовок PE не прошёл проверку. Выбери другой EXE.",
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else if (!isSupportedArchitecture) {
+                Text(
+                    "Папку можно добавить, но запуск этой архитектуры пока не поддерживается. " +
+                        "Текущий движок рассчитан на Windows x86 и x86-64.",
+                    color = MaterialTheme.colorScheme.tertiary,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -450,6 +496,11 @@ private fun ScanResultCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("Результат сканирования", fontWeight = FontWeight.Bold)
+            Text(
+                "Проверила папку и нашла исполняемые файлы. Если главный файл определён уверенно, он уже выбран.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Text("Папка: " + result.folderName)
             Text("Просмотрено файлов: " + result.visitedFiles)
             Text("Найдено EXE: " + result.executableCandidates.size)
@@ -520,7 +571,11 @@ private fun ExecutableRow(
 }
 
 @Composable
-private fun LibraryCard(games: List<ImportedGame>) {
+private fun LibraryCard(
+    games: List<ImportedGame>,
+    launchEnabled: Boolean,
+    onLaunch: (ImportedGame) -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -528,7 +583,9 @@ private fun LibraryCard(games: List<ImportedGame>) {
         ) {
             Text("Библиотека", fontWeight = FontWeight.Bold)
             games.forEach { game ->
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                val gameArchitectureSupported = game.architecture == "x86" ||
+                    game.architecture == "x86-64"
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(game.title, fontWeight = FontWeight.Medium)
                     Text(
                         text = game.executableRelativePath + " · " + game.architecture,
@@ -536,11 +593,31 @@ private fun LibraryCard(games: List<ImportedGame>) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = formatFileSize(game.totalBytes) +
-                            " · runtime пока не подключён",
+                        text = formatFileSize(game.totalBytes) + " · добавлена в библиотеку",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
+                    Button(
+                        onClick = { onLaunch(game) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = launchEnabled && gameArchitectureSupported
+                    ) {
+                        Text("Играть")
+                    }
+                    if (!gameArchitectureSupported) {
+                        Text(
+                            "Пока поддерживаются только Windows x86 и x86-64. " +
+                                "Эта игра сохранена, но запуск для неё пока недоступен.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    } else if (!launchEnabled) {
+                        Text(
+                            "Игровой движок ещё не установлен.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 HorizontalDivider()
             }

@@ -22,6 +22,14 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 PINNED_WAWONA_REVISION = "d298ddd25726fec0977285aa5f57181110c966a6"
+PINNED_WAWONA_ARTIFACT_SHA256 = (
+    "04000a9b31c0125f24b7aecfa3f9bbbc3a51cad7e8fa0ba7207f2e553e7be953"
+)
+PINNED_WAWONA_APK_SHA256 = (
+    "60006df2d5839e6ae3d7137170bbff093ab4f42b74b192f226b293cfee291f37"
+)
+PINNED_WAWONA_ARTIFACT_ID = 13377766663
+PINNED_WAWONA_WORKFLOW_RUN = 41941778312
 APK_LIBRARY_ROOT = "lib/arm64-v8a/"
 APK_ASSET_ROOTS = (
     "xkb",
@@ -34,7 +42,48 @@ ROOT_LIBRARIES = (
     "libEGL_angle.so",
     "libGLESv2_angle.so",
 )
+
+# These are the native methods declared by RamenWine's minimal Kotlin adapter.
+# Keep this list in sync with WawonaNative.kt; checking the actual .dynsym table
+# prevents an UnsatisfiedLinkError on the first compositor start.
+WAWONA_JNI_CLASS_PREFIX = "Java_com_aspauldingcode_wawona_WawonaNative_"
+REQUIRED_WAWONA_JNI_METHODS = (
+    "nativePrepareShellEnvironment",
+    "nativeInit",
+    "nativeIsCompositorReady",
+    "nativeSetSurface",
+    "nativeDestroySurface",
+    "nativeResizeSurface",
+    "nativeSyncOutputSize",
+    "nativeShutdown",
+    "nativeSetDisplayDensity",
+    "nativeSetTouchPointerEmulation",
+    "nativeApplySettings",
+    "nativeApplyHostKeyLevels",
+    "nativeReloadHostKeymap",
+    "nativeTouchDown",
+    "nativeTouchUp",
+    "nativeTouchMotion",
+    "nativeTouchCancel",
+    "nativeTouchFrame",
+    "nativeRunWestonSimpleSHM",
+    "nativeStopWestonSimpleSHM",
+    "nativeIsWestonSimpleSHMRunning",
+    "nativeKeyEvent",
+    "nativePointerMotion",
+    "nativePointerButton",
+    "nativePointerEnter",
+    "nativePointerLeave",
+    "nativePointerAxis",
+    "nativeKeyboardFocus",
+)
+WAWONA_JNI_EXPORT_RE = re.compile(
+    r"\b" + re.escape(WAWONA_JNI_CLASS_PREFIX) + r"(native[A-Za-z0-9_]+)\b"
+)
 OPTIONAL_ROOT_LIBRARIES = (
+    # Wawona's JNI SHM demo wrapper calls dlopen() on this library by name;
+    # it is not a DT_NEEDED dependency of libwawona.so.
+    "libweston_simple_shm.so",
     # Wawona can use this as its bundled offscreen ICD for nested clients.
     # It is not a substitute for Android's host Vulkan WSI driver.
     "libvk_swiftshader.so",
@@ -66,6 +115,7 @@ NEEDED_RE = re.compile(r"\(NEEDED\).*Shared library: \[([^\]]+)\]")
 SONAME_RE = re.compile(r"\(SONAME\).*Library soname: \[([^\]]+)\]")
 ELF_CLASS_RE = re.compile(r"Class:\s*ELF64")
 ELF_MACHINE_RE = re.compile(r"Machine:\s*AArch64", re.IGNORECASE)
+ANDROID_MIN_ELF_PAGE_SIZE = 16 * 1024
 
 
 def safe_archive_path(name: str) -> str:
@@ -92,6 +142,44 @@ def validate_arm64_elf_header(readelf_output: str, filename: str) -> None:
         raise ValueError(f"{filename} is not an AArch64 ELF binary.")
 
 
+def validate_arm64_elf_16kb_alignment(readelf_output: str, filename: str) -> None:
+    """Require every bundled Android ARM64 PT_LOAD segment to support 16 KiB pages."""
+    segments: list[tuple[int, int, int]] = []
+    for line in readelf_output.splitlines():
+        fields = line.split()
+        if not fields or fields[0] != "LOAD":
+            continue
+        if len(fields) < 8:
+            raise ValueError(f"{filename} has an invalid ELF PT_LOAD header.")
+        try:
+            file_offset = int(fields[1], 0)
+            virtual_address = int(fields[2], 0)
+            alignment = int(fields[-1], 0)
+        except ValueError as error:
+            raise ValueError(f"{filename} has an invalid ELF PT_LOAD alignment.") from error
+        segments.append((file_offset, virtual_address, alignment))
+
+    if not segments:
+        raise ValueError(f"{filename} has no ELF PT_LOAD segments.")
+
+    page_size = ANDROID_MIN_ELF_PAGE_SIZE
+    for file_offset, virtual_address, alignment in segments:
+        if (
+            alignment < page_size
+            or alignment % page_size != 0
+            or alignment & (alignment - 1) != 0
+        ):
+            raise ValueError(
+                f"{filename} is not 16 KB page-size compatible: "
+                f"PT_LOAD p_align is 0x{alignment:x}, expected at least 0x{page_size:x}."
+            )
+        if file_offset % alignment != virtual_address % alignment:
+            raise ValueError(
+                f"{filename} has an invalid ELF PT_LOAD alignment: "
+                "file offset and virtual address are not congruent."
+            )
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -100,10 +188,85 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def extract_verified_pinned_artifact(artifact_zip: Path, destination: Path) -> Path:
+    """Extract only the reviewed APK from the known upstream Actions artifact."""
+    if not artifact_zip.is_file():
+        raise ValueError(f"Wawona product artifact ZIP does not exist: {artifact_zip}")
+    actual_artifact_sha = sha256_file(artifact_zip)
+    if actual_artifact_sha != PINNED_WAWONA_ARTIFACT_SHA256:
+        raise ValueError(
+            "Wawona product artifact SHA-256 does not match the reviewed upstream artifact."
+        )
+
+    destination.mkdir(parents=True, exist_ok=True)
+    apk_path = destination / "Wawona.apk"
+    with zipfile.ZipFile(artifact_zip) as archive:
+        entries: dict[str, zipfile.ZipInfo] = {}
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = safe_archive_path(info.filename)
+            if name not in ("Wawona.apk", "product-manifest.json"):
+                raise ValueError(f"unexpected file in pinned Wawona artifact: {name}")
+            if name in entries:
+                raise ValueError(f"duplicate file in pinned Wawona artifact: {name}")
+            entries[name] = info
+
+        if set(entries) != {"Wawona.apk", "product-manifest.json"}:
+            raise ValueError("pinned Wawona artifact is missing its APK or product manifest.")
+
+        manifest_info = entries["product-manifest.json"]
+        if manifest_info.file_size > 64 * 1024:
+            raise ValueError("Wawona product manifest is unexpectedly large.")
+        try:
+            manifest = json.loads(archive.read(manifest_info).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("Wawona product manifest is invalid JSON.") from error
+
+        expected_manifest = {
+            "attr": "wawona-android",
+            "sha": PINNED_WAWONA_REVISION,
+            "artifact": "product-android-apk",
+        }
+        for key, expected in expected_manifest.items():
+            if manifest.get(key) != expected:
+                raise ValueError(f"Wawona product manifest mismatch for {key}.")
+
+        apk_info = entries["Wawona.apk"]
+        if apk_info.file_size <= 0 or apk_info.file_size > 256 * 1024 * 1024:
+            raise ValueError("Wawona APK size is outside the accepted range.")
+        with archive.open(apk_info) as source, apk_path.open("wb") as output:
+            shutil.copyfileobj(source, output, length=1024 * 1024)
+
+    if sha256_file(apk_path) != PINNED_WAWONA_APK_SHA256:
+        apk_path.unlink(missing_ok=True)
+        raise ValueError("Wawona APK SHA-256 does not match the reviewed pinned build.")
+    return apk_path
+
+
 def parse_dynamic_dependencies(readelf_output: str) -> tuple[list[str], str | None]:
     needed = NEEDED_RE.findall(readelf_output)
     soname_match = SONAME_RE.search(readelf_output)
     return needed, soname_match.group(1) if soname_match else None
+
+
+def validate_wawona_jni_exports(readelf_output: str, filename: str) -> None:
+    """Require defined JNI methods from the .dynsym table, not just UND imports."""
+    exported: set[str] = set()
+    for line in readelf_output.splitlines():
+        fields = line.split()
+        # llvm-readelf --dyn-syms --wide columns:
+        # Num: Value Size Type Bind Vis Ndx Name
+        if len(fields) < 8 or not fields[0].endswith(":") or fields[6] == "UND":
+            continue
+        match = WAWONA_JNI_EXPORT_RE.fullmatch(fields[7])
+        if match:
+            exported.add(match.group(1))
+    missing = sorted(set(REQUIRED_WAWONA_JNI_METHODS) - exported)
+    if missing:
+        raise ValueError(
+            f"{filename} is missing required Wawona JNI exports: " + ", ".join(missing)
+        )
 
 
 def collect_native_closure(
@@ -176,8 +339,17 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
         with tempfile.NamedTemporaryFile(prefix="ramenwine-", suffix=".so") as temp:
             temp.write(data)
             temp.flush()
+            readelf_command = [
+                readelf,
+                "--wide",
+                "--file-header",
+                "--program-headers",
+                "--dynamic",
+            ]
+            if filename == "libwawona.so":
+                readelf_command.append("--dyn-syms")
             result = subprocess.run(
-                [readelf, "--file-header", "--dynamic", temp.name],
+                [*readelf_command, temp.name],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -187,6 +359,9 @@ def make_readelf_reader(readelf: str) -> Callable[[str, bytes], tuple[list[str],
                 f"llvm-readelf failed for {filename}: {result.stderr.strip()}"
             )
         validate_arm64_elf_header(result.stdout, filename)
+        validate_arm64_elf_16kb_alignment(result.stdout, filename)
+        if filename == "libwawona.so":
+            validate_wawona_jni_exports(result.stdout, filename)
         return parse_dynamic_dependencies(result.stdout)
 
     return read_dependencies
@@ -281,6 +456,22 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def hash_extracted_assets(asset_root: Path, asset_paths: list[str]) -> dict[str, str]:
+    """Build the install-time integrity map for the extracted Wawona assets."""
+    hashes: dict[str, str] = {}
+    for relative_path in asset_paths:
+        safe_path = safe_archive_path(relative_path)
+        if safe_path != relative_path or not relative_path.startswith("wawona/"):
+            raise ValueError("invalid extracted Wawona asset path: " + relative_path)
+        if relative_path in hashes:
+            raise ValueError("duplicate extracted Wawona asset path: " + relative_path)
+        path = asset_root / PurePosixPath(relative_path)
+        if not path.is_file():
+            raise ValueError("extracted Wawona asset is missing: " + relative_path)
+        hashes[relative_path] = sha256_file(path)
+    return dict(sorted(hashes.items(), key=lambda item: item[0].casefold()))
+
+
 def package_apk(
     apk_path: Path,
     output_dir: Path,
@@ -313,6 +504,7 @@ def package_apk(
             "revision": revision,
             "apkSha256": sha256_file(apk_path),
             "abi": "arm64-v8a",
+            "androidMinElfPageSizeBytes": ANDROID_MIN_ELF_PAGE_SIZE,
             "rootLibraries": list(ROOT_LIBRARIES),
             "optionalRootLibraries": [
                 name for name in OPTIONAL_ROOT_LIBRARIES
@@ -322,6 +514,7 @@ def package_apk(
                 filename: sha256_bytes(data) for filename, data in selected.items()
             },
             "assets": assets,
+            "assetSha256": hash_extracted_assets(staging / "assets", assets),
             "note": (
                 "Only libwawona.so, its DT_NEEDED closure, ANGLE entry libraries, "
                 "and selected compositor assets are included. This is not a complete "
@@ -343,7 +536,17 @@ def package_apk(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apk", required=True, type=Path, help="APK from the pinned Wawona Nix build")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--apk",
+        type=Path,
+        help="APK built from the pinned Wawona revision",
+    )
+    source.add_argument(
+        "--artifact-zip",
+        type=Path,
+        help="reviewed upstream product-android-apk ZIP (its ZIP, manifest and APK hashes are pinned)",
+    )
     parser.add_argument("--readelf", required=True, help="NDK llvm-readelf executable")
     parser.add_argument(
         "--revision",
@@ -362,7 +565,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        package_apk(args.apk, args.output, args.revision, args.readelf)
+        if args.artifact_zip is not None:
+            with tempfile.TemporaryDirectory(prefix="wawona-artifact-") as temporary:
+                apk_path = extract_verified_pinned_artifact(
+                    args.artifact_zip,
+                    Path(temporary),
+                )
+                package_apk(apk_path, args.output, args.revision, args.readelf)
+        else:
+            package_apk(args.apk, args.output, args.revision, args.readelf)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         print(f"Wawona packaging failed: {error}", file=os.sys.stderr)
         return 1

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -47,6 +49,40 @@ ELF Header:
             "libwawona.so",
         )
 
+    def test_accepts_16kb_aligned_arm64_load_segments(self) -> None:
+        output = """
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x4000
+  LOAD           0x004000 0x0000000000004000 0x0000000000004000 0x001000 0x001000 RW  0x4000
+"""
+        package_wawona_apk.validate_arm64_elf_16kb_alignment(output, "libwawona.so")
+
+    def test_rejects_4kb_arm64_load_segments(self) -> None:
+        output = """
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x1000
+"""
+        with self.assertRaisesRegex(ValueError, "not 16 KB page-size compatible"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                output,
+                "libwawona.so",
+            )
+
+    def test_rejects_misaligned_arm64_load_segment(self) -> None:
+        output = """
+  LOAD           0x001000 0x0000000000004000 0x0000000000004000 0x001000 0x001000 R E 0x4000
+"""
+        with self.assertRaisesRegex(ValueError, "not congruent"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                output,
+                "libwawona.so",
+            )
+
+    def test_rejects_arm64_elf_without_load_segments(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no ELF PT_LOAD segments"):
+            package_wawona_apk.validate_arm64_elf_16kb_alignment(
+                "There are no program headers.",
+                "libwawona.so",
+            )
+
     def test_rejects_non_arm64_elf_header(self) -> None:
         with self.assertRaisesRegex(ValueError, "not an AArch64 ELF binary"):
             package_wawona_apk.validate_arm64_elf_header(
@@ -57,6 +93,46 @@ ELF Header:
 """,
                 "libwawona.so",
             )
+
+
+    def test_accepts_all_jni_exports_required_by_the_kotlin_adapter(self) -> None:
+        output = "\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(
+                package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS,
+                start=1,
+            )
+        )
+        package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
+
+    def test_rejects_undefined_jni_symbol_as_a_missing_export(self) -> None:
+        output = "\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT "
+            f"{'UND' if method == 'nativePrepareShellEnvironment' else '12'} "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(
+                package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS,
+                start=1,
+            )
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing required Wawona JNI exports: nativePrepareShellEnvironment",
+        ):
+            package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
+
+    def test_rejects_missing_wawona_jni_export_before_packaging(self) -> None:
+        output = (
+            "  1: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            + package_wawona_apk.WAWONA_JNI_CLASS_PREFIX
+            + "nativeInit\n"
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing required Wawona JNI exports: nativeApplyHostKeyLevels",
+        ):
+            package_wawona_apk.validate_wawona_jni_exports(output, "libwawona.so")
 
     def test_parses_dt_needed_and_soname(self) -> None:
         output = """
@@ -119,6 +195,28 @@ ELF Header:
                 lambda filename, _data: dependencies[filename],
             )
 
+    def test_keeps_dlopen_only_weston_shm_smoke_client(self) -> None:
+        libraries = {
+            "libwawona.so": b"wawona",
+            "libEGL_angle.so": b"angle-egl",
+            "libGLESv2_angle.so": b"angle-gles",
+            "libweston_simple_shm.so": b"weston-shm",
+        }
+        dependencies = {
+            "libwawona.so": ([], "libwawona.so"),
+            "libEGL_angle.so": ([], "libEGL_angle.so"),
+            "libGLESv2_angle.so": ([], "libGLESv2_angle.so"),
+            "libweston_simple_shm.so": (
+                ["libandroid.so", "liblog.so", "libm.so"],
+                "libweston_simple_shm.so",
+            ),
+        }
+        selected = package_wawona_apk.collect_native_closure(
+            libraries,
+            lambda filename, _data: dependencies[filename],
+        )
+        self.assertIn("libweston_simple_shm.so", selected)
+
     def test_keeps_optional_swiftshader_icd_when_present(self) -> None:
         libraries = {
             "libwawona.so": b"wawona",
@@ -155,6 +253,89 @@ ELF Header:
         )
         self.assertEqual(set(libraries), set(selected))
 
+    def _write_pinned_product_artifact(self, path: Path, revision: str | None = None) -> None:
+        manifest = {
+            "attr": "wawona-android",
+            "sha": revision or package_wawona_apk.PINNED_WAWONA_REVISION,
+            "outPath": "/nix/store/pinned-wawona-android",
+            "artifact": "product-android-apk",
+        }
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Wawona.apk", b"pinned-apk-fixture")
+            archive.writestr(
+                "product-manifest.json",
+                json.dumps(manifest),
+            )
+
+    def test_extracts_only_the_exact_pinned_product_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            destination = root / "extracted"
+            self._write_pinned_product_artifact(artifact)
+
+            def fixture_sha(path: Path) -> str:
+                return (
+                    package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256
+                    if path == artifact
+                    else package_wawona_apk.PINNED_WAWONA_APK_SHA256
+                )
+
+            with patch.object(package_wawona_apk, "sha256_file", side_effect=fixture_sha):
+                apk = package_wawona_apk.extract_verified_pinned_artifact(
+                    artifact,
+                    destination,
+                )
+
+            self.assertEqual(b"pinned-apk-fixture", apk.read_bytes())
+            self.assertEqual({"Wawona.apk"}, {path.name for path in destination.iterdir()})
+
+    def test_rejects_changed_upstream_product_artifact_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact)
+            with patch.object(package_wawona_apk, "sha256_file", return_value="0" * 64):
+                with self.assertRaisesRegex(ValueError, "artifact SHA-256"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
+
+    def test_rejects_product_manifest_from_another_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact, revision="0" * 40)
+            with patch.object(
+                package_wawona_apk,
+                "sha256_file",
+                return_value=package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256,
+            ):
+                with self.assertRaisesRegex(ValueError, "manifest mismatch for sha"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
+
+    def test_rejects_changed_apk_inside_pinned_product_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "product-android-apk.zip"
+            self._write_pinned_product_artifact(artifact)
+
+            def fixture_sha(path: Path) -> str:
+                if path == artifact:
+                    return package_wawona_apk.PINNED_WAWONA_ARTIFACT_SHA256
+                return "0" * 64
+
+            with patch.object(package_wawona_apk, "sha256_file", side_effect=fixture_sha):
+                with self.assertRaisesRegex(ValueError, "APK SHA-256"):
+                    package_wawona_apk.extract_verified_pinned_artifact(
+                        artifact,
+                        root / "extracted",
+                    )
+
     def test_rejects_unpinned_upstream_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             apk = Path(temporary) / "empty.apk"
@@ -167,6 +348,39 @@ ELF Header:
                     "main",
                     "llvm-readelf",
                 )
+
+
+    def test_readelf_reader_checks_exported_jni_methods_on_core_library(self) -> None:
+        from types import SimpleNamespace
+
+        commands = []
+        methods = package_wawona_apk.REQUIRED_WAWONA_JNI_METHODS
+        dynamic_symbols = "\n".join(
+            f"  {index}: 0000000000000000 0 FUNC GLOBAL DEFAULT 12 "
+            f"{package_wawona_apk.WAWONA_JNI_CLASS_PREFIX}{method}"
+            for index, method in enumerate(methods, start=1)
+        )
+        elf_metadata = """
+ELF Header:
+  Class:                             ELF64
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x001000 0x001000 R E 0x4000
+"""
+
+        def fake_readelf(command, **_kwargs):
+            commands.append(command)
+            output = (
+                elf_metadata + "\n" + dynamic_symbols
+                if "--dyn-syms" in command
+                else elf_metadata
+            )
+            return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+        with patch.object(package_wawona_apk.subprocess, "run", side_effect=fake_readelf):
+            reader = package_wawona_apk.make_readelf_reader("llvm-readelf")
+            reader("libwawona.so", b"fixture-elf")
+
+        self.assertTrue(any("--dyn-syms" in command for command in commands))
 
     def test_asset_extraction_preserves_only_allowlisted_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -186,6 +400,31 @@ ELF Header:
             self.assertIn("wawona/weston/sign_close.png", copied)
             self.assertFalse((output / "wawona/about/README.txt").exists())
             self.assertEqual("rules", (output / "wawona/xkb/rules/evdev").read_text())
+
+    def test_hashes_each_extracted_asset_for_android_integrity_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            asset = root / "wawona" / "xkb" / "rules" / "evdev"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"wayland keymap rules")
+
+            hashes = package_wawona_apk.hash_extracted_assets(
+                root,
+                ["wawona/xkb/rules/evdev"],
+            )
+
+            self.assertEqual(
+                {"wawona/xkb/rules/evdev": package_wawona_apk.sha256_file(asset)},
+                hashes,
+            )
+
+    def test_rejects_missing_file_in_extracted_asset_hash_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "extracted Wawona asset is missing"):
+                package_wawona_apk.hash_extracted_assets(
+                    Path(temporary),
+                    ["wawona/fonts/truetype/missing.ttf"],
+                )
 
     def test_rejects_asset_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

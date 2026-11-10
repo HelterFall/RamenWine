@@ -222,6 +222,12 @@ class RuntimePackageInstaller(private val context: Context) {
                 }
             }
 
+            if (manifest.backend == RuntimeBackendId.GLIBC_PROOT_BOX64) {
+                // Reject a package with incorrect ARM64/x86-64 ELF or Windows PE
+                // components before replacing a previously working runtime.
+                GlibcRuntimeAbiValidator.validate(stagingDirectory)
+            }
+
             writeRuntimeProperties(stagingDirectory, manifest)
 
             val backendDirectory = File(backendsRoot, manifest.backend.directoryName)
