@@ -409,7 +409,7 @@ class ProotWineCommandBuilderTest {
             val error = runCatching { fixture.build() }.exceptionOrNull()
 
             assertTrue(error is java.io.IOException)
-            assertTrue(error?.message.orEmpty().contains("Wine Wayland PE driver"))
+            assertTrue(error?.message.orEmpty().contains("Wine x86-64 Wayland PE driver"))
         } finally {
             fixture.cleanup()
         }

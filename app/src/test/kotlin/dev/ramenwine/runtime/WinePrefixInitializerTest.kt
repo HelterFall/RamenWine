@@ -270,6 +270,11 @@ class WinePrefixInitializerTest {
                 rootfs,
                 "usr/lib/x86_64-linux-gnu/wine/i386-windows/winewayland.drv"
             )
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-client.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libwayland-egl.so.1")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libxkbcommon.so.0")
+            regular(rootfs, "usr/lib/x86_64-linux-gnu/libxkbregistry.so.0")
             File(displayDirectory, "wayland-0").writeText("test socket placeholder")
             val gameDirectory = File(filesDirectory, "games/$gameId").apply { mkdirs() }
             File(gameDirectory, "game.exe").writeBytes(byteArrayOf(0x4D, 0x5A))
