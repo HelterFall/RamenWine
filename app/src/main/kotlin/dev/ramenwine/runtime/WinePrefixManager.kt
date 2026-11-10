@@ -2,6 +2,7 @@ package dev.ramenwine.runtime
 
 import java.io.File
 import java.io.IOException
+import android.util.AtomicFile
 
 /**
  * Initializes each game's Wine prefix once per installed runtime version.
@@ -21,8 +22,19 @@ internal class WinePrefixManager(
 
         val marker = File(prefix, MARKER_NAME)
         val expectedMarker = markerContents(gameCommand)
-        val registryReady = File(prefix, "system.reg").isFile &&
-            File(prefix, "user.reg").isFile
+        val registryFiles = listOf(
+            File(prefix, "system.reg"),
+            File(prefix, "user.reg"),
+            File(prefix, "userdef.reg")
+        )
+        val presentRegistryCount = registryFiles.count { it.isFile && it.length() > 0L }
+        val registryReady = presentRegistryCount == registryFiles.size
+
+        if (presentRegistryCount in 1 until registryFiles.size && !marker.isFile) {
+            throw IOException(
+                "The Wine prefix is partially initialized. It was left untouched to protect game data."
+            )
+        }
 
         if (registryReady && marker.isFile &&
             runCatching {
@@ -43,11 +55,11 @@ internal class WinePrefixManager(
             throw IOException("Wine prefix $operation failed with exit code $exitCode.")
         }
 
-        if (!File(prefix, "system.reg").isFile ||
-            !File(prefix, "user.reg").isFile
-        ) {
+        val missingRegistryFiles = registryFiles.filterNot { it.isFile && it.length() > 0L }
+        if (missingRegistryFiles.isNotEmpty()) {
             throw IOException(
-                "wineboot exited successfully but did not create the prefix registry files."
+                "wineboot exited successfully but did not create: " +
+                    missingRegistryFiles.joinToString { it.name }
             )
         }
 
@@ -62,16 +74,15 @@ internal class WinePrefixManager(
     }
 
     private fun writeMarkerAtomically(marker: File, contents: String) {
-        val temporary = File(marker.parentFile, MARKER_NAME + ".tmp")
-        temporary.delete()
-        temporary.writeText(contents, Charsets.UTF_8)
-        if (marker.exists() && !marker.delete()) {
-            temporary.delete()
-            throw IOException("Could not replace the Wine prefix version marker.")
-        }
-        if (!temporary.renameTo(marker)) {
-            temporary.delete()
-            throw IOException("Could not activate the Wine prefix version marker.")
+        val atomicFile = AtomicFile(marker)
+        val output = atomicFile.startWrite()
+        try {
+            output.write(contents.toByteArray(Charsets.UTF_8))
+            output.fd.sync()
+            atomicFile.finishWrite(output)
+        } catch (error: Exception) {
+            atomicFile.failWrite(output)
+            throw IOException("Could not atomically save the Wine prefix version marker.", error)
         }
     }
 

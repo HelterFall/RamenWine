@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Starts a previously validated PRoot command without a shell.
@@ -45,10 +46,20 @@ class ProotWineProcessSupervisor {
 
         try {
             val exitCode = process.waitFor()
-            outputJob.join()
+            val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
+                outputJob.join()
+                true
+            } ?: false
+            if (!drained) {
+                // A Wine child can inherit PRoot's output pipe. Do not keep the
+                // launch UI blocked forever after the supervised process exits.
+                runCatching { process.inputStream.close() }
+                withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) { outputJob.join() }
+            }
             exitCode
         } catch (error: Throwable) {
             if (process.isAlive) process.destroyForcibly()
+            runCatching { process.inputStream.close() }
             outputJob.cancel()
             throw error
         }
@@ -130,8 +141,16 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
-            // Drain the final stdout/stderr lines before reporting the exit.
-            runCatching { outputJob.join() }
+            // Drain final output briefly. A descendant may inherit the pipe,
+            // so the display/session must not wait forever after PRoot exits.
+            val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
+                outputJob.join()
+                true
+            } ?: false
+            if (!drained) {
+                runCatching { process.inputStream.close() }
+                withTimeoutOrNull(OUTPUT_CLOSE_WAIT_MILLIS) { outputJob.join() }
+            }
             notifyExit(exitCode)
         }
     }
@@ -168,6 +187,8 @@ class ProotWineProcessSession internal constructor(
     companion object {
         private const val DEFAULT_GRACE_PERIOD_MILLIS = 1_500L
         private const val FORCE_STOP_WAIT_MILLIS = 1_500L
+        private const val OUTPUT_DRAIN_MILLIS = 500L
+        private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
         const val UNKNOWN_EXIT_CODE = -1
     }
 }
