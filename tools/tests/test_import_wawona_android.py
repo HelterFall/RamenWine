@@ -35,7 +35,7 @@ class WawonaReleaseImporterTests(unittest.TestCase):
         )
         declared_methods = set(
             re.findall(
-                r"\\bexternal\\s+fun\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(",
+                r"\bexternal\s+fun\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
                 wrapper.read_text(encoding="utf-8"),
             )
         )
