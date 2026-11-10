@@ -155,7 +155,7 @@ SHMEM_C="$(find "$WORK_DIR" -mindepth 2 -type f -name shmem.c -print -quit)"
   exit 1
 }
 SHMEM_SRC="$(dirname "$SHMEM_C")"
-"$CC" -O2 -fPIC -std=c11 -Wall -Wextra -I"$SHMEM_SRC" \
+"$CC" -O2 -fPIC -std=c11 -Wall -Wextra -D_PATH_TMP='"/tmp/"' -I"$SHMEM_SRC" \
   -c "$SHMEM_C" -o "$WORK_DIR/shmem.o"
 "$AR" rcs "$DEPS_PREFIX/lib/libandroid-shmem.a" "$WORK_DIR/shmem.o"
 mkdir -p "$DEPS_PREFIX/include/sys"
@@ -167,7 +167,7 @@ install -m 0644 "$SHMEM_SRC/shm.h" "$DEPS_PREFIX/include/sys/shm.h"
 
 echo "[3/3] Building the Android ARM64 PRoot executable"
 CPPFLAGS_VALUE="-D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I$PROOT_SRC/src -I$DEPS_PREFIX/include -DARG_MAX=131072 -DVERSION='\"RamenWine-PRoot-Android-$API\"'"
-LDFLAGS_VALUE="-pie -L$DEPS_PREFIX/lib -Wl,-Bstatic -landroid-shmem -Wl,-Bdynamic -llog -landroid -ltalloc -Wl,-z,noexecstack"
+LDFLAGS_VALUE="-pie -L$DEPS_PREFIX/lib -Wl,-Bstatic -landroid-shmem -ltalloc -Wl,-Bdynamic -llog -landroid -Wl,-z,noexecstack"
 
 make -C "$PROOT_SRC/src" clean
 make -C "$PROOT_SRC/src" -j"$JOBS" \
