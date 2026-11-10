@@ -19,9 +19,9 @@ class DisplayBackendUnavailableException(
 /**
  * In-process Wawona compositor adapter.
  *
- * The native libraries are not bundled yet. availability() therefore reports
- * the missing package until the pinned arm64-v8a Wawona build is staged into
- * RamenWine's jniLibs. start() fails closed when any prerequisite is absent.
+ * Expensive APK hashing and support-asset extraction run in prepare() on an IO
+ * dispatcher. start() is intentionally limited to JNI and Android Surface
+ * lifecycle work on the main thread.
  */
 class WawonaDisplayBackend(context: Context) : DisplayBackend {
     private val appContext = context.applicationContext
@@ -32,16 +32,17 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         val manifest = runCatching {
             WawonaPackageManifestReader.read(appContext)
         }.getOrNull()
-        val apkFile = File(appContext.applicationInfo.sourceDir)
         val missing = if (manifest == null) {
             WawonaLibraryInventory.requiredFileNames + WawonaPackageManifestReader.ASSET_PATH
         } else {
-            WawonaLibraryInventory.missingFromApk(apkFile, manifest.nativeLibraries)
+            WawonaLibraryInventory.requiredFileNames.filterNot {
+                it in manifest.nativeLibraries
+            }
         }
         return if (missing.isEmpty() && manifest != null) {
             DisplayBackendAvailability(
                 available = true,
-                detail = "Pinned Wawona native libraries and support assets are staged; runtime loading is still required."
+                detail = "Pinned Wawona package manifest is present; APK hashes and support assets are verified during preparation."
             )
         } else {
             DisplayBackendAvailability(
@@ -52,15 +53,49 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         }
     }
 
+    @Volatile
+    private var preparedManifest: WawonaPackageManifest? = null
+
+    override fun prepare() {
+        val manifest = try {
+            WawonaPackageManifestReader.read(appContext)
+        } catch (error: Exception) {
+            throw DisplayBackendUnavailableException(
+                "Wawona package manifest is missing or invalid: " +
+                    (error.message ?: error.javaClass.simpleName),
+                error
+            )
+        }
+
+        val apkFile = File(appContext.applicationInfo.sourceDir)
+        val missing = WawonaLibraryInventory.missingFromApk(
+            apkFile,
+            manifest.nativeLibraries
+        )
+        if (missing.isNotEmpty()) {
+            throw DisplayBackendUnavailableException(
+                "Wawona APK native payload failed verification: " + missing.joinToString()
+            )
+        }
+
+        try {
+            WawonaSupportAssetInstaller.install(appContext, manifest)
+        } catch (error: Exception) {
+            throw DisplayBackendUnavailableException(
+                "Wawona support assets could not be prepared: " +
+                    (error.message ?: error.javaClass.simpleName),
+                error
+            )
+        }
+        preparedManifest = manifest
+    }
+
     override fun start(): DisplaySession {
         checkMainThread()
 
-        val availability = availability()
-        if (!availability.available) {
-            throw DisplayBackendUnavailableException(
-                availability.detail + " Missing: " + availability.missingLibraries.joinToString()
-            )
-        }
+        val manifest = preparedManifest ?: throw DisplayBackendUnavailableException(
+            "Wawona package must be verified and prepared before compositor startup."
+        )
 
         if (!WawonaSessionGate.acquire()) {
             throw DisplayBackendUnavailableException(
@@ -94,8 +129,6 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 Os.chmod(runtimeDirectory.absolutePath, 448)
             }
 
-            val manifest = WawonaPackageManifestReader.read(appContext)
-            WawonaSupportAssetInstaller.install(appContext, manifest)
             WawonaNative.loadLibraries()
             WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
             WawonaHostKeymap.apply()

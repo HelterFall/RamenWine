@@ -39,7 +39,7 @@
 9. Wait for the real Android Surface to attach; the launch button stays disabled until attachment is reported.
 10. Request the Windows EXE launch; the coordinator validates runtime paths and requires the active Wayland socket before starting PRoot/Wine.
 
-The UI now exposes an initial per-game flow: prepare the Wawona display, attach its Surface, then request a Windows EXE launch. The flow fails closed when the native Wawona package or a compatible PRoot/Wine runtime is absent. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
+The UI now exposes an initial per-game flow: prepare and verify Wawona off the UI thread, attach its Surface, then request a Windows EXE launch. The flow fails closed when the native Wawona package or a compatible PRoot/Wine runtime is absent. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
 
 ## Runtime launch scaffolding
 

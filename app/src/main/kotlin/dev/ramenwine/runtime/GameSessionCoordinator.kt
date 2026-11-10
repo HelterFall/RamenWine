@@ -30,17 +30,31 @@ class GameSessionCoordinator(
     private var displaySession: DisplaySession? = null
     private var processSession: ProotWineProcessSession? = null
     private var launchInProgress = false
+    private var displayPreparationInProgress = false
 
     /**
      * Starts the compositor and returns a session for the UI to attach its
      * SurfaceView. This does not start a game process.
      */
-    fun openDisplay(): DisplaySession {
+    suspend fun openDisplay(): DisplaySession = withContext(Dispatchers.Main.immediate) {
         checkMainThread()
         check(displaySession == null) { "A display session is already open." }
         check(processSession?.isAlive() != true) { "A game process is still running." }
+        check(!displayPreparationInProgress) { "Display preparation is already running." }
 
-        return displayBackend.start().also { displaySession = it }
+        displayPreparationInProgress = true
+        try {
+            // APK hashing and asset extraction can take noticeable time on a
+            // phone. Keep all of that I/O off the UI thread; native init remains
+            // on main because Wawona owns Android Surface/Vulkan lifecycle.
+            withContext(Dispatchers.IO) {
+                displayBackend.prepare()
+            }
+            checkMainThread()
+            displayBackend.start().also { displaySession = it }
+        } finally {
+            displayPreparationInProgress = false
+        }
     }
 
     /**

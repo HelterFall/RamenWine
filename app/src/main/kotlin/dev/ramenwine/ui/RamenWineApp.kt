@@ -192,30 +192,22 @@ fun RamenWineApp() {
         ) return
 
         gameLaunchError = null
-        gameLaunchNotice = null
+        gameLaunchNotice = "Проверяю Wawona и подготавливаю ресурсы…"
         processOutput = ""
-
-        val availability = displayBackend.availability()
-        if (!availability.available) {
-            gameLaunchError = availability.detail +
-                if (availability.missingLibraries.isNotEmpty()) {
-                    " Missing: " + availability.missingLibraries.joinToString()
-                } else {
-                    ""
-                }
-            return
-        }
-
         preparingGame = true
-        try {
-            activeDisplaySession = gameSessionCoordinator.openDisplay()
-            selectedDisplayGame = game
-            surfaceReady = false
-            gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
-        } catch (error: Exception) {
-            gameLaunchError = error.message ?: error.javaClass.simpleName
-        } finally {
-            preparingGame = false
+
+        scope.launch {
+            try {
+                activeDisplaySession = gameSessionCoordinator.openDisplay()
+                selectedDisplayGame = game
+                surfaceReady = false
+                gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
+            } catch (error: Exception) {
+                gameLaunchError = error.message ?: error.javaClass.simpleName
+                gameLaunchNotice = null
+            } finally {
+                preparingGame = false
+            }
         }
     }
 

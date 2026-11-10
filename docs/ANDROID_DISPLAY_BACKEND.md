@@ -58,7 +58,7 @@ Implemented:
 - WawonaSupportAssetInstaller extracts XKB, fonts and Weston data to filesDir/wawona-rootfs with size limits, staging/rollback and SHA-256 verification.
 - WawonaHostKeymap applies Android KeyCharacterMap levels to the Wawona seat.
 - WawonaDisplayBackend follows upstream bootstrap order: prepare shell environment, apply host keymap, initialize the core, reload the keymap, set density, then check compositor readiness and the Wayland socket.
-- WawonaDisplayBackend checks native availability, rejects AF_UNIX paths that would trigger upstream's out-of-sandbox fallback, starts the native compositor, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
+- WawonaDisplayBackend.prepare() verifies every manifest-listed native library against the installed APK and extracts XKB/font/Weston assets on an IO dispatcher. WawonaDisplayBackend.start() then performs only the native bootstrap on the Android main thread, confirms native readiness and verifies that wayland-0 is an actual Unix socket.
 - WawonaDisplaySession owns Surface attach/detach/resize, forwards basic touch and hardware-key events, and releases Vulkan presentation resources even when no Surface was attached.
 - WawonaSurfaceView connects Android SurfaceHolder callbacks and basic input events to DisplaySession.
 - WawonaSurfaceHost embeds the view in Compose; surface attach/detach state is delivered back to the UI.
@@ -70,7 +70,7 @@ Not implemented:
 - The generated Wawona native bundle is not currently present in this repository checkout, so availability() reports missing libraries/manifest and start() fails closed until the staging script has been run.
 - No reproducible Wawona Nix/NDK build output has been staged into jniLibs for the current checkout.
 - The pinned APK importer and runtime support-asset installer now exist; the generated provenance manifest and local assets are ignored by Git and must be created on the build host.
-- The Compose UI now offers a per-game prepare-display and launch flow, and shows Wawona/runtime errors rather than simulating a successful launch.
+- The Compose UI now offers a per-game prepare-display and launch flow. APK hashing and support-asset extraction run off the main thread; JNI and Surface lifecycle stay on main. Errors are surfaced instead of simulating a successful launch.
 - WawonaSurfaceHost reports Android Surface attach/detach transitions back to the Compose state; the launch button remains disabled until the Surface is attached.
 - No actual Wayland client or Wine process has connected to the socket through RamenWine; the Compose flow and JNI/display lifecycle have not been exercised on a device.
 - Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.

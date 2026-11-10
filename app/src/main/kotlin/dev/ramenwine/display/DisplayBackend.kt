@@ -17,6 +17,12 @@ interface DisplayBackend {
     fun availability(): DisplayBackendAvailability
 
     /**
+     * Performs disk, archive and asset preparation off the Android main thread.
+     * This must not call JNI or touch an Android Surface.
+     */
+    fun prepare() {}
+
+    /**
      * Starts the compositor and returns only after its Wayland socket is ready.
      * Implementations are Android-main-thread lifecycle APIs.
      */
