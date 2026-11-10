@@ -52,7 +52,7 @@ class RuntimeBinaryValidatorTest {
             createRuntimeHeaders(backendRoot, wineMachine = 62)
             File(
                 backendRoot,
-                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so"
+                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
             ).delete()
 
             val errors = RuntimeBinaryValidator.inspectInstalled(
@@ -74,7 +74,7 @@ class RuntimeBinaryValidatorTest {
             createRuntimeHeaders(backendRoot, wineMachine = 62)
             File(
                 backendRoot,
-                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so"
+                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
             ).writeBytes(elf64(183))
 
             val errors = RuntimeBinaryValidator.inspectInstalled(
@@ -109,7 +109,7 @@ class RuntimeBinaryValidatorTest {
 
         val waylandDriver = File(
             backendRoot,
-            "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.drv.so"
+            "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
         )
         waylandDriver.parentFile?.mkdirs()
         waylandDriver.writeBytes(elf64(62))
