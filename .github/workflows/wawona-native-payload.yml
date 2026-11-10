@@ -1,10 +1,8 @@
 name: Package final RamenWine APK (manual, end-of-project only)
 
-# Temporary feature-branch trigger for the Wawona provenance fix smoke APK.
-# Restore manual-only triggering immediately after this package is verified.
+# Deliberately manual-only. The installable APK is assembled on request;
+# runtime development checks remain in the separate focused workflow.
 on:
-  push:
-    branches: [feature/wawona-shm-smoke]
   workflow_dispatch:
 
 concurrency:
