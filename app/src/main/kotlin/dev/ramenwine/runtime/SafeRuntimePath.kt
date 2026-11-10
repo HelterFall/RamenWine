@@ -69,8 +69,13 @@ object SafeRuntimePath {
             }
 
             if (!targetPath.startsWith(domainRoot)) return null
-            linkParent.relativize(targetPath).toString()
+            val relativeTarget = linkParent.relativize(targetPath)
+                .toString()
                 .replace(File.separatorChar, '/')
+            // A symlink that points to its own parent (for example,
+            // /usr/bin/X11 -> .) has an empty relative path. Preserve it
+            // explicitly as "." because Os.symlink rejects an empty target.
+            relativeTarget.ifEmpty { "." }
         }.getOrNull()
     }
 

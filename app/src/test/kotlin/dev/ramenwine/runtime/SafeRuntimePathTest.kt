@@ -37,6 +37,37 @@ class SafeRuntimePathTest {
         }
     }
 
+
+    @Test
+    fun relativeDotSymlinkToCurrentDirectoryIsPreserved() {
+        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
+        try {
+            val actual = SafeRuntimePath.normalizeSymlinkTarget(
+                runtimeRoot = root,
+                linkRelativePath = "rootfs/usr/bin/X11",
+                target = "."
+            )
+            assertEquals(".", actual)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun absoluteRootfsSymlinkToItsParentIsPreservedAsDot() {
+        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
+        try {
+            val actual = SafeRuntimePath.normalizeSymlinkTarget(
+                runtimeRoot = root,
+                linkRelativePath = "rootfs/usr/bin/X11",
+                target = "/usr/bin"
+            )
+            assertEquals(".", actual)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun absoluteHostSymlinkIsRejected() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()

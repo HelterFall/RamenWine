@@ -25,7 +25,7 @@ if [[ "$ACTUAL_REVISION" != "$PINNED_REVISION" ]]; then
 fi
 
 echo "Building Wawona Android from $ACTUAL_REVISION"
-BUILD_OUTPUT="$(cd "$WORK_DIR/source" && nix build .#wawona-android --no-link --print-out-paths)"
+BUILD_OUTPUT="$(cd "$WORK_DIR/source" && nix build --accept-flake-config .#wawona-android --no-link --print-out-paths)"
 APK_PATH="$BUILD_OUTPUT/bin/Wawona.apk"
 if [[ ! -s "$APK_PATH" ]]; then
   echo "Wawona Android build did not produce $APK_PATH" >&2

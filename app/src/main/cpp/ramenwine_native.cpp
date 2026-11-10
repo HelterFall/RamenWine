@@ -2,7 +2,7 @@
 
 namespace {
 constexpr const char* kBuildInfo =
-    "RamenWine native bridge 0.1.0 (ARM64); Wine runtime not bundled yet";
+    "RamenWine native bridge 0.1.0 (ARM64); offline Wine runtime package bundled in APK";
 }
 
 extern "C"

@@ -80,6 +80,9 @@ jobs:
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
 
+      - name: Run runtime path regression tests
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
       - name: Build debug APK with prebuilt runtime
         run: gradle --no-daemon --stacktrace assembleDebug
 

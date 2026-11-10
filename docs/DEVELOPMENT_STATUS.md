@@ -40,7 +40,7 @@
 4. Import the complete folder into the app-private games/<uuid> directory.
 5. Watch copied-file and byte progress.
 6. Save game metadata in the local library index.
-7. Optionally install a runtime ZIP selected from local device storage.
+7. On first launch, the app automatically extracts the offline Wine runtime already bundled inside the APK; the player does not need to find or download a separate runtime ZIP.
 8. Choose “Open game display” for an imported game; the UI checks the pinned Wawona package and starts the compositor.
 9. Wait for the real Android Surface to attach; the launch button stays disabled until attachment is reported.
 10. Request the Windows EXE launch; the coordinator validates runtime paths and requires the active Wayland socket before starting PRoot/Wine.
@@ -71,7 +71,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - No pinned signing key or signed runtime release metadata exists. SHA-256 in a ZIP detects payload mismatch; it does not authenticate the publisher.
 - No real Windows EXE has been launched by RamenWine.
 - The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
-- The generated Wawona native libraries are not present in a clean checkout until tools/build_wawona_android.sh is run; therefore no in-process Wayland server or Android display socket is running in the current APK.
+- The generated Wawona native libraries are intentionally not committed. The Android CI workflow is now configured to run tools/build_wawona_android.sh before Gradle and to verify that the APK contains wawona/provenance.json plus every native library named by that manifest. The APK shown in the 2026-11-10 device screenshots predates this CI change and is missing the bundle. Until the updated workflow completes successfully, do not assume a newly built APK contains Wawona; even a successful package check does not prove device-side compositor or game startup.
 - No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - No production input, IME, audio, save-management, pause/resume or child-process lifecycle bridge exists.
@@ -93,13 +93,12 @@ The last explicitly documented successful Android build/test/lint run passed on 
 
 ## Next engineering steps
 
-1. Run tools/build_wawona_android.sh on a Nix-capable build host and build the RamenWine APK with the generated Wawona native bundle.
-2. Implement the pinned-source build and ARM64/x86-64 dependency-rootfs assembly; Wine's WOW64 archive is not self-contained and requires its Linux library closure.
-3. Build and install a matching glibc + PRoot + Box64 + Wine runtime ZIP that satisfies the package contract; the package builder only packages already-built binaries and does not produce them.
-4. Verify native loading, compositor readiness and the actual app-private Wayland socket on a physical ARM64 Android device.
-5. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
-6. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.
-7. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.
+1. Complete a green Android CI run with the pinned Wawona Nix build/import and APK payload verification enabled.
+2. Install that exact APK on a physical ARM64 Android device and verify first-launch automatic runtime extraction plus Wawona native library loading.
+3. Verify compositor readiness and the actual app-private Wayland socket on-device.
+4. Run an original Win32 GDI test executable and verify rendering inside the RamenWine Surface.
+5. Verify pause/resume, surface recreation, keyboard/IME, touch, process-tree cleanup and long-session stability.
+6. Add 32-bit Windows execution and only then begin graphics backend selection and visual-novel engine compatibility tests.
 
 ## Engineering rules
 
