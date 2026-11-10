@@ -3,7 +3,6 @@
 ## Import
 
 The selected EXE is checked for a valid Windows PE header and supported x86/x86-64 architecture before copying starts. The copied EXE is checked again before the game folder is committed.
- flow
 
 RamenWine asks Android's system folder picker for read access to one game folder. It scans for Windows `.exe` candidates, lets the user select the main executable, then copies the selected tree into the app's private storage.
 
