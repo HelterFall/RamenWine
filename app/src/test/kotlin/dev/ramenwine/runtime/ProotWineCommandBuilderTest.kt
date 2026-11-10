@@ -114,6 +114,38 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun rejectsArm64ExecutableBeforeBuildingABox64WineCommand() {
+        val fixture = Fixture()
+        try {
+            val unsupportedGame = fixture.request().game.copy(architecture = "ARM64")
+            val error = runCatching {
+                ProotWineCommandBuilder.build(
+                    fixture.request().copy(game = unsupportedGame)
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("x86-64"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun allows32BitX86ExecutableThroughWow64Backend() {
+        val fixture = Fixture()
+        try {
+            val x86Game = fixture.request().game.copy(architecture = "x86")
+            val command = ProotWineCommandBuilder.build(
+                fixture.request().copy(game = x86Game)
+            )
+            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun refusesPrefixInitializationWhenWinebootIsMissing() {
         val fixture = Fixture()
         try {

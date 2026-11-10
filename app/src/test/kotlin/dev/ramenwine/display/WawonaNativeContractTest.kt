@@ -25,11 +25,10 @@ class WawonaNativeContractTest {
                 "nativeSyncOutputSize",
                 "nativeSetDisplayDensity",
                 "nativeShutdown",
-                "nativeTouchDown",
-                "nativeTouchUp",
-                "nativeTouchMotion",
-                "nativeTouchCancel",
-                "nativeTouchFrame",
+                "nativePointerEnter",
+                "nativePointerMotion",
+                "nativePointerButton",
+                "nativePointerLeave",
                 "nativeKeyEvent"
             ),
             nativeMethods
@@ -40,5 +39,6 @@ class WawonaNativeContractTest {
         )
         assertFalse("nativeApplyHostKeyLevels" in nativeMethods)
         assertFalse("nativeReloadHostKeymap" in nativeMethods)
+        assertFalse("nativeTouchDown" in nativeMethods)
     }
 }

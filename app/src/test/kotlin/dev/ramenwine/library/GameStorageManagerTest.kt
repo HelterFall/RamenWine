@@ -76,6 +76,14 @@ class GameStorageManagerTest {
             write(File(cache, "wine-tmp/$orphanId/temp.bin"), 11)
             write(File(root, "games/.$orphanId.importing/partial.bin"), 13)
             write(File(root, "runtime/shared.bin"), 17)
+
+            // Startup cleanup deliberately keeps entries younger than one hour
+            // so a fresh or interrupted import cannot be deleted immediately.
+            markOld(File(root, "games/$orphanId"))
+            markOld(File(root, "prefixes/$orphanId"))
+            markOld(File(cache, "wine-tmp/$orphanId"))
+            markOld(File(root, "games/.$orphanId.importing"))
+
             val removed = mutableListOf<String>()
 
             val manager = GameStorageManager(root, cache, removed::add)
@@ -136,6 +144,14 @@ class GameStorageManagerTest {
             root.deleteRecursively()
             outside.deleteRecursively()
         }
+    }
+
+    private fun markOld(entry: File) {
+        val oldTimestamp = System.currentTimeMillis() - 2L * 60L * 60L * 1000L
+        assertTrue(
+            "Could not age cleanup fixture: " + entry.name,
+            entry.setLastModified(oldTimestamp)
+        )
     }
 
     private fun game() = ImportedGame(

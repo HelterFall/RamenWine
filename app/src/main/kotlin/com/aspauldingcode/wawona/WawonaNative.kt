@@ -34,10 +34,11 @@ object WawonaNative {
     external fun nativeSetDisplayDensity(density: Float)
     external fun nativeShutdown()
 
-    external fun nativeTouchDown(id: Int, x: Float, y: Float, timestampMs: Int)
-    external fun nativeTouchUp(id: Int, timestampMs: Int)
-    external fun nativeTouchMotion(id: Int, x: Float, y: Float, timestampMs: Int)
-    external fun nativeTouchCancel()
-    external fun nativeTouchFrame()
+    // Android finger taps are translated to mouse input because standard
+    // Windows visual novels consume pointer clicks rather than Wayland touch.
+    external fun nativePointerEnter(x: Double, y: Double, timestampMs: Int)
+    external fun nativePointerMotion(x: Double, y: Double, timestampMs: Int)
+    external fun nativePointerButton(buttonCode: Int, state: Int, timestampMs: Int)
+    external fun nativePointerLeave(timestampMs: Int)
     external fun nativeKeyEvent(keyCode: Int, state: Int, timestampMs: Int)
 }

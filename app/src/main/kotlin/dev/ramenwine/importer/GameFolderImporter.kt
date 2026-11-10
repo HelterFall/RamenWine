@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.StatFs
 import androidx.documentfile.provider.DocumentFile
+import dev.ramenwine.inspection.PeArchitecture
 import dev.ramenwine.inspection.PeHeaderInspector
 import dev.ramenwine.inspection.SafeGamePath
 import dev.ramenwine.inspection.SafDocumentTree
@@ -229,6 +230,15 @@ class GameFolderImporter(private val context: Context) {
 
             if (peInspection?.isValidPe != true) {
                 throw IOException("The selected .exe does not contain a valid Windows PE header.")
+            }
+            if (
+                peInspection.architecture != PeArchitecture.X86 &&
+                peInspection.architecture != PeArchitecture.X86_64
+            ) {
+                throw IOException(
+                    "This runtime supports Windows x86 and x86-64 EXE files only. " +
+                        "The selected EXE is " + peInspection.architecture.displayName + "."
+                )
             }
 
             if (!stagingDirectory.renameTo(finalDirectory)) {

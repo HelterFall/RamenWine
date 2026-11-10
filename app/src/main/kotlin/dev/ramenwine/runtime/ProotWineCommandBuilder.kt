@@ -57,6 +57,12 @@ object ProotWineCommandBuilder {
         if (!executableRelativePath.endsWith(".exe", ignoreCase = true)) {
             throw IOException("The selected game file is not an EXE.")
         }
+        if (request.game.architecture != "x86" && request.game.architecture != "x86-64") {
+            throw IOException(
+                "This Wine/Box64 runtime supports Windows x86 and x86-64 games only. " +
+                    "This game is marked as " + request.game.architecture + "."
+            )
+        }
 
         val filesRoot = request.filesDirectory.canonicalFile
         val runtimeRoot = File(filesRoot, "runtime/current").canonicalFile

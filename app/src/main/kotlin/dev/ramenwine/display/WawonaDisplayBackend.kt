@@ -187,6 +187,25 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
     ) : DisplaySession {
         private var attachedSurface: Surface? = null
         private var stopped = false
+        private val touchMouseInput = TouchToPointerBridge(
+            object : WaylandPointerSink {
+                override fun enter(x: Double, y: Double, timestampMs: Int) {
+                    WawonaNative.nativePointerEnter(x, y, timestampMs)
+                }
+
+                override fun motion(x: Double, y: Double, timestampMs: Int) {
+                    WawonaNative.nativePointerMotion(x, y, timestampMs)
+                }
+
+                override fun button(buttonCode: Int, state: Int, timestampMs: Int) {
+                    WawonaNative.nativePointerButton(buttonCode, state, timestampMs)
+                }
+
+                override fun leave(timestampMs: Int) {
+                    WawonaNative.nativePointerLeave(timestampMs)
+                }
+            }
+        )
 
         override val isSurfaceAttached: Boolean
             get() = attachedSurface != null && !stopped
@@ -211,7 +230,10 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 return
             }
 
-            attachedSurface?.let { WawonaNative.nativeDestroySurface() }
+            attachedSurface?.let {
+                touchMouseInput.cancel(currentTimestamp())
+                WawonaNative.nativeDestroySurface()
+            }
             WawonaNative.nativeSetDisplayDensity(density)
             WawonaNative.nativeSetSurface(surface)
             attachedSurface = surface
@@ -228,6 +250,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         override fun detachSurface(surface: Surface) {
             checkMainThread()
             if (stopped || attachedSurface !== surface) return
+            touchMouseInput.cancel(currentTimestamp())
             WawonaNative.nativeDestroySurface()
             attachedSurface = null
         }
@@ -241,32 +264,37 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 MotionEvent.ACTION_DOWN,
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     val index = event.actionIndex
-                    WawonaNative.nativeTouchDown(
+                    touchMouseInput.down(
                         event.getPointerId(index),
-                        event.getX(index),
-                        event.getY(index),
+                        event.getX(index).toDouble(),
+                        event.getY(index).toDouble(),
                         timestamp
                     )
-                    WawonaNative.nativeTouchFrame()
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    // The bridge tracks the first pressed finger and ignores
+                    // additional pointers so one gesture cannot create several
+                    // overlapping Windows mouse buttons.
                     for (index in 0 until event.pointerCount) {
-                        WawonaNative.nativeTouchMotion(
+                        touchMouseInput.move(
                             event.getPointerId(index),
-                            event.getX(index),
-                            event.getY(index),
+                            event.getX(index).toDouble(),
+                            event.getY(index).toDouble(),
                             timestamp
                         )
                     }
-                    WawonaNative.nativeTouchFrame()
                 }
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_POINTER_UP -> {
                     val index = event.actionIndex
-                    WawonaNative.nativeTouchUp(event.getPointerId(index), timestamp)
-                    WawonaNative.nativeTouchFrame()
+                    touchMouseInput.up(
+                        event.getPointerId(index),
+                        event.getX(index).toDouble(),
+                        event.getY(index).toDouble(),
+                        timestamp
+                    )
                 }
-                MotionEvent.ACTION_CANCEL -> WawonaNative.nativeTouchCancel()
+                MotionEvent.ACTION_CANCEL -> touchMouseInput.cancel(timestamp)
                 else -> return false
             }
             return true
@@ -293,6 +321,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             try {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
+                touchMouseInput.cancel(currentTimestamp())
                 WawonaNative.nativeDestroySurface()
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
@@ -300,6 +329,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 WawonaSessionGate.release()
             }
         }
+
+        private fun currentTimestamp(): Int =
+            (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
         private fun checkMainThread() {
             check(Looper.myLooper() == Looper.getMainLooper()) {
