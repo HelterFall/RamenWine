@@ -36,6 +36,15 @@ internal class WawonaRuntimeAssets(context: Context) {
         copyAssetTree("wawona/xkb", xkb, required = true)
         copyAssetTree("wawona/fonts", fonts, required = true)
         copyAssetTree("wawona/weston", weston, required = false)
+        // The pinned upstream APK also ships an optional SwiftShader ICD
+        // manifest. Keep it inside app-private storage and include it in the
+        // same provenance/hash check; the active renderer currently selects
+        // Android's system Vulkan driver.
+        copyAssetTree(
+            "wawona/vulkan/icd.d",
+            File(rootfs, "usr/share/vulkan/icd.d"),
+            required = false
+        )
 
         if (!WawonaAssetIntegrity.matches(rootfs, expectedHashes)) {
             throw IOException(
@@ -107,7 +116,8 @@ internal class WawonaRuntimeAssets(context: Context) {
         if (
             !path.startsWith("wawona/xkb/") &&
             !path.startsWith("wawona/fonts/") &&
-            !path.startsWith("wawona/weston/")
+            !path.startsWith("wawona/weston/") &&
+            !path.startsWith("wawona/vulkan/icd.d/")
         ) {
             return false
         }
@@ -285,9 +295,14 @@ internal object WawonaAssetIntegrity {
             "xkb" -> "usr/share/X11/xkb"
             "fonts" -> "usr/share/fonts"
             "weston" -> "usr/share/weston"
+            "vulkan" -> {
+                if (parts.size < 4 || parts[2] != "icd.d") return null
+                "usr/share/vulkan/icd.d"
+            }
             else -> return null
         }
-        return destination + "/" + parts.drop(2).joinToString("/")
+        return destination + "/" + parts.drop(if (parts[1] == "vulkan") 3 else 2)
+            .joinToString("/")
     }
 
     private fun toHex(bytes: ByteArray): String = buildString(bytes.size * 2) {
