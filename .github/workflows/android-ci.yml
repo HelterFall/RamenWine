@@ -60,6 +60,17 @@ jobs:
           chmod +x tools/prepare_prebuilt_runtime.sh
           tools/prepare_prebuilt_runtime.sh
 
+      - name: Install Nix for the pinned Wawona Android build
+        uses: cachix/install-nix-action@v31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            max-jobs = auto
+            cores = 4
+
+      - name: Build and import pinned Wawona Android bundle
+        run: tools/build_wawona_android.sh
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -102,6 +113,44 @@ jobs:
           test -s "$RUNTIME_ZIP"
           unzip -t "$RUNTIME_ZIP"
           unzip -Z1 "$RUNTIME_ZIP" | grep -Fx "runtime-manifest.json"
+
+      - name: Confirm APK contains the pinned Wawona display bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          MANIFEST="app/src/main/assets/wawona/provenance.json"
+
+          test -s "$MANIFEST"
+          unzip -Z1 "$APK" | grep -Fx "assets/wawona/provenance.json"
+
+          python3 - "$APK" "$MANIFEST" <<'PY'
+          import json
+          import sys
+          import zipfile
+
+          apk_path, manifest_path = sys.argv[1:]
+          with open(manifest_path, encoding="utf-8") as stream:
+              manifest = json.load(stream)
+
+          libraries = manifest.get("nativeLibraries")
+          if not isinstance(libraries, dict) or not libraries:
+              raise SystemExit("Wawona provenance manifest has no native libraries")
+
+          with zipfile.ZipFile(apk_path) as archive:
+              names = set(archive.namelist())
+              required = {
+                  "lib/arm64-v8a/" + name
+                  for name in libraries
+              }
+              missing = sorted(required - names)
+              if missing:
+                  raise SystemExit(
+                      "APK is missing Wawona native libraries: " + ", ".join(missing)
+                  )
+
+          print(f"Verified Wawona provenance and {len(libraries)} native libraries in APK")
+          PY
 
       - name: Upload debug APK
         if: success()
