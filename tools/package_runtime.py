@@ -86,40 +86,62 @@ def resolve_symlink_inside(root: Path, link_path: Path, target: str) -> Path:
     domain = relative_link.split("/", 1)[0]
     domain_root = root_real / domain if domain in {"rootfs", "host"} else root_real
 
-    if target.startswith("/"):
-        if domain == "host":
-            raise ValueError(
-                f"absolute host symlinks are not allowed: {link_path} -> {target}"
-            )
-        absolute_root = domain_root if domain == "rootfs" else root_real
-        candidate = absolute_root / target.lstrip("/")
-    else:
-        candidate = link_path.parent / target
-
-    # Absolute Linux links in rootfs use the guest root, not the package root.
-    # Host links must remain inside the Android-host payload.
-    resolved = candidate.resolve(strict=False)
-    try:
-        resolved.relative_to(domain_root)
-    except ValueError as exc:
-        raise ValueError(f"symlink escapes its runtime domain: {link_path} -> {target}") from exc
-
-    probe = resolved
-    while not probe.exists() and not probe.is_symlink():
-        parent = probe.parent
-        if parent == probe:
-            raise ValueError(f"symlink target has no existing parent: {link_path} -> {target}")
-        probe = parent
-
-    try:
-        real_probe = probe.resolve(strict=True)
-        real_probe.relative_to(domain_root)
-    except (OSError, ValueError, RuntimeError) as exc:
+    if target.startswith("/") and domain == "host":
         raise ValueError(
-            f"symlink escapes runtime root or has a broken parent: {link_path} -> {target}"
-        ) from exc
+            f"absolute host symlinks are not allowed: {link_path} -> {target}"
+        )
 
-    return resolved
+    # Linux absolute links in the guest rootfs are relative to that guest,
+    # not the GitHub runner's "/" directory. Resolve components ourselves:
+    # pathlib.Path.resolve() follows guest absolute links on the host and can
+    # incorrectly turn /usr/sbin/rmt into a path outside the staged rootfs.
+    if target.startswith("/"):
+        resolved_parts: list[str] = []
+        pending = target.lstrip("/").split("/")
+    else:
+        try:
+            parent = link_path.parent.relative_to(domain_root)
+        except ValueError as exc:
+            raise ValueError(f"symlink parent escapes its runtime domain: {link_path}") from exc
+        resolved_parts = list(parent.parts)
+        pending = target.split("/")
+
+    visited_states: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
+    while pending:
+        component = pending.pop(0)
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            if not resolved_parts:
+                raise ValueError(
+                    f"symlink escapes its runtime domain: {link_path} -> {target}"
+                )
+            resolved_parts.pop()
+            continue
+
+        resolved_parts.append(component)
+        candidate = domain_root.joinpath(*resolved_parts)
+        if not candidate.is_symlink():
+            continue
+
+        state = (tuple(resolved_parts), tuple(pending))
+        if state in visited_states:
+            raise ValueError(f"symlink loop detected: {link_path} -> {target}")
+        visited_states.add(state)
+
+        nested_target = os.readlink(candidate)
+        resolved_parts.pop()
+        if nested_target.startswith("/"):
+            if domain == "host":
+                raise ValueError(
+                    f"absolute host symlinks are not allowed: {candidate} -> {nested_target}"
+                )
+            resolved_parts = []
+            pending = nested_target.lstrip("/").split("/") + pending
+        else:
+            pending = nested_target.split("/") + pending
+
+    return domain_root.joinpath(*resolved_parts)
 
 
 def scan_runtime(root: Path, max_bytes: int) -> tuple[list[PackageFile], list[PackageSymlink]]:

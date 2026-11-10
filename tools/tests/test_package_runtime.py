@@ -141,6 +141,27 @@ class RuntimePackagerTests(unittest.TestCase):
             self.assertEqual(guest_binary, resolved)
             self.assertNotEqual(host_binary, resolved)
 
+    def test_resolves_chained_guest_absolute_symlinks_without_host_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            guest = root / "rootfs"
+            rmt_link = guest / "etc/rmt"
+            mt_link = guest / "usr/sbin/rmt"
+            target = guest / "usr/bin/mt"
+            rmt_link.parent.mkdir(parents=True)
+            mt_link.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"guest mt")
+
+            rmt_link.symlink_to("/usr/sbin/rmt")
+            mt_link.symlink_to("/usr/bin/mt")
+
+            resolved = package_runtime.resolve_symlink_inside(
+                root, rmt_link, "/usr/sbin/rmt"
+            )
+
+            self.assertEqual(target, resolved)
+
     def test_rejects_backslash_and_nul_in_symlink_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "root"
