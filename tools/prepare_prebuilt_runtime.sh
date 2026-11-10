@@ -133,8 +133,12 @@ WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 [[ "$WINE_ELF_RELATIVE" != "$WINE_ELF" ]] || \
   fail "Wine launcher is outside its expected distribution directory."
 
-WINEBOOT_FILE="$(find "$WINE_ROOT" -type f -iname wineboot.exe -print -quit)"
-[[ -n "$WINEBOOT_FILE" ]] || fail "Kron4ek archive does not contain wineboot.exe."
+# WoW64 distributions include both i386 and x86-64 PE tools. Select by
+# the actual PE machine and optional-header magic, not nondeterministic find order.
+WINEBOOT_FILE="$(python3 "$ROOT_DIR/tools/select_wineboot.py" "$WINE_ROOT")" || \
+  fail "Kron4ek archive does not contain an AMD64 PE32+ wineboot.exe."
+[[ -n "$WINEBOOT_FILE" ]] || \
+  fail "Kron4ek archive does not contain an AMD64 PE32+ wineboot.exe."
 WINEBOOT_RELATIVE="${WINEBOOT_FILE#"$WINE_ROOT"/}"
 [[ "$WINEBOOT_RELATIVE" != "$WINEBOOT_FILE" ]] || \
   fail "wineboot.exe is outside the Wine distribution directory."
