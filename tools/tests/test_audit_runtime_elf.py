@@ -24,8 +24,11 @@ def elf64(machine: int) -> bytes:
     return bytes(data)
 
 
-def dynamic_elf64(machine: int, needed: str) -> bytes:
-    data = bytearray(768)
+def dynamic_elf64(machine: int, *needed_libraries: str) -> bytes:
+    if not needed_libraries:
+        raise ValueError("At least one DT_NEEDED library is required.")
+
+    data = bytearray(1024)
     data[:4] = b"\x7fELF"
     data[4:7] = bytes((2, 1, 1))
     struct.pack_into("<HHIQQQIHHHHHH", data, 16,
@@ -34,14 +37,23 @@ def dynamic_elf64(machine: int, needed: str) -> bytes:
     struct.pack_into("<IIQQQQQQ", data, 64,
                      1, 4, 0, 0x400000, 0, len(data), len(data), 0x1000)
     dynamic_offset = 0x100
-    string_offset = 0x200
-    string_table = b"\x00" + needed.encode("utf-8") + b"\x00"
-    entries = (
+    string_offset = 0x300
+
+    string_parts = [library.encode("utf-8") + b"\x00"
+                    for library in needed_libraries]
+    offsets = []
+    cursor = 1
+    for part in string_parts:
+        offsets.append(cursor)
+        cursor += len(part)
+    string_table = b"\x00" + b"".join(string_parts)
+
+    entries = [
         (5, 0x400000 + string_offset),
         (10, len(string_table)),
-        (1, 1),
+        *[(1, offset) for offset in offsets],
         (0, 0),
-    )
+    ]
     for index, (tag, value) in enumerate(entries):
         struct.pack_into("<qQ", data, dynamic_offset + index * 16, tag, value)
     struct.pack_into("<IIQQQQQQ", data, 120,
