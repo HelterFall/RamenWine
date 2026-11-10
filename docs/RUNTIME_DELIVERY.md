@@ -125,7 +125,7 @@ The debug runtime ZIP picker has been removed from the Android UI. The current Z
 
 ## Engineering sequence
 
-1. Fix and verify the Wawona asset-provenance startup failure on the phone.
+1. Install the replacement APK from [Actions run #42733393190](https://github.com/HelterFall/RamenWine/actions/runs/42733393190) and verify that the Wawona SHM test window actually renders on the phone. APK-level provenance verification now passes; physical rendering remains the outstanding Wawona check.
 2. Build the complete pinned PRoot/Ubuntu/Box64/Wine package and record its actual size, hashes and source provenance.
 3. Validate the runtime package with the same strict ELF/PE checks used by the Android installer.
 4. Publish an immutable versioned artifact and signed release index.
