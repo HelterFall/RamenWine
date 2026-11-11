@@ -35,7 +35,10 @@ class WawonaNativeContractTest {
                 "nativeDeleteSurroundingText",
                 "nativeInjectKey",
                 "nativeTextEntryWanted",
-                "nativeGetTextInputContentType"
+                "nativeGetTextInputContentType",
+                "nativeRunWestonSimpleSHM",
+                "nativeStopWestonSimpleSHM",
+                "nativeIsWestonSimpleSHMRunning"
             ),
             nativeMethods
         )
@@ -46,6 +49,22 @@ class WawonaNativeContractTest {
         assertFalse("nativeApplyHostKeyLevels" in nativeMethods)
         assertFalse("nativeReloadHostKeymap" in nativeMethods)
         assertFalse("nativeTouchDown" in nativeMethods)
+        assertEquals(
+            0,
+            WawonaNative::class.java.getDeclaredMethod("nativeRunWestonSimpleSHM").parameterCount
+        )
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            WawonaNative::class.java.getDeclaredMethod("nativeRunWestonSimpleSHM").returnType
+        )
+        assertEquals(
+            0,
+            WawonaNative::class.java.getDeclaredMethod("nativeStopWestonSimpleSHM").parameterCount
+        )
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            WawonaNative::class.java.getDeclaredMethod("nativeIsWestonSimpleSHMRunning").returnType
+        )
         assertEquals(1, WawonaNative::class.java.getDeclaredMethod(
             "nativeCommitText", String::class.java
         ).parameterCount)
