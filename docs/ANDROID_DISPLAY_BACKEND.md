@@ -2,13 +2,13 @@
 
 **Status:** Kotlin/JNI adapter, support-asset bootstrap and SurfaceView host implemented; local native bundle build recipe added  
 **Review snapshot:** 2026-11-10  
-**Pinned research revision:** Wawona/Wawona commit dd745564ffe4e28628c9cf2525c620bcfd4ebed5 (upstream Cargo package version 26.11.2)
+**Pinned Android package:** official Wawona v26.8.12 release APK, source commit `75ffe2982bd7d99b29b7e743c4f70a9becf61f86`
 
 ## Goal
 
 Display a Windows game's graphical output inside the RamenWine Android application, without exposing a Linux desktop shell to the user. The display backend must own an Android Surface, start a Wayland compositor in the same app UID, publish a local Wayland socket for Wine, route input/IME, and survive Activity and Surface lifecycle changes.
 
-Wine process execution and display are separate systems. ProotWineCommandBuilder already expects a Wayland socket; it deliberately refuses to construct a launch command until the socket exists. RamenWine now has a Wawona adapter that starts the in-process core and verifies the real socket, but the native libraries required for that path are not yet packaged.
+Wine process execution and display are separate systems. ProotWineCommandBuilder already expects a Wayland socket; it deliberately refuses to construct a launch command until the socket exists. RamenWine now has a Wawona adapter that starts the in-process core and verifies the real socket, and the pinned Android release libraries/assets are staged by the checksum-verifying package importer before Android packaging.
 
 ## Selected candidate: Wawona
 
@@ -32,7 +32,7 @@ The Android Kotlin wrapper exposes lifecycle calls including nativeInit(cacheDir
 
 The upstream android/app Gradle module is a full application, not a small AAR intended for embedding. The Android native build is assembled through the upstream Nix dependency graph and links the Rust core plus platform/native dependencies. Copying one Kotlin SurfaceView class is not sufficient to get a compositor.
 
-Upstream Android settings in the reviewed revision include minSdk 24, compileSdk 36 and NDK 29. RamenWine currently targets minSdk 26, compileSdk 36 and NDK 30. The SDK floor is compatible in principle, but the NDK and native dependency graph must be made reproducible rather than mixing arbitrary .so files from an APK.
+RamenWine uses minSdk 28 because the bundled DirectAudio Android relay is built against Android API 28 AAudio. The current adapter packages the checksum-pinned upstream Wawona 26.8.12 native release rather than rebuilding that large native dependency graph.
 
 ### License boundary
 
@@ -69,11 +69,11 @@ Implemented:
 Not implemented:
 - The generated Wawona native bundle is not currently present in this repository checkout, so availability() reports missing libraries/manifest and start() fails closed until the staging script has been run.
 - No reproducible Wawona Nix/NDK build output has been staged into jniLibs for the current checkout.
-- The pinned APK importer and runtime support-asset installer now exist; the generated provenance manifest and local assets are ignored by Git and must be created on the build host.
+- The pinned APK importer and runtime support-asset installer exist; the generated provenance manifest and native binaries are materialized by the Android packaging workflow and are not committed as opaque binary files.
 - The Compose UI now offers a per-game prepare-display and launch flow. APK hashing and support-asset extraction run off the main thread; JNI and Surface lifecycle stay on main. Errors are surfaced instead of simulating a successful launch.
 - WawonaSurfaceHost reports Android Surface attach/detach transitions back to the Compose state; the launch button remains disabled until the Surface is attached.
-- No actual Wayland client or Wine process has connected to the socket through RamenWine; the Compose flow and JNI/display lifecycle have not been exercised on a device.
-- Basic touch/key forwarding exists, but Android IME/text composition, mouse/scroll mapping, focus management and audio are not integrated.
+- The app now exposes a pinned Weston SHM-client + Android PixelCopy verification flow. It proves visible pixels only when run successfully on a device; no Wine process has yet been shown rendering a Win32 window through RamenWine.
+- Basic touch/key and IME/text composition forwarding exist. Scroll mapping, full focus management and actual audio playback still require real-game/device verification.
 - No physical-device Vulkan presentation or pause/resume test has been completed.
 
 ## RamenWine-owned abstraction
