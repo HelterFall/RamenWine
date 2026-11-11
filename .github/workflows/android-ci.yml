@@ -77,6 +77,14 @@ jobs:
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test runtime packager and Wine shutdown wrapper
+        run: python -m unittest discover -s tools/tests -v
+
       - name: Compile app, run unit tests and lint
         run: gradle --no-daemon --stacktrace testDebugUnitTest lintDebug
 
