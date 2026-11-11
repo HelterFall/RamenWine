@@ -81,6 +81,9 @@ class RuntimePackagerTests(unittest.TestCase):
         ):
             self.write_elf64(root / relative, machine)
 
+        (root / "rootfs/usr/bin/sh").symlink_to("dash")
+        (root / "rootfs/bin").symlink_to("usr/bin", target_is_directory=True)
+
         wrapper = root / "rootfs/opt/ramenwine-tools/run-wine-command.sh"
         wrapper.parent.mkdir(parents=True, exist_ok=True)
         wrapper_source = Path(__file__).resolve().parents[1] / "run-wine-command.sh"
@@ -145,6 +148,22 @@ class RuntimePackagerTests(unittest.TestCase):
                     [{"path": "host/lib/libwine.so", "target": "libwine.so.1"}],
                 )
 
+
+    def test_glibc_manifest_accepts_debian_merged_usr_shell_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            manifest = package_runtime.make_manifest(
+                "glibc-proot-box64", "test-merged-usr", files, symlinks
+            )
+
+            link_targets = {
+                item["path"]: item["target"] for item in manifest["symlinks"]
+            }
+            self.assertEqual("usr/bin", link_targets["rootfs/bin"])
+            self.assertEqual("dash", link_targets["rootfs/usr/bin/sh"])
 
     def test_glibc_manifest_rejects_missing_wineserver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
