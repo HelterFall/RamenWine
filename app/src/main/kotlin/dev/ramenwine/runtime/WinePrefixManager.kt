@@ -4,6 +4,44 @@ import java.io.File
 import java.io.IOException
 import android.util.AtomicFile
 
+internal enum class WinePrefixRecoveryAction {
+    SKIP,
+    INITIALIZE,
+    UPDATE
+}
+
+/**
+ * Pure recovery policy so interrupted wineboot states can be covered without
+ * invoking Wine or touching a real game prefix in a unit test.
+ */
+internal object WinePrefixRecoveryPolicy {
+    fun decide(
+        populatedRegistryFiles: Int,
+        markerExists: Boolean,
+        markerMatches: Boolean
+    ): WinePrefixRecoveryAction {
+        require(populatedRegistryFiles in 0..REQUIRED_REGISTRY_FILE_COUNT) {
+            "Registry file count is outside the supported range."
+        }
+
+        if (
+            populatedRegistryFiles == REQUIRED_REGISTRY_FILE_COUNT &&
+            markerExists &&
+            markerMatches
+        ) {
+            return WinePrefixRecoveryAction.SKIP
+        }
+
+        return if (populatedRegistryFiles > 0 || markerExists) {
+            WinePrefixRecoveryAction.UPDATE
+        } else {
+            WinePrefixRecoveryAction.INITIALIZE
+        }
+    }
+
+    private const val REQUIRED_REGISTRY_FILE_COUNT = 3
+}
+
 /**
  * Initializes each game's Wine prefix once per installed runtime version.
  * A marker is committed only after wineboot succeeds and registry files exist.
@@ -28,21 +66,23 @@ internal class WinePrefixManager(
             File(prefix, "userdef.reg")
         )
         val presentRegistryCount = registryFiles.count { it.isFile && it.length() > 0L }
-        val registryReady = presentRegistryCount == registryFiles.size
+        val markerExists = marker.isFile
+        val markerMatches = markerExists && runCatching {
+            marker.readText(Charsets.UTF_8) == expectedMarker
+        }.getOrDefault(false)
+        val recoveryAction = WinePrefixRecoveryPolicy.decide(
+            populatedRegistryFiles = presentRegistryCount,
+            markerExists = markerExists,
+            markerMatches = markerMatches
+        )
 
-        if (registryReady && marker.isFile &&
-            runCatching {
-                marker.readText(Charsets.UTF_8) == expectedMarker
-            }.getOrDefault(false)
-        ) {
-            return false
-        }
+        if (recoveryAction == WinePrefixRecoveryAction.SKIP) return false
 
         // An interrupted first-time wineboot may have created only some
         // registry files. Treat that prefix as existing and let wineboot -u
         // complete it instead of permanently blocking a retry. Existing
         // files are not deleted or replaced by this recovery path.
-        val updateExistingPrefix = presentRegistryCount > 0 || marker.exists()
+        val updateExistingPrefix = recoveryAction == WinePrefixRecoveryAction.UPDATE
         val winebootCommand = ProotWineCommandBuilder.buildWinebootCommand(
             gameCommand = gameCommand,
             updateExistingPrefix = updateExistingPrefix
