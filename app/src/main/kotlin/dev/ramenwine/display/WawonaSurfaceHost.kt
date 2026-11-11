@@ -16,10 +16,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun WawonaSurfaceHost(
     session: DisplaySession,
     modifier: Modifier = Modifier,
-    onSurfaceStateChanged: (Boolean) -> Unit = {}
+    onSurfaceStateChanged: (Boolean) -> Unit = {},
+    onSurfaceViewChanged: (WawonaSurfaceView?) -> Unit = {}
 ) {
     val context = LocalContext.current
     val currentSurfaceStateChanged = rememberUpdatedState(onSurfaceStateChanged)
+    val currentSurfaceViewChanged = rememberUpdatedState(onSurfaceViewChanged)
     val view = remember(session, context) {
         WawonaSurfaceView(context, session) { attached ->
             currentSurfaceStateChanged.value(attached)
@@ -33,12 +35,17 @@ fun WawonaSurfaceHost(
                 session.detachSurface(surface)
             }
             currentSurfaceStateChanged.value(false)
+            currentSurfaceViewChanged.value(null)
             view.holder.removeCallback(view)
         }
     }
 
     AndroidView(
-        factory = { view },
+        factory = {
+            currentSurfaceViewChanged.value(view)
+            view
+        },
+        update = { currentSurfaceViewChanged.value(it) },
         modifier = modifier
     )
 }
