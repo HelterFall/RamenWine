@@ -46,16 +46,10 @@ class ProotWineProcessSupervisor(
         timeoutMillis: Long = SETUP_COMMAND_TIMEOUT_MILLIS
     ): Int = withContext(Dispatchers.IO) {
         require(timeoutMillis > 0L) { "Setup timeout must be positive." }
+        // One-shot wineboot/reg.exe commands run under PRoot --kill-on-exit.
+        // Do not force-kill their descendants here: Wine may keep wineserver
+        // alive briefly so the next setup command can reuse the same prefix.
         val process = createProcess(command)
-        val processTree = createProcessTreeTerminator(process)
-        processTree?.captureDescendants()
-        val processTreeMonitor = launch {
-            while (process.isAlive) {
-                processTree?.captureDescendants()
-                delay(PROCESS_TREE_SCAN_INTERVAL_MILLIS)
-            }
-            processTree?.captureDescendants()
-        }
         val outputJob = launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
@@ -112,12 +106,6 @@ class ProotWineProcessSupervisor(
             runCatching { process.inputStream.close() }
             outputJob.cancel()
             throw error
-        } finally {
-            withContext(NonCancellable) {
-                processTreeMonitor.cancelAndJoin()
-                processTree?.captureDescendants()
-                processTree?.terminateRemaining()
-            }
         }
     }
 
