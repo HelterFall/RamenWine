@@ -314,19 +314,17 @@ readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || 
 
 # PRoot normally extracts its ELF loader into PROOT_TMP_DIR. Android denies
 # executing that writable filesDir/cacheDir copy on targetSdk 29+, so ship
-# both loader variants in nativeLibraryDir and point PRoot at those APK files.
+# the ARM64 loader in nativeLibraryDir and point PRoot at that APK file.
 PROOT_LOADER_BINARY="$(find "$PROOT_DIR" -type f -name loader -print -quit)"
-PROOT_LOADER32_BINARY="$(find "$PROOT_DIR" -type f -name loader-m32 -print -quit)"
 [[ -n "$PROOT_LOADER_BINARY" && -s "$PROOT_LOADER_BINARY" ]] || \
   fail "The Android PRoot archive does not contain its ELF loader."
-[[ -n "$PROOT_LOADER32_BINARY" && -s "$PROOT_LOADER32_BINARY" ]] || \
-  fail "The Android PRoot archive does not contain its 32-bit ELF loader."
 install -m 0755 "$PROOT_LOADER_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader.so"
-install -m 0755 "$PROOT_LOADER32_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader32.so"
 readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader.so" | grep -q 'AArch64' || \
   fail "Packaged PRoot ELF loader is not an AArch64 ELF."
-readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader32.so" | grep -q 'AArch64' || \
-  fail "Packaged PRoot 32-bit ELF loader is not an AArch64 ELF."
+
+# The bundled Debian guest is ARM64 only. PRoot's optional loader-m32 is for
+# 32-bit ARM guest ELF programs and is not needed by this guest; x86 games run
+# under Box64/Wine rather than as 32-bit ARM ELF binaries.
 
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
