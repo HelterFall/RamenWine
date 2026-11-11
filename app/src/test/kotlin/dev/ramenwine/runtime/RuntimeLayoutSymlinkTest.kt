@@ -39,9 +39,11 @@ class RuntimeLayoutSymlinkTest {
             Files.createSymbolicLink(alias.toPath(), root.toPath())
             val result = RuntimeLayout.inspect(alias)
 
+            val inspection = result.backends.first { it.backend == backend }
             assertEquals(
+                inspection.missingItems.joinToString("; "),
                 RuntimeState.FILES_PRESENT,
-                result.backends.first { it.backend == backend }.state
+                inspection.state
             )
         } finally {
             Files.deleteIfExists(alias.toPath())
@@ -103,9 +105,11 @@ class RuntimeLayoutSymlinkTest {
             )
 
             val result = RuntimeLayout.inspect(root)
+            val inspection = result.backends.first { it.backend == backend }
             assertEquals(
+                inspection.missingItems.joinToString("; "),
                 RuntimeState.FILES_PRESENT,
-                result.backends.first { it.backend == backend }.state
+                inspection.state
             )
         } finally {
             root.deleteRecursively()
@@ -146,9 +150,11 @@ class RuntimeLayoutSymlinkTest {
             )
 
             val result = RuntimeLayout.inspect(root)
+            val inspection = result.backends.first { it.backend == backend }
             assertEquals(
+                inspection.missingItems.joinToString("; "),
                 RuntimeState.FILES_PRESENT,
-                result.backends.first { it.backend == backend }.state
+                inspection.state
             )
         } finally {
             root.deleteRecursively()
@@ -180,9 +186,11 @@ class RuntimeLayoutSymlinkTest {
             )
 
             val result = RuntimeLayout.inspect(root)
+            val inspection = result.backends.first { it.backend == backend }
             assertEquals(
+                inspection.missingItems.joinToString("; "),
                 RuntimeState.FILES_PRESENT,
-                result.backends.first { it.backend == backend }.state
+                inspection.state
             )
         } finally {
             root.deleteRecursively()
