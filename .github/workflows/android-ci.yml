@@ -303,9 +303,56 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  rootfs:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
+    name: Build Debian ARM64 guest rootfs natively
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare guest rootfs output directory
+        run: |
+          rm -rf build/prebuilt-runtime/glibc-proot-box64/rootfs
+          mkdir -p build/prebuilt-runtime/glibc-proot-box64
+
+      - name: Build cached Debian ARM64 guest rootfs natively
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tools/runtime-rootfs.Dockerfile
+          platforms: linux/arm64
+          outputs: type=local,dest=build/prebuilt-runtime/glibc-proot-box64/rootfs
+          cache-from: type=gha,scope=ramenwine-debian-arm64-rootfs
+          cache-to: type=gha,scope=ramenwine-debian-arm64-rootfs,mode=max,ignore-error=true
+
+      - name: Archive Debian ARM64 guest rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/env
+          test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/box64
+          tar --numeric-owner \
+            -C build/prebuilt-runtime/glibc-proot-box64/rootfs \
+            -cpf build/prebuilt-runtime/ramenwine-arm64-rootfs.tar .
+
+      - name: Upload Debian ARM64 guest rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ramenwine-arm64-rootfs
+          path: build/prebuilt-runtime/ramenwine-arm64-rootfs.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
   android:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
-    needs: directaudio
+    needs: [directaudio, rootfs]
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -337,28 +384,22 @@ jobs:
       - name: Test runtime packager, ELF auditor and Wawona release importer
         run: python -m unittest discover -s tools/tests -v
 
-      - name: Enable ARM64 containers for Debian rootfs
-        uses: docker/setup-qemu-action@v4
+      - name: Download Debian ARM64 guest rootfs
+        uses: actions/download-artifact@v4
         with:
-          platforms: arm64
+          name: ramenwine-arm64-rootfs
+          path: build/prebuilt-runtime/rootfs-artifact
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Prepare guest rootfs output directory
+      - name: Restore Debian ARM64 guest rootfs
+        shell: bash
         run: |
-          rm -rf build/prebuilt-runtime/glibc-proot-box64/rootfs
-          mkdir -p build/prebuilt-runtime/glibc-proot-box64
-
-      - name: Build cached Debian ARM64 guest rootfs
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: tools/runtime-rootfs.Dockerfile
-          platforms: linux/arm64
-          outputs: type=local,dest=build/prebuilt-runtime/glibc-proot-box64/rootfs
-          cache-from: type=gha,scope=ramenwine-debian-arm64-rootfs
-          cache-to: type=gha,scope=ramenwine-debian-arm64-rootfs,mode=max,ignore-error=true
+          set -euo pipefail
+          ROOTFS="build/prebuilt-runtime/glibc-proot-box64/rootfs"
+          mkdir -p "$ROOTFS"
+          tar -xpf build/prebuilt-runtime/rootfs-artifact/ramenwine-arm64-rootfs.tar -C "$ROOTFS"
+          rm -rf build/prebuilt-runtime/rootfs-artifact
+          test -x "$ROOTFS/usr/bin/env"
+          test -x "$ROOTFS/usr/bin/box64"
 
       - name: Assemble offline Wine, Box64 and PRoot runtime
         shell: bash
