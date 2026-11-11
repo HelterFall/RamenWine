@@ -74,7 +74,7 @@ class RuntimePackagerTests(unittest.TestCase):
         for relative, machine in (
             ("host/bin/proot", 183),
             ("rootfs/usr/bin/env", 183),
-            ("rootfs/bin/sh", 183),
+            ("rootfs/usr/bin/dash", 183),
             ("rootfs/usr/bin/box64", 183),
             ("rootfs/usr/bin/wine", 62),
             ("rootfs/usr/bin/wineserver", 62),
