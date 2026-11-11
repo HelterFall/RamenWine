@@ -145,7 +145,11 @@ class RuntimePackagerTests(unittest.TestCase):
                 self.assertTrue(parsed["files"][0]["sha256"])
                 self.assertEqual(
                     parsed["symlinks"],
-                    [{"path": "host/lib/libwine.so", "target": "libwine.so.1"}],
+                    [
+                        {"path": "host/lib/libwine.so", "target": "libwine.so.1"},
+                        {"path": "rootfs/bin", "target": "usr/bin"},
+                        {"path": "rootfs/usr/bin/sh", "target": "dash"},
+                    ],
                 )
 
 
@@ -159,8 +163,9 @@ class RuntimePackagerTests(unittest.TestCase):
                 "glibc-proot-box64", "test-merged-usr", files, symlinks
             )
 
+            parsed = json.loads(manifest)
             link_targets = {
-                item["path"]: item["target"] for item in manifest["symlinks"]
+                item["path"]: item["target"] for item in parsed["symlinks"]
             }
             self.assertEqual("usr/bin", link_targets["rootfs/bin"])
             self.assertEqual("dash", link_targets["rootfs/usr/bin/sh"])
