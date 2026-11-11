@@ -4,6 +4,7 @@
 
     <application
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:label="RamenWine"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
