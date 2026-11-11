@@ -83,7 +83,8 @@ class RuntimePackagerTests(unittest.TestCase):
 
         wrapper = root / "rootfs/opt/ramenwine-tools/run-wine-command.sh"
         wrapper.parent.mkdir(parents=True, exist_ok=True)
-        wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        wrapper_source = Path(__file__).resolve().parents[1] / "run-wine-command.sh"
+        wrapper.write_bytes(wrapper_source.read_bytes())
         wrapper.chmod(0o755)
 
         self.write_pe32_plus_amd64(
