@@ -318,8 +318,8 @@ jobs:
 
       - name: Prepare guest rootfs output directory
         run: |
-          rm -rf build/prebuilt-runtime/glibc-proot-box64/rootfs
-          mkdir -p build/prebuilt-runtime/glibc-proot-box64
+          rm -rf build/prebuilt-runtime/rootfs-export
+          mkdir -p build/prebuilt-runtime/rootfs-export
 
       - name: Build cached Debian ARM64 guest rootfs natively
         uses: docker/build-push-action@v7
@@ -327,25 +327,18 @@ jobs:
           context: .
           file: tools/runtime-rootfs.Dockerfile
           platforms: linux/arm64
-          outputs: type=local,dest=build/prebuilt-runtime/glibc-proot-box64/rootfs
+          outputs: type=local,dest=build/prebuilt-runtime/rootfs-export
           cache-from: type=gha,scope=ramenwine-debian-arm64-rootfs
           cache-to: type=gha,scope=ramenwine-debian-arm64-rootfs,mode=max,ignore-error=true
 
-      - name: Archive Debian ARM64 guest rootfs
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/env
-          test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/box64
-          ROOTFS_DIR="$GITHUB_WORKSPACE/build/prebuilt-runtime/glibc-proot-box64/rootfs"
-          ARCHIVE="$GITHUB_WORKSPACE/build/prebuilt-runtime/ramenwine-arm64-rootfs.tar"
-          tar --numeric-owner -C "$ROOTFS_DIR" -cpf "$ARCHIVE" .
+      - name: Verify single-file rootfs export
+        run: test -s build/prebuilt-runtime/rootfs-export/ramenwine-arm64-rootfs.tar
 
       - name: Upload Debian ARM64 guest rootfs
         uses: actions/upload-artifact@v4
         with:
           name: ramenwine-arm64-rootfs
-          path: build/prebuilt-runtime/ramenwine-arm64-rootfs.tar
+          path: build/prebuilt-runtime/rootfs-export/ramenwine-arm64-rootfs.tar
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
@@ -396,7 +389,7 @@ jobs:
           set -euo pipefail
           ROOTFS="build/prebuilt-runtime/glibc-proot-box64/rootfs"
           mkdir -p "$ROOTFS"
-          tar -xpf build/prebuilt-runtime/rootfs-artifact/ramenwine-arm64-rootfs.tar -C "$ROOTFS"
+          tar --numeric-owner --xattrs --acls -xpf build/prebuilt-runtime/rootfs-artifact/ramenwine-arm64-rootfs.tar -C "$ROOTFS"
           rm -rf build/prebuilt-runtime/rootfs-artifact
           test -x "$ROOTFS/usr/bin/env"
           test -x "$ROOTFS/usr/bin/box64"
