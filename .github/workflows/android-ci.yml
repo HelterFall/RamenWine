@@ -10,9 +10,9 @@ on:
     inputs:
       build_android:
         description: "Also build the Android APK and run the full Android packaging stage."
-        required: false
+        required: true
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: ramenwine-android-ci-${{ github.ref }}
