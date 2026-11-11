@@ -84,11 +84,11 @@ The upstream root MIT license does not make every transitive native dependency M
 - No real Windows EXE has been launched by RamenWine.
 - The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
 - The generated Wawona native libraries are intentionally not committed. Android CI downloads the official v26.8.12 release APK, verifies the published asset digest, extracts the ARM64 JNI libraries and required support assets, then verifies the final APK contains the full SHA-256 inventory. No Wawona compilation or Nix setup occurs in CI. The APK shown in the 2026-11-10 device screenshots predates this packaging change and is missing the bundle; even a successful package check does not prove device-side compositor or game startup.
-- No Android game surface has been validated with a real Wine client; the new wineboot flow has not yet been exercised with an actual Wine package.
+- The Wawona display now has an explicit `weston-simple-shm` smoke action that uses PixelCopy to inspect actual Android Surface pixels. It separates compositor/presenter validation from Wine; it has not yet been run on a physical device. The wineboot flow has not yet been exercised with an actual Wine package.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - Basic Android touch-to-pointer and text-input/IME forwarding are implemented, but still need real-game validation.
-- The bundled DirectAudio output bridge is integrated into the runtime and game-session lifecycle; real-device audio playback is not yet verified.
-- Save-management, pause/resume and full child-process-tree lifecycle handling remain incomplete.
+- The bundled DirectAudio output bridge is integrated into the runtime and game-session lifecycle. Startup now requires an actual AF_UNIX connection probe; real-device audio playback is not yet verified.
+- Save-management and pause/resume remain incomplete. PRoot uses `--kill-on-exit`; the Android supervisor now also samples `/proc` descendants and applies PID/start-time-safe TERM/KILL cleanup, but this still requires physical-device verification.
 - No physical Android device has been validated by this bootstrap.
 
 ## CI execution policy
@@ -104,7 +104,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - Gradle: 9.3.1
 - Compose Compiler Gradle plugin: 2.2.10
 - Android compile/target SDK: 36
-- Minimum Android SDK: 26
+- Minimum Android SDK: 28 (required by the bundled Android AAudio relay)
 - Android NDK: 30.0.16248370
 - CMake: 3.22.1
 - Compose BOM: 2026.04.01
