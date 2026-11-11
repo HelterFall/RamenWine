@@ -113,6 +113,49 @@ class RuntimeLayoutSymlinkTest {
     }
 
     @Test
+    fun installedGuestAbsoluteWineserverLinkIsAcceptedAfterNormalization() {
+        val root = Files.createTempDirectory("ramenwine-runtime-wineserver-link").toFile()
+        try {
+            val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
+            val backendRoot = backendRoot(root, backend)
+            createGlibcContract(backendRoot)
+
+            val wineserverLink = File(backendRoot, "rootfs/usr/bin/wineserver")
+            assertTrue(wineserverLink.delete())
+            val wineserverTarget = File(
+                backendRoot,
+                "rootfs/opt/ramenwine-wine/lib/wine/wineserver"
+            )
+            wineserverTarget.parentFile?.mkdirs()
+            wineserverTarget.writeBytes(elf64(62))
+            wineserverTarget.setExecutable(true)
+
+            // RuntimePackageInstaller rewrites guest-absolute links into
+            // relative links that remain inside the extracted rootfs.
+            Files.createSymbolicLink(
+                wineserverLink.toPath(),
+                Paths.get("../../opt/ramenwine-wine/lib/wine/wineserver")
+            )
+
+            writeManifest(
+                backendRoot = backendRoot,
+                backend = backend,
+                requiredFiles = "bin/wine",
+                executableFiles = "bin/wine",
+                requiredSymlinks = ""
+            )
+
+            val result = RuntimeLayout.inspect(root)
+            assertEquals(
+                RuntimeState.FILES_PRESENT,
+                result.backends.first { it.backend == backend }.state
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun symlinkToRuntimeCreatedMountPathIsAccepted() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
         try {
@@ -190,7 +233,8 @@ class RuntimeLayoutSymlinkTest {
             "host/bin/directaudio-relay" to 183,
             "rootfs/usr/bin/env" to 183,
             "rootfs/usr/bin/box64" to 183,
-            "rootfs/usr/bin/wine" to 62
+            "rootfs/usr/bin/wine" to 62,
+            "rootfs/usr/bin/wineserver" to 62
         ).forEach { (relative, machine) ->
             val executable = File(backendRoot, relative)
             executable.parentFile?.mkdirs()
