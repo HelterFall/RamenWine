@@ -337,9 +337,9 @@ jobs:
           set -euo pipefail
           test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/env
           test -x build/prebuilt-runtime/glibc-proot-box64/rootfs/usr/bin/box64
-          tar --numeric-owner \
-            -C build/prebuilt-runtime/glibc-proot-box64/rootfs \
-            -cpf build/prebuilt-runtime/ramenwine-arm64-rootfs.tar .
+          ROOTFS_DIR="$GITHUB_WORKSPACE/build/prebuilt-runtime/glibc-proot-box64/rootfs"
+          ARCHIVE="$GITHUB_WORKSPACE/build/prebuilt-runtime/ramenwine-arm64-rootfs.tar"
+          tar --numeric-owner -C "$ROOTFS_DIR" -cpf "$ARCHIVE" .
 
       - name: Upload Debian ARM64 guest rootfs
         uses: actions/upload-artifact@v4
