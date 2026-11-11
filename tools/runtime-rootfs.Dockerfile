@@ -101,6 +101,10 @@ RUN set -eux; \
 # slow; exporting this single tarball keeps file ownership, symlinks and modes.
 RUN set -eux; \
     tar --numeric-owner --xattrs --acls \
+      --exclude=./dev \
+      --exclude=./proc \
+      --exclude=./sys \
+      --exclude=./run \
       --exclude=./ramenwine-arm64-rootfs.tar \
       -C / -cpf /ramenwine-arm64-rootfs.tar .
 

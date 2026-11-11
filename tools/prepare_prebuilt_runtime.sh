@@ -89,17 +89,23 @@ done < <(find "$PROOT_DIR" -type f \( -name loader -o -name loader-m32 \) -print
 # Use the Buildx-exported Debian ARM64 guest rootfs. CI builds this from
 # runtime-rootfs.Dockerfile and caches the expensive apt layer between runs.
 # The fallback keeps this preparation script usable outside GitHub Actions.
+ROOTFS_EXPORT="${RUNTIME_ROOT}/rootfs-export"
 if [[ ! -x "$ROOTFS/usr/bin/env" || ! -x "$ROOTFS/usr/bin/box64" ]] || \
    { [[ ! -e "$ROOTFS/lib64/ld-linux-x86-64.so.2" ]] && \
      [[ ! -e "$ROOTFS/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2" ]]; }; then
-  rm -rf "$ROOTFS"
-  mkdir -p "$ROOTFS"
+  rm -rf "$ROOTFS" "$ROOTFS_EXPORT"
+  mkdir -p "$ROOTFS" "$ROOTFS_EXPORT"
   echo "Building Debian ARM64 guest rootfs from the pinned package recipe"
   docker buildx build \
     --platform linux/arm64 \
     --file "$ROOT_DIR/tools/runtime-rootfs.Dockerfile" \
-    --output "type=local,dest=$ROOTFS" \
+    --output "type=local,dest=$ROOTFS_EXPORT" \
     "$ROOT_DIR"
+  ROOTFS_ARCHIVE="$ROOTFS_EXPORT/ramenwine-arm64-rootfs.tar"
+  [[ -s "$ROOTFS_ARCHIVE" ]] || fail "Docker did not export the Debian rootfs archive."
+  tar --numeric-owner --xattrs --acls -xpf "$ROOTFS_ARCHIVE" -C "$ROOTFS"
+  mkdir -p "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys" "$ROOTFS/run"
+  rm -rf "$ROOTFS_EXPORT"
 else
   echo "Using prepared Debian ARM64 guest rootfs"
 fi
