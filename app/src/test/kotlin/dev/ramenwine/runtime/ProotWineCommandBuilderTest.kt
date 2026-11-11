@@ -33,9 +33,10 @@ class ProotWineCommandBuilderTest {
             assertEquals(fixture.nativeProot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/env"))
-            assertTrue(command.arguments.contains("/usr/bin/box64"))
-            assertTrue(command.arguments.contains("/usr/bin/wine"))
-            assertTrue(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("/bin/sh"))
+            assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
+            assertTrue(command.arguments.contains("--link2symlink"))
+            assertFalse(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(
@@ -85,7 +86,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
             assertTrue(
                 command.arguments.indexOf("/usr/bin/env") <
-                    command.arguments.indexOf("/usr/bin/box64")
+                    command.arguments.indexOf("/bin/sh")
             )
             assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
@@ -97,6 +98,14 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.unsetEnvironment.contains("WINEDLLPATH"))
             assertTrue(command.unsetEnvironment.contains("BANNER_AUDIO_DIRECT_RELAY"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
+            assertEquals(
+                listOf(
+                    "/bin/sh",
+                    "/opt/ramenwine-tools/run-wine-command.sh",
+                    "/games/" + fixture.gameId + "/game.exe"
+                ),
+                command.arguments.takeLast(3)
+            )
         } finally {
             fixture.cleanup()
         }
@@ -199,6 +208,8 @@ class ProotWineCommandBuilderTest {
                 ProotWineCommandBuilder.build(fixture.request())
             )
             assertEquals("reg.exe", command.guestExecutablePath)
+            assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
+            assertFalse(command.arguments.contains("--kill-on-exit"))
             assertEquals("directaudio", command.arguments[command.arguments.lastIndex - 1])
             assertTrue(command.arguments.contains("HKCU\\Software\\Wine\\Drivers"))
             assertTrue(command.arguments.contains("/v"))
@@ -224,11 +235,15 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals("/opt/ramenwine-tests", smokeCommand.guestWorkingDirectory)
             assertTrue(smokeCommand.arguments.contains("--pwd=/opt/ramenwine-tests"))
-            assertEquals("/usr/bin/box64", smokeCommand.arguments[smokeCommand.arguments.size - 3])
-            assertEquals("/usr/bin/wine", smokeCommand.arguments[smokeCommand.arguments.size - 2])
+            assertTrue(smokeCommand.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
+            assertFalse(smokeCommand.arguments.contains("--kill-on-exit"))
             assertEquals(
-                "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe",
-                smokeCommand.arguments.last()
+                listOf(
+                    "/bin/sh",
+                    "/opt/ramenwine-tools/run-wine-command.sh",
+                    "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+                ),
+                smokeCommand.arguments.takeLast(3)
             )
             assertEquals(gameCommand.hostPrefixDirectory, smokeCommand.hostPrefixDirectory)
             assertEquals(
@@ -272,8 +287,11 @@ class ProotWineCommandBuilderTest {
                 command.guestExecutablePath
             )
             assertEquals("-i", command.arguments.last())
-            assertEquals("/usr/bin/box64", command.arguments[command.arguments.size - 4])
-            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 3])
+            assertEquals("/bin/sh", command.arguments[command.arguments.size - 4])
+            assertEquals(
+                "/opt/ramenwine-tools/run-wine-command.sh",
+                command.arguments[command.arguments.size - 3]
+            )
         } finally {
             fixture.cleanup()
         }
@@ -319,7 +337,8 @@ class ProotWineCommandBuilderTest {
             val command = ProotWineCommandBuilder.build(
                 fixture.request().copy(game = x86Game)
             )
-            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+            assertEquals("/opt/ramenwine-tools/run-wine-command.sh", command.arguments[command.arguments.size - 2])
+            assertFalse(command.arguments.contains("--kill-on-exit"))
         } finally {
             fixture.cleanup()
         }
@@ -484,6 +503,9 @@ class ProotWineCommandBuilderTest {
         val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val wineserver = executable(rootfs, "usr/bin/wineserver")
+        val shell = executable(rootfs, "bin/sh")
+        val wineCommandWrapper = executable(rootfs, "opt/ramenwine-tools/run-wine-command.sh")
         val touch = executable(rootfs, "usr/bin/touch")
         val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
         val prefixDirectory = File(filesDirectory, "prefixes/" + gameId)
