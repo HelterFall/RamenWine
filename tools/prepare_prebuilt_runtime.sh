@@ -243,8 +243,10 @@ readelf -h "$WINE_SERVER_GUEST" | grep -q 'Advanced Micro Devices X86-64' || \
 # Some upstream archives preserve the ELF payload but omit its executable bit.
 # wineserver is a program entry point, so restore the expected mode explicitly.
 chmod 0755 "$WINE_SERVER_GUEST"
-test -x "$ROOTFS/usr/bin/wineserver" || \
-  fail "Guest wineserver link is not executable (target: $WINE_SERVER_RELATIVE)."
+# The /usr/bin/wineserver link is guest-absolute, so the CI host must
+# validate its target under ROOTFS rather than following it from the host's /.
+test -x "$WINE_SERVER_GUEST" || \
+  fail "Copied guest wineserver target is not executable: $WINE_SERVER_RELATIVE."
 
 # All Wine commands use this wrapper. After the Windows command exits, it asks
 # wineserver to shut down and waits until the server releases its prefix lock.
