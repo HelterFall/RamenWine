@@ -79,6 +79,7 @@ RUN set -eux; \
     locale -a | grep -qi 'zh_CN'; \
     test -d /usr/share/fonts/opentype/noto; \
     test -x /usr/bin/env; \
+    test -x /usr/bin/sh; \
     test -x /usr/bin/box64; \
     test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; \
     apt-get clean; \
