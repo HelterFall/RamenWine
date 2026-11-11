@@ -111,7 +111,7 @@ class RuntimePackageInstaller(private val context: Context) {
                         val bytes = ByteArrayOutputStream()
                         copyManifest(zip, bytes)
                         manifest = try {
-                            RuntimePackageManifestParser.parse(bytes.toString(Charsets.UTF_8))
+                            RuntimePackageManifestParser.parse(String(bytes.toByteArray(), Charsets.UTF_8))
                         } catch (error: Exception) {
                             throw IOException("Bundled runtime manifest is invalid.", error)
                         }
