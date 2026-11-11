@@ -51,13 +51,27 @@ class WinePrefixRecoveryPolicyTest {
     }
 
     @Test
+    fun updatesAFirstInitializationThatLeftOnlyAnUpdateTimestamp() {
+        assertEquals(
+            WinePrefixRecoveryAction.UPDATE,
+            WinePrefixRecoveryPolicy.decide(
+                populatedRegistryFiles = 0,
+                markerExists = false,
+                markerMatches = false,
+                prefixHasData = true
+            )
+        )
+    }
+
+    @Test
     fun initializesOnlyAnEmptyPrefixWithoutACompletionMarker() {
         assertEquals(
             WinePrefixRecoveryAction.INITIALIZE,
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 0,
                 markerExists = false,
-                markerMatches = false
+                markerMatches = false,
+                prefixHasData = false
             )
         )
     }
@@ -67,7 +81,8 @@ class WinePrefixRecoveryPolicyTest {
         WinePrefixRecoveryPolicy.decide(
             populatedRegistryFiles = 4,
             markerExists = true,
-            markerMatches = false
+            markerMatches = false,
+            prefixHasData = true
         )
     }
 }
