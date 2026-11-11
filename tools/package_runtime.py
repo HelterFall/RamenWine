@@ -327,7 +327,9 @@ def validate_backend_payload(
         ("host/bin/proot", 183, "AArch64 Android-host PRoot"),
         ("rootfs/usr/bin/env", 183, "AArch64 guest env"),
         ("rootfs/usr/bin/box64", 183, "AArch64 Box64"),
+        ("rootfs/bin/sh", 183, "AArch64 guest shell"),
         ("rootfs/usr/bin/wine", 62, "x86-64 Wine loader for Box64"),
+        ("rootfs/usr/bin/wineserver", 62, "x86-64 Wine server"),
     )
     for path, expected_machine, label in required_executables:
         item = resolve_manifest_file(path, files_by_path, links_by_path)
@@ -341,6 +343,16 @@ def validate_backend_payload(
                 f"{label} must be a 64-bit little-endian ELF with machine "
                 f"{expected_machine}; got {identity!r} at {path}"
             )
+
+    wine_wrapper_path = "rootfs/opt/ramenwine-tools/run-wine-command.sh"
+    wine_wrapper = resolve_manifest_file(
+        wine_wrapper_path, files_by_path, links_by_path
+    )
+    if wine_wrapper is None or not wine_wrapper.executable:
+        raise ValueError(
+            "runtime is missing executable Wine shutdown wrapper "
+            "(run-wine-command.sh)"
+        )
 
     relay = resolve_manifest_file(
         "host/bin/directaudio-relay", files_by_path, links_by_path
