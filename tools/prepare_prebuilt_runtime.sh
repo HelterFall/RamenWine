@@ -256,7 +256,8 @@ mkdir -p "$(dirname "$WINE_COMMAND_WRAPPER")"
 # Keep one canonical wrapper source so the runtime and its unit test cannot drift.
 cp "$ROOT_DIR/tools/run-wine-command.sh" "$WINE_COMMAND_WRAPPER"
 chmod 0755 "$WINE_COMMAND_WRAPPER"
-test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing /bin/sh."
+test -x "$ROOTFS/usr/bin/sh" || fail "Debian rootfs is missing /usr/bin/sh."
+test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing the /bin/sh compatibility link."
 test -x "$WINE_COMMAND_WRAPPER" || fail "Wine shutdown wrapper is not executable."
 
 # Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
