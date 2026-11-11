@@ -14,6 +14,8 @@ data class WaylandDisplayEndpoint(
 data class ProotWineLaunchRequest(
     val filesDirectory: File,
     val cacheDirectory: File,
+    /** APK-extracted Android-host binaries; app-data files are not execve()-eligible on API 29+. */
+    val nativeLibraryDirectory: File,
     val game: ImportedGame,
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
@@ -103,14 +105,21 @@ object ProotWineCommandBuilder {
             ?.takeIf { it.isNotEmpty() && it.length <= 128 }
             ?: throw IOException("Runtime version is missing from runtime.properties.")
 
-        val proot = executableFile(backendRoot, "host/bin/proot")
+        // Keep the runtime package's copies as integrity-checked payload files,
+        // but execute Android-host ELF programs only from the APK-extracted native
+        // library directory. Android 10+ denies execve() from writable filesDir.
+        requireRuntimeFile(backendRoot, "host/bin/proot")
+        requireRuntimeFile(backendRoot, "host/bin/directaudio-relay")
+        val nativeLibraryDirectory = request.nativeLibraryDirectory.canonicalFile
+        val proot = androidHostExecutable(nativeLibraryDirectory, "libproot.so")
+        androidHostExecutable(nativeLibraryDirectory, "libdirectaudio-relay.so")
+
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/env")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
-        executableFile(backendRoot, "host/bin/directaudio-relay")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
@@ -250,7 +259,10 @@ object ProotWineCommandBuilder {
         }
 
         val environment = linkedMapOf(
-            "LD_LIBRARY_PATH" to hostLibraryDirectory.canonicalPath,
+            "LD_LIBRARY_PATH" to listOf(
+                nativeLibraryDirectory.canonicalPath,
+                hostLibraryDirectory.canonicalPath
+            ).joinToString(File.pathSeparator),
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
         )
 
@@ -385,6 +397,19 @@ object ProotWineCommandBuilder {
         if (!canonicalDirectory.isDirectory) {
             throw IOException("Guest mount target is not a directory: " + guestAbsolutePath)
         }
+    }
+
+    private fun androidHostExecutable(nativeLibraryDirectory: File, fileName: String): File {
+        val root = nativeLibraryDirectory.canonicalFile
+        requireDirectory(root, "Android native library")
+        val executable = File(root, fileName).canonicalFile
+        requireContained(root, executable, "Android host executable")
+        if (!executable.isFile || !executable.canExecute()) {
+            throw IOException(
+                "Required Android native executable is missing or not executable: " + fileName
+            )
+        }
+        return executable
     }
 
     private fun executableFile(root: File, relativePath: String): File {
