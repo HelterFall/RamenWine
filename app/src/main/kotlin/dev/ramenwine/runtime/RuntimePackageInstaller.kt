@@ -26,6 +26,19 @@ data class RuntimeInstallResult(
     val installedBytes: Long
 )
 
+/** Decides whether the packaged backend must replace the installed one. */
+internal object BundledRuntimeUpdatePolicy {
+    fun shouldInstall(
+        installedState: RuntimeState?,
+        installedVersion: String?,
+        bundledVersion: String
+    ): Boolean {
+        require(bundledVersion.isNotBlank()) { "Bundled runtime version is missing." }
+        return installedState != RuntimeState.FILES_PRESENT ||
+            installedVersion != bundledVersion
+    }
+}
+
 /**
  * Installs an offline runtime ZIP package.
  *
@@ -48,6 +61,71 @@ class RuntimePackageInstaller(private val context: Context) {
             context.assets.open(assetPath)
         } catch (error: IOException) {
             throw IOException("Bundled runtime asset is missing: " + assetPath, error)
+        }
+    }
+
+    /**
+     * Installs the bundled runtime when it is missing, incomplete, or older
+     * than the runtime carried by this APK. Per-game prefixes and imported
+     * game directories live outside the replaced backend directory.
+     *
+     * Returns null when the installed runtime already matches the APK.
+     */
+    suspend fun installBundledIfOutdated(
+        assetPath: String = "runtime/ramenwine-runtime.zip"
+    ): RuntimeInstallResult? {
+        val bundledVersion = readBundledRuntimeVersion(assetPath)
+        val installed = RuntimeLayout.inspect(context.filesDir)
+            .backends
+            .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+
+        if (!BundledRuntimeUpdatePolicy.shouldInstall(
+                installedState = installed?.state,
+                installedVersion = installed?.runtimeVersion,
+                bundledVersion = bundledVersion
+            )
+        ) {
+            return null
+        }
+
+        return installBundled(assetPath)
+    }
+
+    private suspend fun readBundledRuntimeVersion(assetPath: String): String {
+        val source = try {
+            context.assets.open(assetPath)
+        } catch (error: IOException) {
+            throw IOException("Bundled runtime asset is missing: " + assetPath, error)
+        }
+
+        source.use { rawInput ->
+            ZipInputStream(BufferedInputStream(rawInput)).use { zip ->
+                var manifest: RuntimePackageManifest? = null
+                while (true) {
+                    coroutineContext.ensureActive()
+                    val entry = zip.nextEntry ?: break
+                    if (entry.name == MANIFEST_ENTRY) {
+                        if (manifest != null) {
+                            throw IOException("Bundled runtime contains duplicate manifests.")
+                        }
+                        val bytes = ByteArrayOutputStream()
+                        copyManifest(zip, bytes)
+                        manifest = try {
+                            RuntimePackageManifestParser.parse(bytes.toString(Charsets.UTF_8))
+                        } catch (error: Exception) {
+                            throw IOException("Bundled runtime manifest is invalid.", error)
+                        }
+                        break
+                    }
+                }
+
+                val parsed = manifest
+                    ?: throw IOException("Bundled runtime manifest is missing.")
+                if (parsed.backend != RuntimeBackendId.GLIBC_PROOT_BOX64) {
+                    throw IOException("Bundled runtime does not contain the supported PRoot backend.")
+                }
+                return parsed.runtimeVersion
+            }
         }
     }
 
