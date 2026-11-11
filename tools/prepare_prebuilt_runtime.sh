@@ -136,18 +136,29 @@ mapfile -t WINE_DISTRIBUTION_ROOTS < <(
 WINE_ROOT="${WINE_DISTRIBUTION_ROOTS[0]}"
 echo "Using Wine distribution root: $WINE_ROOT"
 
+# Select the public launcher under bin/, never an internal implementation
+# such as lib/wine/wine64. LUG archives expose wine64/wine from bin/.
 WINE_ELF=""
-while IFS= read -r candidate; do
-  [[ -n "$candidate" ]] || continue
-  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
-  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
-  if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
-    WINE_ELF="$candidate"
-    break
-  fi
-done < <(find "$WINE_ROOT" \( -type f -o -type l \) \( -name wine64 -o -name wine \) -print)
+for launcher_name in wine64 wine; do
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+    [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+    case "$resolved_candidate" in
+      "$WINE_ROOT"/*) ;;
+      *) continue ;;
+    esac
+    if readelf -h "$resolved_candidate" 2>/dev/null | \
+        grep -q 'Advanced Micro Devices X86-64'; then
+      WINE_ELF="$candidate"
+      break
+    fi
+  done < <(find "$WINE_ROOT" \( -type f -o -type l \) \
+    -path "*/bin/$launcher_name" -print)
+  [[ -n "$WINE_ELF" ]] && break
+done
 [[ -n "$WINE_ELF" ]] || \
-  fail "Could not find an x86-64 ELF Wine launcher (expected bin/wine64)."
+  fail "Could not find an x86-64 ELF Wine launcher in bin/ (expected bin/wine64)."
 
 # The final LUG binary must use the same mmdevapi system-thread table as
 # the DirectAudio driver built in the audio job. Upstream DirectAudio uses
