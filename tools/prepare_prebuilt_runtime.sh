@@ -393,7 +393,7 @@ cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramen
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v2" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"
