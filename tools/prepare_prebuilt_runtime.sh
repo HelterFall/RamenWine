@@ -274,7 +274,7 @@ data = pathlib.Path(sys.argv[1]).read_bytes()
 if len(data) < 0x9A or data[:2] != b"MZ":
     raise SystemExit("Win32 GDI smoke executable is not a DOS/PE image")
 offset = struct.unpack_from("<I", data, 0x3C)[0]
-if offset + 26 > len(data) or data[offset:offset + 4] != b"PE\\0\\0":
+if offset + 26 > len(data) or data[offset:offset + 4] != b"PE\0\0":
     raise SystemExit("Win32 GDI smoke executable has no PE header")
 machine, = struct.unpack_from("<H", data, offset + 4)
 subsystem, = struct.unpack_from("<H", data, offset + 24)
