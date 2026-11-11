@@ -106,6 +106,31 @@ class GameSessionCoordinator(
                 ProotWineCommandBuilder.build(request)
             }
 
+            val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
+            val prefixProbeFile = File(
+                command.hostPrefixDirectory,
+                ProotWineCommandBuilder.PREFIX_WRITE_PROBE_FILE_NAME
+            )
+            prefixProbeFile.delete()
+            try {
+                val probeExitCode = processSupervisor.runToCompletion(
+                    prefixProbe,
+                    onOutput,
+                    timeoutMillis = PREFIX_PROBE_TIMEOUT_MILLIS
+                )
+                if (probeExitCode != 0 || !prefixProbeFile.isFile) {
+                    throw IOException(
+                        "PRoot could not write through the guest WINEPREFIX bind " +
+                            "(" + command.guestEnvironment["WINEPREFIX"] + " -> " +
+                            command.hostPrefixDirectory.absolutePath + "); probe exit code: " +
+                            probeExitCode + "."
+                    )
+                }
+                onOutput("RamenWine: WINEPREFIX bind is visible and writable from the guest.")
+            } finally {
+                prefixProbeFile.delete()
+            }
+
             WinePrefixManager(processSupervisor).ensureInitialized(
                 gameCommand = command,
                 onOutput = onOutput
@@ -189,6 +214,7 @@ class GameSessionCoordinator(
     }
 
     private companion object {
+        const val PREFIX_PROBE_TIMEOUT_MILLIS = 15_000L
         const val AUDIO_DRIVER_SETUP_TIMEOUT_MILLIS = 30_000L
     }
 
