@@ -28,10 +28,14 @@ static LRESULT CALLBACK smoke_window_proc(HWND window, UINT message, WPARAM wpar
 
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, RGB(255, 255, 255));
-        TextOutA(dc, 24, 24, "RAMENWINE - WIN32 GDI", 22);
-        TextOutA(dc, 24, 192, "If you can read this, PRoot + Box64 + Wine", 43);
-        TextOutA(dc, 24, 216, "created a real Win32 window on the Wayland surface.", 52);
-        TextOutA(dc, 24, 272, "Close this window or use Stop in RamenWine.", 44);
+        const char *line1 = "RAMENWINE - WIN32 GDI";
+        const char *line2 = "If you can read this, PRoot + Box64 + Wine";
+        const char *line3 = "created a real Win32 window on the Wayland surface.";
+        const char *line4 = "Close this window or use Stop in RamenWine.";
+        TextOutA(dc, 24, 24, line1, lstrlenA(line1));
+        TextOutA(dc, 24, 192, line2, lstrlenA(line2));
+        TextOutA(dc, 24, 216, line3, lstrlenA(line3));
+        TextOutA(dc, 24, 272, line4, lstrlenA(line4));
 
         EndPaint(window, &paint);
         return 0;
@@ -49,6 +53,8 @@ static LRESULT CALLBACK smoke_window_proc(HWND window, UINT message, WPARAM wpar
 }
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, int show_command) {
+    (void)previous;
+    (void)command_line;
     WNDCLASSEXA window_class = { 0 };
     window_class.cbSize = sizeof(window_class);
     window_class.style = CS_HREDRAW | CS_VREDRAW;
