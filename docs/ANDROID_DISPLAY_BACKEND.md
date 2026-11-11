@@ -103,6 +103,12 @@ The DisplayBackend API should describe capabilities and lifecycle, not expose up
 7. Launch an original Wayland client smoke program, then a Wine Win32 GDI test program through the existing PRoot builder.
 8. Verify IME, touch, mouse, hardware keyboard, orientation, focus, exit and complete cleanup on a physical ARM64 device.
 
+## Real Android Surface smoke test
+
+RamenWine exposes a manual **Проверить реальный вывод Wayland** action after the Wawona Surface attaches. It starts the pinned upstream `weston-simple-shm` Wayland client, which submits a real shared-memory buffer through the compositor. Android `PixelCopy` then reads pixels from the actual `SurfaceView`; the check passes only when a sufficient number of sampled pixels are non-black. A native client-start return value, compositor-ready flag, or socket file alone is not considered success.
+
+This gate isolates the compositor-to-Android-Surface path from Wine. A successful result proves that a Wayland SHM client produced visible pixels through Wawona's Android presentation surface. It does not yet prove Wine, Box64, PRoot, or a Windows EXE can render.
+
 ## Acceptance gates
 
 - A Wayland client can connect to the socket while RamenWine owns the Android Surface.
