@@ -3,6 +3,7 @@ package dev.ramenwine.runtime
 import android.content.Context
 import android.os.Looper
 import android.os.Process
+import java.io.File
 import java.io.IOException
 import dev.ramenwine.display.DisplayBackend
 import dev.ramenwine.display.DisplaySession
@@ -85,7 +86,7 @@ class GameSessionCoordinator(
         launchInProgress = true
         try {
             val relay = withContext(Dispatchers.IO) {
-                DirectAudioRelaySupervisor(appContext.filesDir).start(
+                DirectAudioRelaySupervisor(File(appContext.applicationInfo.nativeLibraryDir)).start(
                     display.endpoint.hostRuntimeDirectory
                 )
             }
@@ -95,6 +96,7 @@ class GameSessionCoordinator(
             val request = ProotWineLaunchRequest(
                 filesDirectory = appContext.filesDir,
                 cacheDirectory = appContext.cacheDir,
+                nativeLibraryDirectory = File(appContext.applicationInfo.nativeLibraryDir),
                 game = game,
                 display = display.endpoint,
                 hostUid = Process.myUid(),
