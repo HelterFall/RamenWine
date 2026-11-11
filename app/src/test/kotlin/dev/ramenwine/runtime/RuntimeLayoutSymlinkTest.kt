@@ -232,6 +232,7 @@ class RuntimeLayoutSymlinkTest {
             "host/bin/proot" to 183,
             "host/bin/directaudio-relay" to 183,
             "rootfs/usr/bin/env" to 183,
+            "rootfs/usr/bin/dash" to 183,
             "rootfs/usr/bin/box64" to 183,
             "rootfs/usr/bin/wine" to 62,
             "rootfs/usr/bin/wineserver" to 62
@@ -241,6 +242,15 @@ class RuntimeLayoutSymlinkTest {
             executable.writeBytes(elf64(machine))
             executable.setExecutable(true)
         }
+
+        Files.createSymbolicLink(
+            File(backendRoot, "rootfs/usr/bin/sh").toPath(),
+            Paths.get("dash")
+        )
+        Files.createSymbolicLink(
+            File(backendRoot, "rootfs/bin").toPath(),
+            Paths.get("usr/bin")
+        )
 
         val legacyExecutable = File(backendRoot, "bin/wine")
         legacyExecutable.parentFile?.mkdirs()
