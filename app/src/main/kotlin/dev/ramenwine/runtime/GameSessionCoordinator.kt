@@ -175,9 +175,42 @@ class GameSessionCoordinator(
                 processSession = process
             }
 
-            GameSession(game, process, launchDiagnosticWindow) {
-                closeDisplayIfCurrent(display)
-            }
+            GameSession(
+                game = game,
+                process = process,
+                isDiagnostic = launchDiagnosticWindow,
+                requestWineServerShutdown = {
+                    val killCommand = ProotWineCommandBuilder.buildWineServerControlCommand(
+                        gameCommand = command,
+                        waitForExit = false
+                    )
+                    val killExitCode = processSupervisor.runToCompletion(
+                        command = killCommand,
+                        onOutput = onOutput,
+                        timeoutMillis = WINE_SERVER_STOP_TIMEOUT_MILLIS
+                    )
+                    if (killExitCode != 0) {
+                        onOutput("RamenWine: wineserver -k returned $killExitCode; checking shutdown state.")
+                    }
+
+                    val waitCommand = ProotWineCommandBuilder.buildWineServerControlCommand(
+                        gameCommand = command,
+                        waitForExit = true
+                    )
+                    val waitExitCode = processSupervisor.runToCompletion(
+                        command = waitCommand,
+                        onOutput = onOutput,
+                        timeoutMillis = WINE_SERVER_STOP_TIMEOUT_MILLIS
+                    )
+                    if (waitExitCode != 0) {
+                        throw IOException(
+                            "wineserver did not release the Wine prefix lock " +
+                                "(exit code $waitExitCode)."
+                        )
+                    }
+                },
+                releaseDisplay = { closeDisplayIfCurrent(display) }
+            )
         } catch (error: Exception) {
             closeDisplayIfCurrent(display)
             throw error
@@ -216,6 +249,7 @@ class GameSessionCoordinator(
     private companion object {
         const val PREFIX_PROBE_TIMEOUT_MILLIS = 15_000L
         const val AUDIO_DRIVER_SETUP_TIMEOUT_MILLIS = 30_000L
+        const val WINE_SERVER_STOP_TIMEOUT_MILLIS = 30_000L
     }
 
     private fun checkMainThread() {
@@ -230,13 +264,27 @@ class GameSession internal constructor(
     val game: ImportedGame,
     private val process: ProotWineProcessSession,
     val isDiagnostic: Boolean,
+    private val requestWineServerShutdown: suspend () -> Unit,
     private val releaseDisplay: () -> Unit
 ) {
     val isRunning: Boolean
         get() = process.isAlive()
 
     suspend fun stop(): Int {
-        return try {
+        var gracefulShutdownError: Exception? = null
+        if (process.isAlive()) {
+            try {
+                // Stop guest Windows processes through wineserver first. The
+                // active Wine wrapper then exits after its registry flush.
+                requestWineServerShutdown()
+            } catch (error: Exception) {
+                gracefulShutdownError = error
+            }
+        }
+
+        val exitCode = try {
+            // This is the fallback if the wineserver protocol could not stop
+            // the game cleanly or the host PRoot process remained alive.
             process.stop()
         } finally {
             // Keep the compositor and Android Surface alive if PRoot resisted
@@ -248,5 +296,13 @@ class GameSession internal constructor(
                 }
             }
         }
+
+        gracefulShutdownError?.let { error ->
+            throw IOException(
+                "Wine could not shut down cleanly; the app used its process-stop fallback.",
+                error
+            )
+        }
+        return exitCode
     }
 }
