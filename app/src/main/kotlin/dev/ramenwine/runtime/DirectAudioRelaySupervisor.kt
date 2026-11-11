@@ -123,8 +123,7 @@ internal class DirectAudioRelaySupervisor(
                 LocalSocketAddress(
                     socket.absolutePath,
                     LocalSocketAddress.Namespace.FILESYSTEM
-                ),
-                SOCKET_PROBE_TIMEOUT_MILLIS
+                )
             )
             true
         } catch (_: Exception) {
@@ -140,7 +139,6 @@ internal class DirectAudioRelaySupervisor(
         const val MAX_UNIX_SOCKET_PATH_BYTES = 108
         const val SOCKET_READY_TIMEOUT_NANOS = 2_000_000_000L
         const val SOCKET_POLL_INTERVAL_MILLIS = 20L
-        const val SOCKET_PROBE_TIMEOUT_MILLIS = 200
     }
 }
 
