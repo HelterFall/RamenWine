@@ -122,6 +122,9 @@ object ProotWineCommandBuilder {
         executableFile(rootfs, "usr/bin/touch")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
+        executableFile(rootfs, "usr/bin/wineserver")
+        executableFile(rootfs, "bin/sh")
+        executableFile(rootfs, "opt/ramenwine-tools/run-wine-command.sh")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
@@ -230,7 +233,8 @@ object ProotWineCommandBuilder {
         )
 
         val arguments = buildList {
-            add("--kill-on-exit")
+            // Wine starts a detached wineserver and services.exe. The guest
+            // wrapper below shuts them down cleanly before PRoot exits.
             add("--link2symlink")
             add("--sysvipc")
             add("--rootfs=" + rootfs.absolutePath)
@@ -255,8 +259,8 @@ object ProotWineCommandBuilder {
             guestEnvironment.forEach { (name, value) ->
                 add("$name=$value")
             }
-            add("/usr/bin/box64")
-            add("/usr/bin/wine")
+            add("/bin/sh")
+            add("/opt/ramenwine-tools/run-wine-command.sh")
             add(guestExecutable)
         }
 
@@ -322,8 +326,8 @@ object ProotWineCommandBuilder {
         }
 
         val arguments = gameCommand.arguments.dropLast(3) + listOf(
-            "/usr/bin/box64",
-            "/usr/bin/wine",
+            "/bin/sh",
+            "/opt/ramenwine-tools/run-wine-command.sh",
             "reg.exe",
             "add",
             "HKCU\\Software\\Wine\\Drivers",
@@ -357,8 +361,8 @@ object ProotWineCommandBuilder {
                     argument
                 }
             } + listOf(
-                "/usr/bin/box64",
-                "/usr/bin/wine",
+                "/bin/sh",
+                "/opt/ramenwine-tools/run-wine-command.sh",
                 guestExecutable
             )
 
@@ -391,11 +395,11 @@ object ProotWineCommandBuilder {
             "Wine prefix initializer wineboot.exe is missing from the runtime package."
         )
 
-        // build() ends in /usr/bin/box64 /usr/bin/wine <game-exe>.
-        // Replace only that final guest command and retain all validated binds.
+        // wineboot starts wineserver and services.exe. Run it through the
+        // clean-shutdown wrapper so registry hives are flushed before PRoot exits.
         val arguments = gameCommand.arguments.dropLast(3) + listOf(
-            "/usr/bin/box64",
-            "/usr/bin/wine",
+            "/bin/sh",
+            "/opt/ramenwine-tools/run-wine-command.sh",
             "/" + selected,
             if (updateExistingPrefix) "-u" else "-i"
         )
