@@ -362,6 +362,19 @@ class RuntimePackagerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 package_runtime.scan_runtime(root, 1024 * 1024)
 
+    def test_scans_file_with_comma_in_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "rootfs/usr/share/i18n/charmaps/ISO_8859-1,GL.gz"
+            file_path = root / relative
+            file_path.parent.mkdir(parents=True)
+            file_path.write_bytes(b"locale charmap")
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+
+            self.assertEqual([relative], [item.relative_path for item in files])
+            self.assertEqual([], symlinks)
+
     def test_rejects_path_traversal(self) -> None:
         with self.assertRaises(ValueError):
             package_runtime.safe_relative_path("../outside")

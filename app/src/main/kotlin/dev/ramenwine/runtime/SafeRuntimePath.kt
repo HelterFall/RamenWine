@@ -10,7 +10,6 @@ object SafeRuntimePath {
             path.startsWith('\\') ||
             path.contains('\\') ||
             path.contains('\u0000') ||
-            path.contains(',')
         ) {
             return null
         }

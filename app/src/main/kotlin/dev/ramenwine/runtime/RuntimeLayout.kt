@@ -3,7 +3,9 @@ package dev.ramenwine.runtime
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.util.Base64
 import java.util.Properties
+import org.json.JSONArray
 
 enum class RuntimeState {
     NOT_INSTALLED,
@@ -118,9 +120,25 @@ object RuntimeLayout {
             return incomplete(backend, "This runtime package is not built for $REQUIRED_HOST_ABI.")
         }
 
-        val requiredFiles = parsePathList(properties.getProperty("requiredFiles"))
-        val executableFiles = parsePathList(properties.getProperty("executableFiles"))
-        val requiredSymlinks = parsePathList(properties.getProperty("requiredSymlinks"))
+        val pathListFormat = properties.getProperty("pathListFormat")
+        val pathLists = when (pathListFormat) {
+            null -> Triple(
+                parseLegacyPathList(properties.getProperty("requiredFiles")),
+                parseLegacyPathList(properties.getProperty("executableFiles")),
+                parseLegacyPathList(properties.getProperty("requiredSymlinks"))
+            )
+            PATH_LIST_FORMAT -> {
+                val required = parseEncodedPathList(properties.getProperty("requiredFilesBase64"))
+                val executable = parseEncodedPathList(properties.getProperty("executableFilesBase64"))
+                val symlinks = parseEncodedPathList(properties.getProperty("requiredSymlinksBase64"))
+                if (required == null || executable == null || symlinks == null) {
+                    return incomplete(backend, "The encoded runtime path lists are invalid.")
+                }
+                Triple(required, executable, symlinks)
+            }
+            else -> return incomplete(backend, "Unsupported runtime path-list format.")
+        }
+        val (requiredFiles, executableFiles, requiredSymlinks) = pathLists
 
         if (requiredFiles.isEmpty()) {
             return incomplete(backend, "The manifest has no requiredFiles entries.")
@@ -255,11 +273,27 @@ object RuntimeLayout {
         }.getOrDefault(false)
     }
 
-    private fun parsePathList(value: String?): List<String> {
+    private fun parseLegacyPathList(value: String?): List<String> {
         return value.orEmpty()
             .split(',')
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+    }
+
+    private fun parseEncodedPathList(value: String?): List<String>? {
+        if (value.isNullOrBlank()) return null
+        return runCatching {
+            val decoded = Base64.getUrlDecoder().decode(value)
+            val array = JSONArray(String(decoded, Charsets.UTF_8))
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.get(index) as? String
+                        ?: throw IllegalArgumentException("Path-list entries must be strings.")
+                    require(item.isNotBlank()) { "Path-list entries must not be blank." }
+                    add(item)
+                }
+            }
+        }.getOrNull()
     }
 
     private fun incomplete(
@@ -272,6 +306,7 @@ object RuntimeLayout {
         runtimeVersion = null
     )
 
+    private const val PATH_LIST_FORMAT = "json-base64-v1"
     private const val MANIFEST_NAME = "runtime.properties"
     private const val REQUIRED_HOST_ABI = "arm64-v8a"
 }

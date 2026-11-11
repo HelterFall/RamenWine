@@ -49,7 +49,7 @@ class PackageSymlink:
 
 def safe_relative_path(value: str) -> str:
     """Apply the same path constraints as the Android runtime installer."""
-    if not value or value.startswith("/") or "\\" in value or "\x00" in value or "," in value:
+    if not value or value.startswith("/") or "\\" in value or "\x00" in value:
         raise ValueError(f"unsafe relative path: {value!r}")
 
     path = PurePosixPath(value)

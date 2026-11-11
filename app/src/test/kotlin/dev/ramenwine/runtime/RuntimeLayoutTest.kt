@@ -2,6 +2,8 @@ package dev.ramenwine.runtime
 
 import java.io.File
 import java.nio.file.Files
+import java.util.Base64
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -138,6 +140,45 @@ class RuntimeLayoutTest {
             assertEquals(RuntimeState.INCOMPLETE, inspection.state)
             assertTrue(inspection.missingItems.any { it.contains("wineboot") })
             assertTrue(inspection.missingItems.any { it.contains("host/lib") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun installedManifestSupportsCommaInFilename() {
+        val root = Files.createTempDirectory("ramenwine-runtime").toFile()
+        try {
+            val backend = RuntimeBackendId.BIONIC_ARM64EC_FEX
+            val backendRoot = File(
+                root,
+                "runtime/current/backends/" + backend.directoryName
+            )
+            val relative = "share/i18n/charmaps/ISO_8859-1,GL.gz"
+            val charmap = File(backendRoot, relative)
+            charmap.parentFile?.mkdirs()
+            charmap.writeText("locale charmap")
+            charmap.setExecutable(true)
+
+            fun encode(paths: List<String>): String {
+                val json = JSONArray().apply { paths.forEach { put(it) } }.toString()
+                return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(json.toByteArray(Charsets.UTF_8))
+            }
+
+            val manifest = File(backendRoot, "runtime.properties")
+            manifest.writeText(
+                "backendId=" + backend.directoryName + "\n" +
+                    "hostAbi=arm64-v8a\n" +
+                    "runtimeVersion=test\n" +
+                    "pathListFormat=json-base64-v1\n" +
+                    "requiredFilesBase64=" + encode(listOf(relative)) + "\n" +
+                    "executableFilesBase64=" + encode(listOf(relative)) + "\n" +
+                    "requiredSymlinksBase64=" + encode(emptyList()) + "\n"
+            )
+
+            val result = RuntimeLayout.inspect(root)
+            assertEquals(RuntimeState.FILES_PRESENT, result.state)
         } finally {
             root.deleteRecursively()
         }

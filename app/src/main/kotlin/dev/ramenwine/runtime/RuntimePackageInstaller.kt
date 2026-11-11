@@ -11,7 +11,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.UUID
+import org.json.JSONArray
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.ensureActive
@@ -337,19 +339,18 @@ class RuntimePackageInstaller(private val context: Context) {
         backendDirectory: File,
         manifest: RuntimePackageManifest
     ) {
-        val requiredFiles = manifest.files.joinToString(",") { it.path }
-        val executableFiles = manifest.files
-            .filter { it.executable }
-            .joinToString(",") { it.path }
-        val requiredSymlinks = manifest.symlinks.joinToString(",") { it.path }
+        val requiredFiles = manifest.files.map { it.path }
+        val executableFiles = manifest.files.filter { it.executable }.map { it.path }
+        val requiredSymlinks = manifest.symlinks.map { it.path }
 
         val properties = buildString {
             append("backendId=").append(manifest.backend.directoryName).append('\n')
             append("hostAbi=").append(manifest.hostAbi).append('\n')
             append("runtimeVersion=").append(manifest.runtimeVersion).append('\n')
-            append("requiredFiles=").append(requiredFiles).append('\n')
-            append("executableFiles=").append(executableFiles).append('\n')
-            append("requiredSymlinks=").append(requiredSymlinks).append('\n')
+            append("pathListFormat=json-base64-v1\n")
+            append("requiredFilesBase64=").append(encodePathList(requiredFiles)).append('\n')
+            append("executableFilesBase64=").append(encodePathList(executableFiles)).append('\n')
+            append("requiredSymlinksBase64=").append(encodePathList(requiredSymlinks)).append('\n')
         }
 
         FileOutputStream(File(backendDirectory, "runtime.properties")).use { output ->
@@ -357,6 +358,15 @@ class RuntimePackageInstaller(private val context: Context) {
             output.flush()
             output.fd.sync()
         }
+    }
+
+    private fun encodePathList(paths: List<String>): String {
+        val json = JSONArray().apply {
+            paths.forEach { put(it) }
+        }.toString()
+        return Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(json.toByteArray(Charsets.UTF_8))
     }
 
     private fun resolveInside(root: File, relativePath: String): File? {
