@@ -1,8 +1,12 @@
 package dev.ramenwine.display
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.PixelCopy
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -14,6 +18,9 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import com.aspauldingcode.wawona.WawonaNative
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Android Surface host for a Wayland visual-novel session.
@@ -26,6 +33,170 @@ class WawonaSurfaceView(
     private val session: DisplaySession,
     private val onSurfaceStateChanged: (Boolean) -> Unit = {}
 ) : SurfaceView(context), SurfaceHolder.Callback {
+    /**
+     * Starts the official Weston SHM client and verifies its pixels made it
+     * through Wawona's compositor and presenter into this Android SurfaceView.
+     */
+    suspend fun verifyWaylandShmOutput(timeoutMillis: Long = 10_000L): SurfaceFrameVerification {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "Surface frame verification must run on the Android main thread."
+        }
+        require(timeoutMillis > 0L) { "Verification timeout must be positive." }
+        if (!isAttachedToWindow || !holder.surface.isValid || width <= 0 || height <= 0) {
+            return SurfaceFrameVerification(
+                visible = false,
+                detail = "Android Surface is not attached or has no drawable size."
+            )
+        }
+        if (!session.startSurfaceSmokeClient()) {
+            return SurfaceFrameVerification(
+                visible = false,
+                detail = "Wawona could not start weston-simple-shm. Check the native Wawona bundle."
+            )
+        }
+
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        var lastCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
+        var lastVisiblePixels = 0
+        try {
+            while (SystemClock.elapsedRealtime() < deadline) {
+                if (!isAttachedToWindow || !holder.surface.isValid) {
+                    return SurfaceFrameVerification(
+                        visible = false,
+                        detail = "Android Surface was detached during the Wayland test."
+                    )
+                }
+
+                val capture = captureSurfaceFrame()
+                lastCopyStatus = capture.copyStatus
+                lastVisiblePixels = capture.visiblePixelSamples
+                if (
+                    capture.copyStatus == PixelCopy.SUCCESS &&
+                    capture.visiblePixelSamples >= capture.requiredVisiblePixelSamples
+                ) {
+                    return SurfaceFrameVerification(
+                        visible = true,
+                        detail = "Успех: PixelCopy прочитал ${capture.visiblePixelSamples} " +
+                            "нечёрных точек из ${capture.sampledPixels} на Android Surface. " +
+                            "Wayland SHM-клиент действительно отобразился."
+                    )
+                }
+
+                if (!session.isSurfaceSmokeClientRunning()) {
+                    return SurfaceFrameVerification(
+                        visible = false,
+                        detail = "weston-simple-shm завершился до появления видимого кадра " +
+                            "(PixelCopy status=$lastCopyStatus)."
+                    )
+                }
+                delay(SMOKE_CAPTURE_INTERVAL_MS)
+            }
+
+            return SurfaceFrameVerification(
+                visible = false,
+                detail = "За ${timeoutMillis} мс не найден видимый кадр. " +
+                    "PixelCopy status=$lastCopyStatus, нечёрных точек=$lastVisiblePixels. " +
+                    "Это уже проверка содержимого Surface, а не только флага готовности Wawona."
+            )
+        } finally {
+            session.stopSurfaceSmokeClient()
+            // The upstream client uses a detached native thread; settle before teardown.
+            delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+        }
+    }
+
+    private suspend fun captureSurfaceFrame(): SurfaceFrameCapture =
+        suspendCancellableCoroutine { continuation ->
+            val captureWidth = width
+            val captureHeight = height
+            if (
+                !isAttachedToWindow || !holder.surface.isValid ||
+                captureWidth <= 0 || captureHeight <= 0
+            ) {
+                continuation.resume(
+                    SurfaceFrameCapture(
+                        copyStatus = PixelCopy.ERROR_SOURCE_NO_DATA,
+                        visiblePixelSamples = 0,
+                        sampledPixels = 0,
+                        requiredVisiblePixelSamples = MIN_VISIBLE_PIXEL_SAMPLES
+                    )
+                )
+                return@suspendCancellableCoroutine
+            }
+
+            val bitmap = try {
+                Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
+            } catch (_: OutOfMemoryError) {
+                continuation.resume(
+                    SurfaceFrameCapture(
+                        copyStatus = PixelCopy.ERROR_UNKNOWN,
+                        visiblePixelSamples = 0,
+                        sampledPixels = 0,
+                        requiredVisiblePixelSamples = MIN_VISIBLE_PIXEL_SAMPLES
+                    )
+                )
+                return@suspendCancellableCoroutine
+            }
+
+            try {
+                PixelCopy.request(this, bitmap, { status ->
+                    val sample = if (status == PixelCopy.SUCCESS) {
+                        countVisiblePixelSamples(bitmap)
+                    } else {
+                        PixelSample(0, 0)
+                    }
+                    bitmap.recycle()
+                    if (continuation.isActive) {
+                        continuation.resume(
+                            SurfaceFrameCapture(
+                                copyStatus = status,
+                                visiblePixelSamples = sample.visible,
+                                sampledPixels = sample.total,
+                                requiredVisiblePixelSamples = maxOf(
+                                    MIN_VISIBLE_PIXEL_SAMPLES,
+                                    sample.total / MIN_VISIBLE_PIXEL_PERCENT_DIVISOR
+                                )
+                            )
+                        )
+                    }
+                }, imeHandler)
+            } catch (_: RuntimeException) {
+                bitmap.recycle()
+                if (continuation.isActive) {
+                    continuation.resume(
+                        SurfaceFrameCapture(
+                            copyStatus = PixelCopy.ERROR_UNKNOWN,
+                            visiblePixelSamples = 0,
+                            sampledPixels = 0,
+                            requiredVisiblePixelSamples = MIN_VISIBLE_PIXEL_SAMPLES
+                        )
+                    )
+                }
+            }
+        }
+
+    private fun countVisiblePixelSamples(bitmap: Bitmap): PixelSample {
+        val columns = FRAME_SAMPLE_GRID
+        val rows = FRAME_SAMPLE_GRID
+        var visible = 0
+        var total = 0
+        for (row in 0 until rows) {
+            val y = ((row + 0.5f) * bitmap.height / rows).toInt().coerceIn(0, bitmap.height - 1)
+            for (column in 0 until columns) {
+                val x = ((column + 0.5f) * bitmap.width / columns).toInt().coerceIn(0, bitmap.width - 1)
+                val pixel = bitmap.getPixel(x, y)
+                val brightness = (
+                    Color.red(pixel) * 3 +
+                        Color.green(pixel) * 6 +
+                        Color.blue(pixel)
+                    ) / 10
+                total++
+                if (brightness > NON_BLACK_BRIGHTNESS_THRESHOLD) visible++
+            }
+        }
+        return PixelSample(visible, total)
+    }
+
     private val imeHandler = Handler(Looper.getMainLooper())
     private var imePolling = false
     private var lastImeWanted: Boolean? = null
@@ -243,5 +414,28 @@ class WawonaSurfaceView(
     private companion object {
         const val IME_POLL_INTERVAL_MS = 200L
         const val IME_SHOW_RETRY_MS = 120L
+        const val SMOKE_CAPTURE_INTERVAL_MS = 200L
+        const val SMOKE_CLIENT_STOP_SETTLE_MS = 300L
+        const val FRAME_SAMPLE_GRID = 32
+        const val MIN_VISIBLE_PIXEL_SAMPLES = 8
+        const val MIN_VISIBLE_PIXEL_PERCENT_DIVISOR = 100
+        const val NON_BLACK_BRIGHTNESS_THRESHOLD = 28
     }
 }
+
+data class SurfaceFrameVerification(
+    val visible: Boolean,
+    val detail: String
+)
+
+private data class SurfaceFrameCapture(
+    val copyStatus: Int,
+    val visiblePixelSamples: Int,
+    val sampledPixels: Int,
+    val requiredVisiblePixelSamples: Int
+)
+
+private data class PixelSample(
+    val visible: Int,
+    val total: Int
+)
