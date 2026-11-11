@@ -523,7 +523,7 @@ object ProotWineCommandBuilder {
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
         "BOX64_NOBANNER",
-                "WINEDLLPATH",
+        "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",
         "LD_PRELOAD",
         "ANDROID_ROOT",
