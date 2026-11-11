@@ -10,6 +10,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -21,6 +23,7 @@ private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
 private const val SETUP_COMMAND_TIMEOUT_MILLIS = 5 * 60 * 1000L
 private const val SETUP_COMMAND_STOP_WAIT_MILLIS = 1_500L
 private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
+private const val PROCESS_TREE_SCAN_INTERVAL_MILLIS = 250L
 
 /**
  * Starts a previously validated PRoot command without a shell.
@@ -43,6 +46,15 @@ class ProotWineProcessSupervisor(
     ): Int = withContext(Dispatchers.IO) {
         require(timeoutMillis > 0L) { "Setup timeout must be positive." }
         val process = createProcess(command)
+        val processTree = createProcessTreeTerminator(process)
+        processTree?.captureDescendants()
+        val processTreeMonitor = launch {
+            while (process.isAlive) {
+                processTree?.captureDescendants()
+                delay(PROCESS_TREE_SCAN_INTERVAL_MILLIS)
+            }
+            processTree?.captureDescendants()
+        }
         val outputJob = launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
@@ -92,12 +104,25 @@ class ProotWineProcessSupervisor(
             }
             exitCode
         } catch (error: Throwable) {
-            if (process.isAlive) process.destroyForcibly()
+            if (process.isAlive) {
+                process.destroyForcibly()
+                runCatching { process.waitFor(SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+            }
             runCatching { process.inputStream.close() }
             outputJob.cancel()
             throw error
+        } finally {
+            processTreeMonitor.cancelAndJoin()
+            processTree?.captureDescendants()
+            processTree?.terminateRemaining()
         }
     }
+
+    private fun createProcessTreeTerminator(process: Process): ProcessTreeTerminator? =
+        runCatching {
+            val pid = process.pid().toInt()
+            if (pid > 0) ProcessTreeTerminator(pid) else null
+        }.getOrNull()
 
     private fun createProcess(command: ProotWineCommand): Process {
         if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
@@ -157,6 +182,11 @@ class ProotWineProcessSession internal constructor(
     // Only one path may drain output and deliver the final callback.
     private val outputDrainMutex = Mutex()
     private val outputJob: Job
+    private val processTreeMonitor: Job
+    private val processTree = runCatching {
+        val pid = process.pid().toInt()
+        if (pid > 0) ProcessTreeTerminator(pid) else null
+    }.getOrNull()
 
     init {
         outputJob = scope.launch {
@@ -180,6 +210,17 @@ class ProotWineProcessSession internal constructor(
             }
         }
 
+        // Capture the process tree while PRoot is alive. Some Wine/game children
+        // may outlive a failed or interrupted PRoot shutdown and become reparented.
+        processTree?.captureDescendants()
+        processTreeMonitor = scope.launch {
+            while (process.isAlive) {
+                processTree?.captureDescendants()
+                delay(PROCESS_TREE_SCAN_INTERVAL_MILLIS)
+            }
+            processTree?.captureDescendants()
+        }
+
         // Exactly one coroutine observes process termination. Manual stop waits
         // on this deferred instead of racing a second Process.waitFor().
         scope.launch {
@@ -189,6 +230,9 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
+            processTree?.captureDescendants()
+            processTree?.terminateRemaining()
+            processTreeMonitor.cancelAndJoin()
             processExit.complete(exitCode)
             completeAfterOutputDrain(exitCode)
         }
