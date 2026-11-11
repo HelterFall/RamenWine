@@ -298,6 +298,20 @@ if machine != 0x8664 or subsystem != 0x20B:
 PY
 
 install -m 0755 "$AUDIO_RELAY" "$RUNTIME_ROOT/host/bin/directaudio-relay"
+
+# Android 10+ blocks execve() of files extracted into the writable app filesDir
+# for apps targeting API 29+. Package Android-host executables as native APK
+# libraries so PackageManager extracts them into ApplicationInfo.nativeLibraryDir.
+NATIVE_LIBRARY_DIR="$ROOT_DIR/app/src/main/jniLibs/arm64-v8a"
+mkdir -p "$NATIVE_LIBRARY_DIR"
+install -m 0755 "$RUNTIME_ROOT/host/bin/proot" "$NATIVE_LIBRARY_DIR/libproot.so"
+install -m 0755 "$RUNTIME_ROOT/host/bin/directaudio-relay" "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so"
+
+readelf -h "$NATIVE_LIBRARY_DIR/libproot.so" | grep -q 'AArch64' || \
+  fail "Packaged Android PRoot is not an AArch64 ELF."
+readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || \
+  fail "Packaged DirectAudio relay is not an AArch64 ELF."
+
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
 # Emit the exact package format consumed by RuntimePackageInstaller.
