@@ -109,12 +109,6 @@ class ProotWineProcessSupervisor(
         }
     }
 
-    private fun createProcessTreeTerminator(process: Process): ProcessTreeTerminator? =
-        runCatching {
-            val pid = process.pid().toInt()
-            if (pid > 0) ProcessTreeTerminator(pid) else null
-        }.getOrNull()
-
     private fun createProcess(command: ProotWineCommand): Process {
         if (!command.prootExecutable.isFile || !command.prootExecutable.canExecute()) {
             throw IOException("The PRoot host executable is missing or not executable.")
