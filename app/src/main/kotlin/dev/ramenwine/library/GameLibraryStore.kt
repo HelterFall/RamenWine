@@ -143,18 +143,17 @@ class GameLibraryStore(context: Context) {
 
         val array = JSONArray()
         games.sortedByDescending { it.importedAtEpochMillis }.forEach { item ->
-            array.put(
-                JSONObject()
-                    .put("id", item.id)
-                    .put("title", item.title)
-                    .put("relativeDirectory", item.relativeDirectory)
-                    .put("executableRelativePath", item.executableRelativePath)
-                    .put("architecture", item.architecture)
-                    .put("totalBytes", item.totalBytes)
-                    .put("importedAtEpochMillis", item.importedAtEpochMillis)
-                    .put("locale", item.locale)
-                    .put("coverImageUrl", item.coverImageUrl ?: JSONObject.NULL)
-            )
+            val storedGame = JSONObject()
+                .put("id", item.id)
+                .put("title", item.title)
+                .put("relativeDirectory", item.relativeDirectory)
+                .put("executableRelativePath", item.executableRelativePath)
+                .put("architecture", item.architecture)
+                .put("totalBytes", item.totalBytes)
+                .put("importedAtEpochMillis", item.importedAtEpochMillis)
+                .put("locale", item.locale)
+            item.coverImageUrl?.let { storedGame.put("coverImageUrl", it) }
+            array.put(storedGame)
         }
 
         val temporaryFile = File(gamesRoot, "$LIBRARY_FILE_NAME.tmp")
