@@ -22,7 +22,51 @@ permissions:
   contents: read
 
 jobs:
+  android-check:
+    if: github.event_name == 'pull_request'
+    name: Android compile, unit tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Cache Android build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/platforms/android-36
+            /usr/local/lib/android/sdk/build-tools/36.0.0
+            /usr/local/lib/android/sdk/ndk/30.0.16248370
+            /usr/local/lib/android/sdk/cmake/3.22.1
+          key: ramenwine-android-sdk-${{ runner.os }}-api36-ndk30-cmake322
+
+      - name: Install Android toolchain
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
+
+      - name: Compile app, run unit tests and lint
+        run: gradle --no-daemon --stacktrace testDebugUnitTest lintDebug
+
   directaudio:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_android
     name: Build ABI-matched DirectAudio driver and Android relay
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -130,6 +174,14 @@ jobs:
             --without-gstreamer --without-vulkan --without-wayland \
             --without-mingw --disable-tests
           make -j"$(nproc)" __tooldeps__ nls/all
+
+      - name: Cache Wine compiler objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ramenwine-wine-11.20-${{ runner.os }}-${{ env.DIRECTAUDIO_REVISION }}
+          restore-keys: |
+            ramenwine-wine-11.20-${{ runner.os }}-
 
       - name: Configure only the x86-64 glibc driver and x86 PE modules
         working-directory: wine
@@ -432,6 +484,16 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
+
+      - name: Cache Android build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/platforms/android-36
+            /usr/local/lib/android/sdk/build-tools/36.0.0
+            /usr/local/lib/android/sdk/ndk/30.0.16248370
+            /usr/local/lib/android/sdk/cmake/3.22.1
+          key: ramenwine-android-sdk-${{ runner.os }}-api36-ndk30-cmake322
 
       - name: Install Android toolchain
         run: |
