@@ -8,6 +8,16 @@ import org.junit.Test
 
 class SafeRuntimePathTest {
     @Test
+    fun relativePathAllowsCommaInFilename() {
+        assertEquals(
+            "rootfs/usr/share/i18n/charmaps/ISO_8859-1,GL.gz",
+            SafeRuntimePath.normalizeRelativePath(
+                "rootfs/usr/share/i18n/charmaps/ISO_8859-1,GL.gz"
+            )
+        )
+    }
+
+    @Test
     fun absoluteRootfsSymlinkIsRewrittenRelativeToGuestRoot() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
         try {
