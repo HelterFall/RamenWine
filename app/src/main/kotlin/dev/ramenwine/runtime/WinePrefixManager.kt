@@ -19,7 +19,8 @@ internal object WinePrefixRecoveryPolicy {
     fun decide(
         populatedRegistryFiles: Int,
         markerExists: Boolean,
-        markerMatches: Boolean
+        markerMatches: Boolean,
+        prefixHasData: Boolean
     ): WinePrefixRecoveryAction {
         require(populatedRegistryFiles in 0..REQUIRED_REGISTRY_FILE_COUNT) {
             "Registry file count is outside the supported range."
@@ -33,7 +34,11 @@ internal object WinePrefixRecoveryPolicy {
             return WinePrefixRecoveryAction.SKIP
         }
 
-        return if (populatedRegistryFiles > 0 || markerExists) {
+        // A failed first boot may leave only .update-timestamp or drive_c.
+        // Wine's -i can then skip wine.inf when the timestamp matches, even
+        // though the prefix registry hives were never flushed. Any state in
+        // the prefix therefore means recovery must use -u.
+        return if (populatedRegistryFiles > 0 || markerExists || prefixHasData) {
             WinePrefixRecoveryAction.UPDATE
         } else {
             WinePrefixRecoveryAction.INITIALIZE
@@ -71,18 +76,20 @@ internal class WinePrefixManager(
         val markerMatches = markerExists && runCatching {
             marker.readText(Charsets.UTF_8) == expectedMarker
         }.getOrDefault(false)
+        val prefixHasData = prefix.list()?.any { it != MARKER_NAME } == true
         val recoveryAction = WinePrefixRecoveryPolicy.decide(
             populatedRegistryFiles = presentRegistryCount,
             markerExists = markerExists,
-            markerMatches = markerMatches
+            markerMatches = markerMatches,
+            prefixHasData = prefixHasData
         )
 
         if (recoveryAction == WinePrefixRecoveryAction.SKIP) return false
 
-        // An interrupted first-time wineboot may have created only some
-        // registry files. Treat that prefix as existing and let wineboot -u
-        // complete it instead of permanently blocking a retry. Existing
-        // files are not deleted or replaced by this recovery path.
+        // An interrupted first-time wineboot may have created only a timestamp
+        // or directory tree, without registry hives. Treat any non-empty
+        // prefix as partial state and run wineboot -u rather than retrying -i.
+        // The recovery path does not delete or replace existing files.
         val updateExistingPrefix = recoveryAction == WinePrefixRecoveryAction.UPDATE
         val winebootCommand = ProotWineCommandBuilder.buildWinebootCommand(
             gameCommand = gameCommand,
