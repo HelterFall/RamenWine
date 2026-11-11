@@ -388,9 +388,13 @@ jobs:
           ROOTFS="build/prebuilt-runtime/glibc-proot-box64/rootfs"
           mkdir -p "$ROOTFS"
           tar --numeric-owner --xattrs --acls -xpf build/prebuilt-runtime/rootfs-artifact/ramenwine-arm64-rootfs.tar -C "$ROOTFS"
+          # These are mount points supplied by PRoot/Android at game launch.
+          mkdir -p "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys" "$ROOTFS/run"
           rm -rf build/prebuilt-runtime/rootfs-artifact
           test -x "$ROOTFS/usr/bin/env"
           test -x "$ROOTFS/usr/bin/box64"
+          test -d "$ROOTFS/dev" && test -d "$ROOTFS/proc"
+          test -d "$ROOTFS/sys" && test -d "$ROOTFS/run"
 
       - name: Assemble offline Wine, Box64 and PRoot runtime
         shell: bash
