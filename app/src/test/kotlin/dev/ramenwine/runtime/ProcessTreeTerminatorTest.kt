@@ -12,7 +12,8 @@ class ProcessTreeTerminatorTest {
     fun capturesOnlyTheRootProcessesChildrenAndGrandchildren() {
         val proc = Files.createTempDirectory("ramenwine-proc-tree").toFile()
         try {
-            writeStat(proc, pid = 101, comm = "wine-preloader", state = 'S', parentPid = 42, startTime = 100L)
+            writeStat(proc, pid = 42, comm = "proot", state = 'S', parentPid = 1, startTime = 50L, childPids = listOf(101, 104))
+            writeStat(proc, pid = 101, comm = "wine-preloader", state = 'S', parentPid = 42, startTime = 100L, childPids = listOf(102))
             writeStat(proc, pid = 102, comm = "visual novel.exe", state = 'S', parentPid = 101, startTime = 200L)
             writeStat(proc, pid = 103, comm = "unrelated app", state = 'S', parentPid = 7, startTime = 300L)
             writeStat(proc, pid = 104, comm = "zombie", state = 'Z', parentPid = 42, startTime = 400L)
@@ -43,6 +44,7 @@ class ProcessTreeTerminatorTest {
     fun doesNotSignalAReusedPidAfterItsStartTimeChanges() {
         val proc = Files.createTempDirectory("ramenwine-proc-reused-pid").toFile()
         try {
+            writeStat(proc, pid = 42, comm = "proot", state = 'S', parentPid = 1, startTime = 50L, childPids = listOf(101))
             writeStat(proc, pid = 101, comm = "old-game", state = 'S', parentPid = 42, startTime = 100L)
             val signals = mutableListOf<Pair<Int, Int>>()
             val tracker = ProcessTreeTerminator(
@@ -96,13 +98,16 @@ class ProcessTreeTerminatorTest {
         comm: String,
         state: Char,
         parentPid: Int,
-        startTime: Long
+        startTime: Long,
+        childPids: List<Int> = emptyList()
     ) {
         val directory = File(proc, pid.toString()).apply { mkdirs() }
         File(directory, "stat").writeText(
             statLine(pid, comm, state, parentPid, startTime),
             Charsets.US_ASCII
         )
+        val task = File(directory, "task/$pid").apply { mkdirs() }
+        File(task, "children").writeText(childPids.joinToString(" "), Charsets.US_ASCII)
     }
 
     private fun statLine(
