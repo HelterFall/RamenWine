@@ -3,6 +3,7 @@ package dev.ramenwine.runtime
 import java.io.File
 import java.io.IOException
 import android.util.AtomicFile
+import kotlinx.coroutines.delay
 
 internal enum class WinePrefixRecoveryAction {
     SKIP,
@@ -87,22 +88,63 @@ internal class WinePrefixManager(
             gameCommand = gameCommand,
             updateExistingPrefix = updateExistingPrefix
         )
+        onOutput(
+            "RamenWine: wineboot " +
+                (if (updateExistingPrefix) "-u" else "-i") +
+                " WINEPREFIX=" + gameCommand.guestEnvironment["WINEPREFIX"].orEmpty()
+        )
         val exitCode = processSupervisor.runToCompletion(winebootCommand, onOutput)
         if (exitCode != 0) {
             val operation = if (updateExistingPrefix) "update" else "initialization"
             throw IOException("Wine prefix $operation failed with exit code $exitCode.")
         }
 
-        val missingRegistryFiles = registryFiles.filterNot { it.isFile && it.length() > 0L }
+        // Wine may return from wineboot before the background wineserver has
+        // finished flushing the prefix registry. Poll instead of checking only
+        // once immediately after the process exits.
+        val missingRegistryFiles = awaitRegistryFiles(registryFiles)
         if (missingRegistryFiles.isNotEmpty()) {
+            val entries = prefix.list()?.sorted()?.take(24)?.joinToString()
+                ?.ifBlank { "<empty>" } ?: "<unreadable>"
+            val homePrefix = defaultHomePrefix(prefix)
+            val misplacedCount = homePrefix?.let { directory ->
+                listOf("system.reg", "user.reg", "userdef.reg").count { name ->
+                    val file = File(directory, name)
+                    file.isFile && file.length() > 0L
+                }
+            } ?: 0
+            val locationHint = if (misplacedCount > 0) {
+                " Wine appears to have written registry files under HOME/.wine instead of WINEPREFIX."
+            } else {
+                ""
+            }
             throw IOException(
-                "wineboot exited successfully but did not create: " +
-                    missingRegistryFiles.joinToString { it.name }
+                "wineboot exited with code 0, but after " +
+                    (REGISTRY_WAIT_TIMEOUT_MILLIS / 1000) +
+                    "s these files are still missing in " + prefix.absolutePath + ": " +
+                    missingRegistryFiles.joinToString { it.name } +
+                    ". Prefix contents: " + entries + "." + locationHint
             )
         }
 
+        onOutput("RamenWine: all three Wine registry files are present.")
         writeMarkerAtomically(marker, expectedMarker)
         return true
+    }
+
+    private suspend fun awaitRegistryFiles(registryFiles: List<File>): List<File> {
+        val deadline = System.nanoTime() + REGISTRY_WAIT_TIMEOUT_NANOS
+        while (System.nanoTime() < deadline) {
+            val missing = registryFiles.filterNot { it.isFile && it.length() > 0L }
+            if (missing.isEmpty()) return emptyList()
+            delay(REGISTRY_POLL_INTERVAL_MILLIS)
+        }
+        return registryFiles.filterNot { it.isFile && it.length() > 0L }
+    }
+
+    private fun defaultHomePrefix(prefix: File): File? {
+        val filesDirectory = prefix.parentFile?.parentFile ?: return null
+        return File(filesDirectory, "wine-home/" + prefix.name + "/.wine")
     }
 
     private fun markerContents(command: ProotWineCommand): String = buildString {
@@ -127,5 +169,8 @@ internal class WinePrefixManager(
 
     private companion object {
         const val MARKER_NAME = ".ramenwine-prefix"
+        const val REGISTRY_WAIT_TIMEOUT_MILLIS = 60_000L
+        const val REGISTRY_WAIT_TIMEOUT_NANOS = REGISTRY_WAIT_TIMEOUT_MILLIS * 1_000_000L
+        const val REGISTRY_POLL_INTERVAL_MILLIS = 250L
     }
 }
