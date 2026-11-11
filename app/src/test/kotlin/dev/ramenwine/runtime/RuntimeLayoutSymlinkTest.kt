@@ -260,6 +260,16 @@ class RuntimeLayoutSymlinkTest {
             Paths.get("usr/bin")
         )
 
+        // RuntimeLayout requires the packaged Wine shutdown wrapper as part
+        // of the launch contract, just like the runtime installer does.
+        val wineCommandWrapper = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tools/run-wine-command.sh"
+        )
+        wineCommandWrapper.parentFile?.mkdirs()
+        wineCommandWrapper.writeText("#!/bin/sh\\nexit 0\\n")
+        wineCommandWrapper.setExecutable(true)
+
         val legacyExecutable = File(backendRoot, "bin/wine")
         legacyExecutable.parentFile?.mkdirs()
         legacyExecutable.writeText("test executable")
