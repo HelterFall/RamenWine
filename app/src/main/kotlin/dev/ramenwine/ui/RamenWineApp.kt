@@ -64,9 +64,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@Composable
 private const val MAX_VISIBLE_RUNTIME_ERRORS = 12
 
+@Composable
 fun RamenWineApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
