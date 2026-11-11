@@ -400,6 +400,13 @@ def validate_backend_payload(
     if not is_x86_64_pe32_plus(wineboot.source_path):
         raise ValueError("Wine prefix initializer must be an x86-64 PE32+ executable")
 
+    smoke_path = "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+    smoke_test = resolve_manifest_file(smoke_path, files_by_path, links_by_path)
+    if smoke_test is None:
+        raise ValueError("runtime is missing the Win32 GDI launch smoke executable")
+    if not is_x86_64_pe32_plus(smoke_test.source_path):
+        raise ValueError("Win32 GDI launch smoke executable must be an x86-64 PE32+ file")
+
     wayland_driver_paths = sorted(
         path
         for path in (set(files_by_path) | set(links_by_path))
