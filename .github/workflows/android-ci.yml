@@ -10,9 +10,9 @@ on:
     inputs:
       build_android:
         description: "Also build the Android APK and run the full Android packaging stage."
-        required: false
+        required: true
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: ramenwine-android-ci-${{ github.ref }}
@@ -22,7 +22,23 @@ permissions:
   contents: read
 
 jobs:
+  dispatch-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    name: Validate manual APK build request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the full Android build
+        env:
+          RAMENWINE_BUILD_ANDROID: ${{ inputs.build_android }}
+        run: |
+          if [[ "$RAMENWINE_BUILD_ANDROID" != "true" ]]; then
+            echo "::error::Select build_android=true to run the APK build. No build jobs were started."
+            exit 1
+          fi
+          echo "Full Android APK build requested."
+
   signing:
+    needs: [dispatch-preflight]
     if: github.event_name == 'workflow_dispatch' && inputs.build_android
     name: Verify persistent Android signing key
     runs-on: ubuntu-latest
