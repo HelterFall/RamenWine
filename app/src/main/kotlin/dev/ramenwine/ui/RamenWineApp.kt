@@ -65,6 +65,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
+private const val MAX_VISIBLE_RUNTIME_ERRORS = 12
+
 fun RamenWineApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -861,9 +863,18 @@ private fun RuntimeStatusCard(
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
-                    backend.missingItems.forEach { missing ->
+                    val visibleMissingItems = backend.missingItems.take(MAX_VISIBLE_RUNTIME_ERRORS)
+                    visibleMissingItems.forEach { missing ->
                         Text(
                             text = "• " + missing,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (backend.missingItems.size > visibleMissingItems.size) {
+                        Text(
+                            text = "… и ещё " + (backend.missingItems.size - visibleMissingItems.size) +
+                                " проблем с файлами",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
