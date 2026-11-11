@@ -179,14 +179,20 @@ while IFS= read -r candidate; do
   [[ -n "$candidate" ]] || continue
   resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
   [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  # Store the resolved file, not a potentially absolute or dangling symlink
+  # from bin/. The resolved target must stay inside this Wine distribution.
+  case "$resolved_candidate" in
+    "$WINE_ROOT"/*) ;;
+    *) continue ;;
+  esac
   if readelf -h "$resolved_candidate" 2>/dev/null | \
       grep -q 'Advanced Micro Devices X86-64'; then
-    WINE_SERVER_ELF="$candidate"
+    WINE_SERVER_ELF="$resolved_candidate"
     break
   fi
 done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name wineserver -print)
 [[ -n "$WINE_SERVER_ELF" ]] || \
-  fail "LUG Wine archive does not contain an x86-64 wineserver ELF."
+  fail "LUG Wine archive does not contain an in-tree x86-64 wineserver ELF."
 WINE_SERVER_RELATIVE="${WINE_SERVER_ELF#"$WINE_ROOT"/}"
 [[ "$WINE_SERVER_RELATIVE" != "$WINE_SERVER_ELF" ]] || \
   fail "wineserver is outside the Wine distribution directory."
@@ -234,6 +240,11 @@ WINE_SERVER_GUEST="$ROOTFS/opt/ramenwine-wine/${WINE_SERVER_RELATIVE}"
 [[ -f "$WINE_SERVER_GUEST" ]] || fail "The copied wineserver binary is missing."
 readelf -h "$WINE_SERVER_GUEST" | grep -q 'Advanced Micro Devices X86-64' || \
   fail "The selected wineserver is not an x86-64 ELF."
+# Some upstream archives preserve the ELF payload but omit its executable bit.
+# wineserver is a program entry point, so restore the expected mode explicitly.
+chmod 0755 "$WINE_SERVER_GUEST"
+test -x "$ROOTFS/usr/bin/wineserver" || \
+  fail "Guest wineserver link is not executable (target: $WINE_SERVER_RELATIVE)."
 
 # All Wine commands use this wrapper. After the Windows command exits, it asks
 # wineserver to shut down and waits until the server releases its prefix lock.
@@ -244,7 +255,6 @@ mkdir -p "$(dirname "$WINE_COMMAND_WRAPPER")"
 cp "$ROOT_DIR/tools/run-wine-command.sh" "$WINE_COMMAND_WRAPPER"
 chmod 0755 "$WINE_COMMAND_WRAPPER"
 test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing /bin/sh."
-test -x "$ROOTFS/usr/bin/wineserver" || fail "Guest wineserver link is not executable."
 test -x "$WINE_COMMAND_WRAPPER" || fail "Wine shutdown wrapper is not executable."
 
 # Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
