@@ -327,7 +327,7 @@ def validate_backend_payload(
         ("host/bin/proot", 183, "AArch64 Android-host PRoot"),
         ("rootfs/usr/bin/env", 183, "AArch64 guest env"),
         ("rootfs/usr/bin/box64", 183, "AArch64 Box64"),
-        ("rootfs/bin/sh", 183, "AArch64 guest shell"),
+        ("rootfs/usr/bin/sh", 183, "AArch64 guest shell"),
         ("rootfs/usr/bin/wine", 62, "x86-64 Wine loader for Box64"),
         ("rootfs/usr/bin/wineserver", 62, "x86-64 Wine server"),
     )
