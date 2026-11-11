@@ -29,6 +29,7 @@ class ProotWineCommandBuilderTest {
                 File(fixture.filesDirectory, "prefixes/" + fixture.gameId).canonicalFile,
                 command.hostPrefixDirectory
             )
+            assertTrue(fixture.prefixDirectory.isDirectory)
             assertEquals(fixture.nativeProot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/env"))
@@ -143,6 +144,48 @@ class ProotWineCommandBuilderTest {
             }.exceptionOrNull()
             assertTrue(error is java.io.IOException)
             assertTrue(error?.message.orEmpty().contains("locale"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsWritableGuestWinePrefixProbeCommand() {
+        val fixture = Fixture()
+        try {
+            val gameCommand = ProotWineCommandBuilder.build(fixture.request())
+            val probe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(gameCommand)
+
+            assertEquals("/usr/bin/touch", probe.guestExecutablePath)
+            assertEquals(
+                "/prefixes/" + fixture.gameId + "/" +
+                    ProotWineCommandBuilder.PREFIX_WRITE_PROBE_FILE_NAME,
+                probe.arguments.last()
+            )
+            assertTrue(probe.arguments.contains("/usr/bin/touch"))
+            assertTrue(probe.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
+            assertTrue(
+                probe.arguments.contains(
+                    "--bind=" + fixture.prefixDirectory.absolutePath + ":/prefixes/" + fixture.gameId
+                )
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsUnsafeGuestWinePrefixProbePath() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(
+                    ProotWineCommandBuilder.build(fixture.request()).copy(
+                        guestEnvironment = mapOf("WINEPREFIX" to "/prefixes/../outside")
+                    )
+                )
+            }.exceptionOrNull()
+            assertTrue(error is java.io.IOException)
         } finally {
             fixture.cleanup()
         }
@@ -441,7 +484,9 @@ class ProotWineCommandBuilderTest {
         val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val touch = executable(rootfs, "usr/bin/touch")
         val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
+        val prefixDirectory = File(filesDirectory, "prefixes/" + gameId)
         val audioUnix = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         val audioPe64 = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         val audioPe32 = executable(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
