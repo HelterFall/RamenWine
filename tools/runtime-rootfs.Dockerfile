@@ -1,4 +1,4 @@
-FROM debian:trixie-slim
+FROM debian:trixie-slim AS guest-rootfs
 
 RUN set -eux; \
     export DEBIAN_FRONTEND=noninteractive; \
@@ -95,3 +95,15 @@ RUN set -eux; \
       libglut3.12:amd64; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Package the finished guest filesystem inside the build container. Exporting
+# thousands of individual files through BuildKit's local exporter is extremely
+# slow; exporting this single tarball keeps file ownership, symlinks and modes.
+RUN set -eux; \
+    tar --numeric-owner --xattrs --acls \
+      --exclude=./ramenwine-arm64-rootfs.tar \
+      -C / -cpf /ramenwine-arm64-rootfs.tar .
+
+# The local exporter now transfers exactly one file instead of the full tree.
+FROM scratch AS rootfs-export
+COPY --from=guest-rootfs /ramenwine-arm64-rootfs.tar /ramenwine-arm64-rootfs.tar
