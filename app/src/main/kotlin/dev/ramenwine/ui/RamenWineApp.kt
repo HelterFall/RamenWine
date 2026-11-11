@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import dev.ramenwine.display.DisplaySession
 import dev.ramenwine.display.WawonaDisplayBackend
 import dev.ramenwine.display.WawonaSurfaceHost
+import dev.ramenwine.display.WawonaSurfaceView
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
@@ -111,6 +112,9 @@ fun RamenWineApp() {
     var activeDisplaySession by remember { mutableStateOf<DisplaySession?>(null) }
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
     var surfaceReady by remember { mutableStateOf(false) }
+    var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
+    var verifyingSurfaceFrame by remember { mutableStateOf(false) }
+    var surfaceFrameResult by remember { mutableStateOf<String?>(null) }
     var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
@@ -284,6 +288,25 @@ fun RamenWineApp() {
                 gameLaunchNotice = null
             } finally {
                 preparingGame = false
+            }
+        }
+    }
+
+    fun verifyWaylandSurfaceOutput() {
+        val view = activeSurfaceView
+        if (view == null || !surfaceReady || verifyingSurfaceFrame || preparingGame) return
+
+        verifyingSurfaceFrame = true
+        surfaceFrameResult = "Запускаю настоящий Wayland SHM-клиент и проверяю пиксели Android Surface…"
+        scope.launch {
+            try {
+                val result = view.verifyWaylandShmOutput()
+                surfaceFrameResult = result.detail
+            } catch (error: Exception) {
+                surfaceFrameResult = "Проверка не завершилась: " +
+                    (error.message ?: error.javaClass.simpleName)
+            } finally {
+                verifyingSurfaceFrame = false
             }
         }
     }
@@ -593,13 +616,37 @@ fun RamenWineApp() {
                             WawonaSurfaceHost(
                                 session = currentDisplay,
                                 modifier = Modifier.fillMaxWidth().height(320.dp),
-                                onSurfaceStateChanged = { attached -> surfaceReady = attached }
+                                onSurfaceStateChanged = { attached -> surfaceReady = attached },
+                                onSurfaceViewChanged = { activeSurfaceView = it }
                             )
+                            if (activeGameSession == null) {
+                                Button(
+                                    onClick = ::verifyWaylandSurfaceOutput,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = surfaceReady && !preparingGame && !verifyingSurfaceFrame
+                                ) {
+                                    Text(
+                                        if (verifyingSurfaceFrame) "Проверяю кадр Wayland…"
+                                        else "Проверить реальный вывод Wayland"
+                                    )
+                                }
+                                surfaceFrameResult?.let { detail ->
+                                    Text(
+                                        text = detail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (detail.startsWith("Успех:")) {
+                                            MaterialTheme.colorScheme.secondary
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        }
+                                    )
+                                }
+                            }
                             if (activeGameSession == null) {
                                 Button(
                                     onClick = ::launchSelectedGame,
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && !preparingGame
+                                    enabled = surfaceReady && !preparingGame && !verifyingSurfaceFrame
                                 ) {
                                     Text(
                                         if (preparingGame) "Подготовка…"
