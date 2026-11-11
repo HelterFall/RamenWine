@@ -37,7 +37,7 @@ with Android NDK r27d / API 28 and 16 KB maximum page alignment. The Linux
 guest never loads Android's Bionic `libaaudio.so`.
 
 At game launch, RamenWine starts the helper in its own Android process UID,
-waits for its Unix socket, passes `WINEDLLPATH` and
+waits for the Unix socket to exist and pass an actual AF_UNIX connection probe (the same connect-and-close readiness probe used by DirectAudio's Wine-side `test_connect`), then passes `WINEDLLPATH` and
 `BANNER_AUDIO_DIRECT_RELAY` to the guest, and selects Wine's
 `HKCU\\Software\\Wine\\Drivers\\Audio=directaudio` registry setting
 inside the per-game prefix. The helper stops when the game/display session ends,
