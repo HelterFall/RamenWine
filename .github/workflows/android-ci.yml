@@ -383,6 +383,8 @@ jobs:
           name: ramenwine-arm64-rootfs
           path: build/prebuilt-runtime/rootfs-artifact
 
+      # Transfer the runtime rootfs as one TAR artifact; avoid thousands of
+      # individual BuildKit local-export file operations.
       - name: Restore Debian ARM64 guest rootfs
         shell: bash
         run: |
