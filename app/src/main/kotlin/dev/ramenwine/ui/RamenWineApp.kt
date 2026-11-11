@@ -97,9 +97,6 @@ fun RamenWineApp() {
     var scanError by remember { mutableStateOf<String?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
 
-    var installingRuntime by remember { mutableStateOf(false) }
-    var runtimePackageError by remember { mutableStateOf<String?>(null) }
-
     val displayBackend = remember(context.applicationContext) {
         WawonaDisplayBackend(context.applicationContext)
     }
@@ -145,15 +142,10 @@ fun RamenWineApp() {
             .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
 
         if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
-            installingRuntime = true
-            try {
+            runCatching {
                 withContext(Dispatchers.IO) {
                     RuntimePackageInstaller(context.applicationContext).installBundled()
                 }
-            } catch (error: Exception) {
-                runtimePackageError = error.message ?: error.javaClass.simpleName
-            } finally {
-                installingRuntime = false
             }
         }
     }
@@ -560,14 +552,6 @@ fun RamenWineApp() {
                         }
                     }
                 )
-            }
-
-            // Runtime installation remains automatic and does not occupy the home screen.
-            if (installingRuntime && importedGames.isEmpty() && selectedFolder == null) {
-                // Intentionally no status panel on the library screen.
-            }
-            runtimePackageError?.let {
-                // Kept in state for diagnosis without adding extra controls to the home screen.
             }
         }
     }
