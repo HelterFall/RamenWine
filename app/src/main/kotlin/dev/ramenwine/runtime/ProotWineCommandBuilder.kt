@@ -314,6 +314,26 @@ object ProotWineCommandBuilder {
 
     const val PREFIX_WRITE_PROBE_FILE_NAME = ".ramenwine-prefix-write-probe"
 
+    /**
+     * Builds a separate PRoot command that asks the active Wine server to stop
+     * or waits for it to release the prefix lock. Used by the app's Stop action
+     * before falling back to terminating the Android-host PRoot process.
+     */
+    fun buildWineServerControlCommand(
+        gameCommand: ProotWineCommand,
+        waitForExit: Boolean
+    ): ProotWineCommand {
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/box64",
+            "/usr/bin/wineserver",
+            if (waitForExit) "-w" else "-k"
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "/usr/bin/wineserver"
+        )
+    }
+
     fun buildAudioDriverSelectionCommand(
         gameCommand: ProotWineCommand
     ): ProotWineCommand {
