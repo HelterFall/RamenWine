@@ -106,9 +106,8 @@ internal class WinePrefixManager(
             throw IOException("Wine prefix $operation failed with exit code $exitCode.")
         }
 
-        // Wine may return from wineboot before the background wineserver has
-        // finished flushing the prefix registry. Poll instead of checking only
-        // once immediately after the process exits.
+        // The guest wrapper waits for wineserver shutdown before PRoot exits.
+        // Keep a bounded poll as a final filesystem-visibility safeguard.
         val missingRegistryFiles = awaitRegistryFiles(registryFiles)
         if (missingRegistryFiles.isNotEmpty()) {
             val entries = prefix.list()?.sorted()?.take(24)?.joinToString()
