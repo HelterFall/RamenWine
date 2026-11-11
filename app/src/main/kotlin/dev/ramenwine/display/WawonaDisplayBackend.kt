@@ -232,6 +232,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
             attachedSurface?.let {
                 touchMouseInput.cancel(currentTimestamp())
+                stopSurfaceSmokeClient()
                 WawonaNative.nativeDestroySurface()
             }
             WawonaNative.nativeSetDisplayDensity(density)
@@ -312,6 +313,28 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             val timestamp = (event.eventTime % Int.MAX_VALUE).toInt()
             WawonaNative.nativeKeyEvent(event.keyCode, state, timestamp)
             return true
+        }
+
+        override fun startSurfaceSmokeClient(): Boolean {
+            checkMainThread()
+            check(!stopped) { "Wawona display session is stopped." }
+            check(attachedSurface?.isValid == true) {
+                "Attach the Android Surface before starting the Wayland smoke client."
+            }
+            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) return false
+            return WawonaNative.nativeRunWestonSimpleSHM()
+        }
+
+        override fun isSurfaceSmokeClientRunning(): Boolean {
+            checkMainThread()
+            return !stopped && WawonaNative.nativeIsWestonSimpleSHMRunning()
+        }
+
+        override fun stopSurfaceSmokeClient() {
+            checkMainThread()
+            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) {
+                WawonaNative.nativeStopWestonSimpleSHM()
+            }
         }
 
         override fun stop() {
