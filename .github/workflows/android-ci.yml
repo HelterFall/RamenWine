@@ -632,7 +632,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: RamenWine CI #${{ github.run_number }}
           body: |
-            Installable ARM64 debug APK built from ` ${{ github.sha }} `.
+            Installable ARM64 debug APK built from commit ${{ github.sha }}.
             Signed with the repository's persistent Android signing key.
           prerelease: true
           make_latest: false
