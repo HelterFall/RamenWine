@@ -84,7 +84,7 @@ while IFS= read -r loader_file; do
   [[ -n "$loader_file" ]] || continue
   loader_name="$(basename "$loader_file")"
   install -m 0755 "$loader_file" "$RUNTIME_ROOT/host/libexec/proot/${loader_name}"
-done < <(find "$PROOT_DIR" -type f \( -name loader -o -name loader-m32 \) -print)
+done < <(find "$PROOT_DIR" -type f -name loader -print)
 
 # Use the Buildx-exported Debian ARM64 guest rootfs. CI builds this from
 # runtime-rootfs.Dockerfile and caches the expensive apt layer between runs.
