@@ -86,7 +86,7 @@ Without an in-process compositor and a reachable Wayland socket, a launch comman
 
 ProotWineProcessSupervisor starts PRoot directly with ProcessBuilder, merges stdout/stderr, dispatches output and exit callbacks to the main dispatcher, and supports a graceful stop followed by forced stop. One coroutine owns process-exit observation; concurrent stop requests are serialized, and the exit callback is delivered only after a bounded final-output drain. If a Wine descendant keeps the inherited pipe open, the supervisor closes its read end after the drain timeout rather than blocking the game screen forever. The class also provides a run-to-completion path for one-shot setup commands such as wineboot. The current stop grace period is 1.5 seconds, followed by a 1.5-second forced-wait period.
 
-The supervisor currently supervises the Process returned by ProcessBuilder. It has not been proven that all Wine/Box64 descendants terminate in every failure or Android lifecycle scenario. A production GameSession coordinator must own and verify the complete process tree.
+PRoot's `--kill-on-exit` remains the first cleanup mechanism. The Android supervisor also samples `/proc` while the PRoot process is alive, remembers descendant PID/start-time pairs, and after PRoot exits sends TERM then KILL only to remembered descendants whose start times still match. This catches Wine/game children that escaped an interrupted PRoot shutdown without risking a recycled PID or unrelated app processes. Physical-device verification is still needed for Android's per-device `/proc` visibility and PRoot's actual tracing behavior.
 
 ## Security and package trust
 
