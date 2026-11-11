@@ -19,15 +19,15 @@ class ProcessTreeTerminatorTest {
 
             File(proc, "600/cmdline").apply {
                 parentFile.mkdirs()
-                writeBytes("/app/runtime/proot\\u0000--kill-on-exit\\u0000".toByteArray(Charsets.UTF_8))
+                writeBytes("/app/runtime/proot\u0000--kill-on-exit\u0000".toByteArray(Charsets.UTF_8))
             }
             File(proc, "601/cmdline").apply {
                 parentFile.mkdirs()
-                writeBytes("/app/runtime/proot\\u0000--kill-on-exit\\u0000".toByteArray(Charsets.UTF_8))
+                writeBytes("/app/runtime/proot\u0000--kill-on-exit\u0000".toByteArray(Charsets.UTF_8))
             }
             File(proc, "602/cmdline").apply {
                 parentFile.mkdirs()
-                writeBytes("/app/runtime/other\\u0000".toByteArray(Charsets.UTF_8))
+                writeBytes("/app/runtime/other\u0000".toByteArray(Charsets.UTF_8))
             }
 
             val pid = ProcessTreeTerminator.findNewDirectChildPid(
