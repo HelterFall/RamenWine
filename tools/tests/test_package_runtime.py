@@ -83,7 +83,7 @@ class RuntimePackagerTests(unittest.TestCase):
 
         wrapper = root / "rootfs/opt/ramenwine-tools/run-wine-command.sh"
         wrapper.parent.mkdir(parents=True, exist_ok=True)
-        wrapper.write_text("#!/bin/sh\\nexit 0\\n", encoding="utf-8")
+        wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         wrapper.chmod(0o755)
 
         self.write_pe32_plus_amd64(
@@ -144,6 +144,43 @@ class RuntimePackagerTests(unittest.TestCase):
                     [{"path": "host/lib/libwine.so", "target": "libwine.so.1"}],
                 )
 
+
+    def test_glibc_manifest_rejects_missing_wineserver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            (root / "rootfs/usr/bin/wineserver").unlink()
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(
+                ValueError, "rootfs/usr/bin/wineserver"
+            ):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
+
+    def test_glibc_manifest_rejects_missing_wine_shutdown_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            (root / "rootfs/opt/ramenwine-tools/run-wine-command.sh").unlink()
+
+            files, symlinks = package_runtime.scan_runtime(root, 1024 * 1024)
+            with self.assertRaisesRegex(ValueError, "run-wine-command.sh"):
+                package_runtime.make_manifest(
+                    "glibc-proot-box64", "test-1", files, symlinks
+                )
+
+    def test_wine_shutdown_wrapper_kills_and_waits_for_wineserver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            self.create_glibc_runtime(root)
+            wrapper = root / "rootfs/opt/ramenwine-tools/run-wine-command.sh"
+            contents = wrapper.read_text(encoding="utf-8")
+
+            self.assertIn("/usr/bin/box64 /usr/bin/wineserver -k", contents)
+            self.assertIn("/usr/bin/box64 /usr/bin/wineserver -w", contents)
+            self.assertIn("wine_status", contents)
 
     def test_absolute_rootfs_symlink_uses_guest_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
