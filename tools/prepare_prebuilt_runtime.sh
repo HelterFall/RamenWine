@@ -124,27 +124,30 @@ mkdir -p "$WINE_DIR"
 tar --extract --gzip --file "$DOWNLOAD_DIR/$WINE_ARCHIVE_NAME" \
   --directory "$WINE_DIR"
 
-# Prefer the public launcher in bin/. The distribution also contains
-# an ELF named wine64 under lib/wine/; selecting that implementation directly
-# would incorrectly make lib/ the Wine root and hide bin/wineserver.
-WINE_ELF=""
-for launcher_name in wine64 wine; do
-  while IFS= read -r candidate; do
-    [[ -n "$candidate" ]] || continue
-    resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
-    [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
-    if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
-      WINE_ELF="$candidate"
-      break
-    fi
-  done < <(find "$WINE_DIR" \( -type f -o -type l \) -path "*/bin/$launcher_name" -print)
-  [[ -n "$WINE_ELF" ]] && break
-done
-[[ -n "$WINE_ELF" ]] || \
-  fail "Could not find an x86-64 ELF Wine launcher in bin/ (expected bin/wine64)."
-
-WINE_ROOT="$(cd "$(dirname "$WINE_ELF")/.." && pwd)"
+# The upstream release archive is produced by tar -C ... "$lug_name",
+# so its first-level directory is the Wine distribution root. Do not derive
+# this from the selected ELF: Wine may also store an ELF named wine64 under
+# lib/wine/, which would incorrectly make lib/ the root and hide bin/wineserver.
+mapfile -t WINE_DISTRIBUTION_ROOTS < <(
+  find "$WINE_DIR" -mindepth 1 -maxdepth 1 -type d -print
+)
+[[ "${#WINE_DISTRIBUTION_ROOTS[@]}" -eq 1 ]] || \
+  fail "Expected exactly one top-level LUG Wine distribution directory."
+WINE_ROOT="${WINE_DISTRIBUTION_ROOTS[0]}"
 echo "Using Wine distribution root: $WINE_ROOT"
+
+WINE_ELF=""
+while IFS= read -r candidate; do
+  [[ -n "$candidate" ]] || continue
+  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
+    WINE_ELF="$candidate"
+    break
+  fi
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) \( -name wine64 -o -name wine \) -print)
+[[ -n "$WINE_ELF" ]] || \
+  fail "Could not find an x86-64 ELF Wine launcher (expected bin/wine64)."
 
 # The final LUG binary must use the same mmdevapi system-thread table as
 # the DirectAudio driver built in the audio job. Upstream DirectAudio uses
