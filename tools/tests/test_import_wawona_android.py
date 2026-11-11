@@ -46,6 +46,14 @@ class WawonaReleaseImporterTests(unittest.TestCase):
         self.assertTrue(declared_methods, "The Wawona Kotlin wrapper declares no JNI methods.")
         self.assertEqual(declared_methods, required_methods)
 
+    def test_requires_upstream_shm_smoke_client_exports(self) -> None:
+        required = {
+            "Java_com_aspauldingcode_wawona_WawonaNative_nativeRunWestonSimpleSHM",
+            "Java_com_aspauldingcode_wawona_WawonaNative_nativeStopWestonSimpleSHM",
+            "Java_com_aspauldingcode_wawona_WawonaNative_nativeIsWestonSimpleSHMRunning",
+        }
+        self.assertTrue(required.issubset(import_wawona_android.REQUIRED_JNI_SYMBOLS))
+
     def test_accepts_arm64_elf_and_rejects_x86_64(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             arm64 = Path(temporary) / "libwawona.so"
