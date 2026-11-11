@@ -47,6 +47,9 @@ REQUIRED_JNI_SYMBOLS = {
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeInjectKey",
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeTextEntryWanted",
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeGetTextInputContentType",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeRunWestonSimpleSHM",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeStopWestonSimpleSHM",
+    "Java_com_aspauldingcode_wawona_WawonaNative_nativeIsWestonSimpleSHMRunning",
 }
 ASSET_ROOTS = ("xkb", "fonts", "weston")
 MAX_ENTRIES = 100_000
