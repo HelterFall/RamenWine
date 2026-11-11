@@ -159,7 +159,7 @@ class ProotWineProcessSupervisor(
             } else {
                 null
             }
-            startedProcess to rootPid?.let(::ProcessTreeTerminator)
+            startedProcess to rootPid?.let { ProcessTreeTerminator(it) }
         }
         ProotWineProcessSession(
             process = process,
