@@ -91,6 +91,26 @@ jobs:
           wget -q "https://github.com/bylaws/llvm-mingw/releases/download/20250920/${LLVM_MINGW}.tar.xz"
           tar -xf "${LLVM_MINGW}.tar.xz"
 
+      - name: Checkout RamenWine Win32 smoke-test source
+        uses: actions/checkout@v4
+        with:
+          path: ramenwine-source
+
+      - name: Build the Win32 GDI smoke executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN="$HOME/toolchains/${LLVM_MINGW}/bin"
+          OUTPUT="$GITHUB_WORKSPACE/out/rootfs/opt/ramenwine-tests"
+          mkdir -p "$OUTPUT"
+          "$TOOLCHAIN/x86_64-w64-mingw32-clang" \
+            -O2 -Wall -Wextra -Werror -mwindows \
+            "$GITHUB_WORKSPACE/ramenwine-source/tools/win32-smoke/ramenwine-gdi-smoke.c" \
+            -o "$OUTPUT/ramenwine-gdi-smoke.exe" \
+            -luser32 -lgdi32
+          file "$OUTPUT/ramenwine-gdi-smoke.exe" | grep -q 'PE32+.*x86-64'
+          test -s "$OUTPUT/ramenwine-gdi-smoke.exe"
+
       - name: Regenerate Wine configure script
         working-directory: wine
         run: |
