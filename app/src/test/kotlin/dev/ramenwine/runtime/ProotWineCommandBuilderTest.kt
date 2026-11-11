@@ -29,7 +29,7 @@ class ProotWineCommandBuilderTest {
                 File(fixture.filesDirectory, "prefixes/" + fixture.gameId).canonicalFile,
                 command.hostPrefixDirectory
             )
-            assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
+            assertEquals(fixture.nativeProot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/env"))
             assertTrue(command.arguments.contains("/usr/bin/box64"))
@@ -37,7 +37,13 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
-            assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertEquals(
+                listOf(
+                    fixture.nativeLibraryDirectory.canonicalPath,
+                    fixture.hostLibraries.canonicalPath
+                ).joinToString(File.pathSeparator),
+                command.environment["LD_LIBRARY_PATH"]
+            )
             assertTrue(command.environment.containsKey("PROOT_TMP_DIR"))
             assertFalse(command.environment.containsKey("XDG_RUNTIME_DIR"))
             assertFalse(command.environment.containsKey("WINEPREFIX"))
@@ -341,6 +347,38 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun refusesToBuildWhenApkNativeProotIsMissing() {
+        val fixture = Fixture()
+        try {
+            fixture.nativeProot.delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request())
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("libproot.so"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesToBuildWhenApkNativeAudioRelayIsMissing() {
+        val fixture = Fixture()
+        try {
+            fixture.nativeAudioRelay.delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request())
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("libdirectaudio-relay.so"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun refusesRuntimeWithMissingProotExecutable() {
         val fixture = Fixture()
         try {
@@ -363,6 +401,9 @@ class ProotWineCommandBuilderTest {
         val root = Files.createTempDirectory("ramenwine-launch").toFile()
         val filesDirectory = File(root, "files").apply { mkdirs() }
         val cacheDirectory = File(root, "cache").apply { mkdirs() }
+        val nativeLibraryDirectory = File(root, "native-libs").apply { mkdirs() }
+        val nativeProot = executable(nativeLibraryDirectory, "libproot.so")
+        val nativeAudioRelay = executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
         val gameId = "12345678-1234-1234-1234-123456789abc"
 
         val backendRoot = File(
@@ -404,6 +445,7 @@ class ProotWineCommandBuilderTest {
         fun request() = ProotWineLaunchRequest(
             filesDirectory = filesDirectory,
             cacheDirectory = cacheDirectory,
+            nativeLibraryDirectory = nativeLibraryDirectory,
             game = ImportedGame(
                 id = gameId,
                 title = "Test visual novel",
