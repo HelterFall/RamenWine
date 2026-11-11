@@ -1,5 +1,6 @@
 package dev.ramenwine.runtime
 
+import android.os.Process as AndroidProcess
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,6 +27,9 @@ private const val SETUP_COMMAND_STOP_WAIT_MILLIS = 1_500L
 private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
 private const val PROCESS_TREE_SCAN_INTERVAL_MILLIS = 250L
 
+// Keep the pre/post-spawn /proc snapshot atomic across concurrent sessions.
+private val PROCESS_LAUNCH_LOCK = Any()
+
 /**
  * Starts a previously validated PRoot command without a shell.
  *
@@ -49,7 +53,7 @@ class ProotWineProcessSupervisor(
         // One-shot wineboot/reg.exe commands run under PRoot --kill-on-exit.
         // Do not force-kill their descendants here: Wine may keep wineserver
         // alive briefly so the next setup command can reuse the same prefix.
-        val process = createProcess(command)
+        val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
         val outputJob = launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
@@ -142,12 +146,27 @@ class ProotWineProcessSupervisor(
             throw IOException("The PRoot working directory does not exist.")
         }
 
-        val process = createProcess(command)
+        val (process, processTree) = synchronized(PROCESS_LAUNCH_LOCK) {
+            val parentPid = AndroidProcess.myPid()
+            val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
+            val startedProcess = createProcess(command)
+            val rootPid = if (startedProcess.isAlive) {
+                ProcessTreeTerminator.findNewDirectChildPid(
+                    parentPid = parentPid,
+                    executable = command.prootExecutable,
+                    existingPids = existingChildren
+                )
+            } else {
+                null
+            }
+            startedProcess to rootPid?.let { ProcessTreeTerminator(it) }
+        }
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,
             onExit = onExit,
-            callbackDispatcher = callbackDispatcher
+            callbackDispatcher = callbackDispatcher,
+            processTree = processTree
         )
     }
 }
@@ -156,7 +175,8 @@ class ProotWineProcessSession internal constructor(
     private val process: Process,
     private val onOutput: (String) -> Unit,
     private val onExit: (Int) -> Unit,
-    private val callbackDispatcher: CoroutineDispatcher
+    private val callbackDispatcher: CoroutineDispatcher,
+    private val processTree: ProcessTreeTerminator? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val finished = AtomicBoolean(false)
@@ -168,10 +188,6 @@ class ProotWineProcessSession internal constructor(
     private val outputDrainMutex = Mutex()
     private val outputJob: Job
     private val processTreeMonitor: Job
-    private val processTree = runCatching {
-        val pid = process.pid().toInt()
-        if (pid > 0) ProcessTreeTerminator(pid) else null
-    }.getOrNull()
 
     init {
         outputJob = scope.launch {
