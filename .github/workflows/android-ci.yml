@@ -367,6 +367,8 @@ jobs:
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -572,3 +574,15 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      
+      - name: Publish direct APK download on GitHub Releases
+        if: success() && github.ref == 'refs/heads/build/ramenwine-apk-check'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ramenwine-ci-${{ github.run_number }}
+          name: RamenWine CI #${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          files: app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
+
