@@ -30,6 +30,8 @@ internal object RuntimeBinaryValidator {
         "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",
         "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     )
+    private const val WIN32_GDI_SMOKE_PATH =
+        "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
 
     fun inspectInstalled(backend: RuntimeBackendId, backendRoot: File): List<String> {
         if (backend != RuntimeBackendId.GLIBC_PROOT_BOX64) return emptyList()
@@ -73,6 +75,13 @@ internal object RuntimeBinaryValidator {
             .toList()
         if (winebootFiles.isNotEmpty() && winebootFiles.none(::isX86_64Pe32Plus)) {
             errors += "Wine prefix initializer must be an x86-64 PE32+ executable."
+        }
+
+        val smokeTest = resolveInside(backendRoot, WIN32_GDI_SMOKE_PATH)
+        if (smokeTest == null || !smokeTest.isFile || !smokeTest.canRead() ||
+            !isX86_64Pe32Plus(smokeTest)
+        ) {
+            errors += "Win32 GDI launch smoke executable must be an x86-64 PE32+ file."
         }
 
         val wineRoot = resolveInside(backendRoot, WINE_ROOT_PATH)
