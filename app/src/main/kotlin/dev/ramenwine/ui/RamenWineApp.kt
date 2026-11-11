@@ -113,6 +113,7 @@ fun RamenWineApp() {
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
     var surfaceReady by remember { mutableStateOf(false) }
     var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
+    var surfaceFrameVerified by remember { mutableStateOf(false) }
     var verifyingSurfaceFrame by remember { mutableStateOf(false) }
     var surfaceFrameResult by remember { mutableStateOf<String?>(null) }
     var preparingGame by remember { mutableStateOf(false) }
@@ -274,6 +275,8 @@ fun RamenWineApp() {
 
         gameLaunchError = null
         gameLaunchNotice = "Проверяю Wawona и подготавливаю ресурсы…"
+        surfaceFrameVerified = false
+        surfaceFrameResult = null
         processOutput = ""
         preparingGame = true
 
@@ -282,6 +285,8 @@ fun RamenWineApp() {
                 activeDisplaySession = gameSessionCoordinator.openDisplay()
                 selectedDisplayGame = game
                 surfaceReady = false
+                activeSurfaceView = null
+                surfaceFrameVerified = false
                 gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
@@ -297,12 +302,15 @@ fun RamenWineApp() {
         if (view == null || !surfaceReady || verifyingSurfaceFrame || preparingGame) return
 
         verifyingSurfaceFrame = true
+        surfaceFrameVerified = false
         surfaceFrameResult = "Запускаю настоящий Wayland SHM-клиент и проверяю пиксели Android Surface…"
         scope.launch {
             try {
                 val result = view.verifyWaylandShmOutput()
+                surfaceFrameVerified = result.visible
                 surfaceFrameResult = result.detail
             } catch (error: Exception) {
+                surfaceFrameVerified = false
                 surfaceFrameResult = "Проверка не завершилась: " +
                     (error.message ?: error.javaClass.simpleName)
             } finally {
@@ -313,7 +321,7 @@ fun RamenWineApp() {
 
     fun launchSelectedGame() {
         val game = selectedDisplayGame ?: return
-        if (!surfaceReady || preparingGame) return
+        if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
 
         preparingGame = true
         gameLaunchError = null
@@ -330,6 +338,8 @@ fun RamenWineApp() {
                         activeDisplaySession = null
                         selectedDisplayGame = null
                         surfaceReady = false
+                        surfaceFrameVerified = false
+                        activeSurfaceView = null
                         preparingGame = false
                         gameLaunchNotice = "Windows-процесс завершился (код $exitCode)."
                     }
@@ -342,6 +352,8 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
+                    surfaceFrameVerified = false
+                    activeSurfaceView = null
                     gameLaunchNotice = "Процесс завершился до подтверждения запуска."
                 }
             } catch (error: Exception) {
@@ -351,6 +363,8 @@ fun RamenWineApp() {
                 activeDisplaySession = null
                 selectedDisplayGame = null
                 surfaceReady = false
+                surfaceFrameVerified = false
+                activeSurfaceView = null
             } finally {
                 preparingGame = false
             }
@@ -377,6 +391,8 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
+                    surfaceFrameVerified = false
+                    activeSurfaceView = null
                 }
                 preparingGame = false
             }
@@ -616,8 +632,17 @@ fun RamenWineApp() {
                             WawonaSurfaceHost(
                                 session = currentDisplay,
                                 modifier = Modifier.fillMaxWidth().height(320.dp),
-                                onSurfaceStateChanged = { attached -> surfaceReady = attached },
-                                onSurfaceViewChanged = { activeSurfaceView = it }
+                                onSurfaceStateChanged = { attached ->
+                                    surfaceReady = attached
+                                    if (!attached) {
+                                        surfaceFrameVerified = false
+                                        surfaceFrameResult = null
+                                    }
+                                },
+                                onSurfaceViewChanged = { view ->
+                                    activeSurfaceView = view
+                                    if (view == null) surfaceFrameVerified = false
+                                }
                             )
                             if (activeGameSession == null) {
                                 Button(
@@ -646,10 +671,12 @@ fun RamenWineApp() {
                                 Button(
                                     onClick = ::launchSelectedGame,
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && !preparingGame && !verifyingSurfaceFrame
+                                    enabled = surfaceReady && surfaceFrameVerified &&
+                                        !preparingGame && !verifyingSurfaceFrame
                                 ) {
                                     Text(
                                         if (preparingGame) "Подготовка…"
+                                        else if (!surfaceFrameVerified) "Сначала проверь вывод Wayland"
                                         else "Запустить Windows EXE"
                                     )
                                 }
