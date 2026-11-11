@@ -1,5 +1,7 @@
 package dev.ramenwine.runtime
 
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.os.Build
 import android.system.Os
 import android.system.OsConstants
@@ -84,7 +86,9 @@ internal class DirectAudioRelaySupervisor(
                         "See Android logcat tag DA-Relay for its diagnostic."
                 )
             }
-            if (isUnixSocket(socket)) return DirectAudioRelaySession(process, socket)
+            if (isUnixSocket(socket) && canConnectToRelay(socket)) {
+                return DirectAudioRelaySession(process, socket)
+            }
             try {
                 Thread.sleep(SOCKET_POLL_INTERVAL_MILLIS)
             } catch (interrupted: InterruptedException) {
@@ -98,7 +102,7 @@ internal class DirectAudioRelaySupervisor(
         process.destroyForcibly()
         socket.delete()
         throw IOException(
-            "The DirectAudio helper did not create its listening socket. " +
+            "The DirectAudio helper did not accept a local connection on its listening socket. " +
                 "See Android logcat tag DA-Relay for its diagnostic."
         )
     }
@@ -107,12 +111,36 @@ internal class DirectAudioRelaySupervisor(
         OsConstants.S_ISSOCK(Os.lstat(socket.absolutePath).st_mode)
     }.getOrDefault(false)
 
+    /**
+     * DirectAudio's own mmdevapi test_connect performs this same short AF_UNIX
+     * probe: connect and close without sending a hello. The relay explicitly
+     * treats it as a readiness check, not a game audio stream.
+     */
+    private fun canConnectToRelay(socket: File): Boolean {
+        val probe = LocalSocket()
+        return try {
+            probe.connect(
+                LocalSocketAddress(
+                    socket.absolutePath,
+                    LocalSocketAddress.Namespace.FILESYSTEM
+                ),
+                SOCKET_PROBE_TIMEOUT_MILLIS
+            )
+            true
+        } catch (_: Exception) {
+            false
+        } finally {
+            runCatching { probe.close() }
+        }
+    }
+
     private companion object {
         const val MIN_ANDROID_API = 28
         const val SOCKET_NAME = "directaudio-relay.sock"
         const val MAX_UNIX_SOCKET_PATH_BYTES = 108
         const val SOCKET_READY_TIMEOUT_NANOS = 2_000_000_000L
         const val SOCKET_POLL_INTERVAL_MILLIS = 20L
+        const val SOCKET_PROBE_TIMEOUT_MILLIS = 200
     }
 }
 
