@@ -30,31 +30,37 @@ internal class ProcessTreeTerminator(
 
     /** Call periodically while the root PRoot process is alive. */
     fun captureDescendants() {
-        // Process visibility can vary by Android build and transient /proc
-        // entries can disappear while scanning. A failed snapshot must not
-        // crash the process watcher or prevent its normal exit callback.
-        val directories = runCatching { procDirectory.listFiles() }.getOrNull() ?: return
-        val entries = directories.asSequence()
-            .mapNotNull { directory ->
-                val pid = directory.name.toIntOrNull() ?: return@mapNotNull null
-                if (pid <= 0) return@mapNotNull null
-                readProcStat(File(directory, "stat"))
-            }
-            .associateBy { it.pid }
-
-        val childrenByParent = entries.values.groupBy { it.parentPid }
+        // Read the Linux children lists of this process tree rather than scanning
+        // the device-wide /proc table every 250 ms. Include every thread's list:
+        // PRoot can create children from a non-leader thread.
         val visited = HashSet<Int>()
         val pending = ArrayDeque<Int>()
         pending.addLast(rootPid)
 
         while (pending.isNotEmpty()) {
             val parentPid = pending.removeFirst()
-            for (child in childrenByParent[parentPid].orEmpty()) {
-                if (!visited.add(child.pid)) continue
-                if (child.state != ZOMBIE_STATE && child.state != DEAD_STATE) {
-                    observedStartTimes[child.pid] = child.startTimeTicks
+            val taskDirectory = File(procDirectory, "$parentPid/task")
+            val tasks = runCatching { taskDirectory.listFiles() }.getOrNull() ?: continue
+
+            for (task in tasks) {
+                val childrenFile = File(task, "children")
+                val childPids = runCatching {
+                    childrenFile.readText(Charsets.US_ASCII)
+                        .trim()
+                        .split(Regex("\\s+"))
+                        .mapNotNull(String::toIntOrNull)
+                }.getOrDefault(emptyList())
+
+                for (childPid in childPids) {
+                    if (childPid <= 0 || !visited.add(childPid)) continue
+                    val child = readProcStat(File(procDirectory, "$childPid/stat")) ?: continue
+                    // Reject a stale children-list entry or a recycled PID.
+                    if (child.parentPid != parentPid) continue
+                    if (child.state != ZOMBIE_STATE && child.state != DEAD_STATE) {
+                        observedStartTimes[child.pid] = child.startTimeTicks
+                    }
+                    pending.addLast(child.pid)
                 }
-                pending.addLast(child.pid)
             }
         }
     }
