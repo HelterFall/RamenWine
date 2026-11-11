@@ -114,7 +114,6 @@ object ProotWineCommandBuilder {
         val proot = androidHostExecutable(nativeLibraryDirectory, "libproot.so")
         androidHostExecutable(nativeLibraryDirectory, "libdirectaudio-relay.so")
         val prootLoader = androidHostExecutable(nativeLibraryDirectory, "libproot-loader.so")
-        val prootLoader32 = androidHostExecutable(nativeLibraryDirectory, "libproot-loader32.so")
 
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
@@ -266,8 +265,7 @@ object ProotWineCommandBuilder {
                 hostLibraryDirectory.canonicalPath
             ).joinToString(File.pathSeparator),
             "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
-            "PROOT_LOADER" to prootLoader.canonicalPath,
-            "PROOT_LOADER_32" to prootLoader32.canonicalPath
+            "PROOT_LOADER" to prootLoader.canonicalPath
         )
 
         return ProotWineCommand(
@@ -490,13 +488,13 @@ object ProotWineCommandBuilder {
         "TMPDIR",
         "PROOT_TMP_DIR",
         "PROOT_LOADER",
-        "PROOT_LOADER_32",
         "LD_LIBRARY_PATH",
         "PATH",
         "WINEPREFIX",
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
         "BOX64_NOBANNER",
+        "PROOT_LOADER",
         "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",
         "LD_PRELOAD",
