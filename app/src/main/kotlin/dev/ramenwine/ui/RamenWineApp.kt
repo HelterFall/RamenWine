@@ -111,6 +111,7 @@ fun RamenWineApp() {
     var selectedDisplayGame by remember { mutableStateOf<ImportedGame?>(null) }
     var activeDisplaySession by remember { mutableStateOf<DisplaySession?>(null) }
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
+    var activeGameIsDiagnostic by remember { mutableStateOf(false) }
     var surfaceReady by remember { mutableStateOf(false) }
     var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
     var surfaceFrameVerified by remember { mutableStateOf(false) }
@@ -319,47 +320,68 @@ fun RamenWineApp() {
         }
     }
 
-    fun launchSelectedGame() {
+    fun startSelectedSession(launchDiagnosticWindow: Boolean) {
         val game = selectedDisplayGame ?: return
         if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
 
         preparingGame = true
         gameLaunchError = null
-        gameLaunchNotice = "Проверяю runtime и запускаю Windows EXE…"
+        gameLaunchNotice = if (launchDiagnosticWindow) {
+            "Проверяю запуск встроенного Win32 GDI окна…"
+        } else {
+            "Проверяю runtime и запускаю Windows EXE…"
+        }
         scope.launch {
             try {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
+                    launchDiagnosticWindow = launchDiagnosticWindow,
                     onOutput = { line ->
-                        processOutput = (processOutput + line + "\n").takeLast(8_000)
+                        processOutput = (processOutput + line + "\\n").takeLast(8_000)
                     },
                     onExit = { exitCode ->
                         activeGameSession = null
+                        activeGameIsDiagnostic = false
                         activeDisplaySession = null
                         selectedDisplayGame = null
                         surfaceReady = false
                         surfaceFrameVerified = false
                         activeSurfaceView = null
                         preparingGame = false
-                        gameLaunchNotice = "Windows-процесс завершился (код $exitCode)."
+                        gameLaunchNotice = if (launchDiagnosticWindow) {
+                            "Win32 GDI тест завершился (код $exitCode)."
+                        } else {
+                            "Windows-процесс завершился (код $exitCode)."
+                        }
                     }
                 )
                 if (launched.isRunning) {
                     activeGameSession = launched
-                    gameLaunchNotice = "Процесс игры запущен. Диагностика доступна ниже."
+                    activeGameIsDiagnostic = launchDiagnosticWindow
+                    gameLaunchNotice = if (launchDiagnosticWindow) {
+                        "Тестовое Win32 GDI окно запущено. Проверь, видно ли цветное окно с надписью RAMENWINE."
+                    } else {
+                        "Процесс игры запущен. Диагностика доступна ниже."
+                    }
                 } else {
                     activeGameSession = null
+                    activeGameIsDiagnostic = false
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
                     surfaceFrameVerified = false
                     activeSurfaceView = null
-                    gameLaunchNotice = "Процесс завершился до подтверждения запуска."
+                    gameLaunchNotice = if (launchDiagnosticWindow) {
+                        "Win32 GDI тест завершился до подтверждения запуска."
+                    } else {
+                        "Процесс завершился до подтверждения запуска."
+                    }
                 }
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
                 runCatching { gameSessionCoordinator.closeDisplay() }
                 activeGameSession = null
+                activeGameIsDiagnostic = false
                 activeDisplaySession = null
                 selectedDisplayGame = null
                 surfaceReady = false
@@ -370,6 +392,10 @@ fun RamenWineApp() {
             }
         }
     }
+
+    fun launchSelectedGame() = startSelectedSession(launchDiagnosticWindow = false)
+
+    fun launchWin32GdiSmokeTest() = startSelectedSession(launchDiagnosticWindow = true)
 
     fun stopSelectedGame() {
         scope.launch {
@@ -388,6 +414,7 @@ fun RamenWineApp() {
                 // process is still alive; that would strand a running game.
                 if (running == null || !running.isRunning) {
                     activeGameSession = null
+                    activeGameIsDiagnostic = false
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
@@ -669,6 +696,19 @@ fun RamenWineApp() {
                             }
                             if (activeGameSession == null) {
                                 Button(
+                                    onClick = ::launchWin32GdiSmokeTest,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = surfaceReady && surfaceFrameVerified &&
+                                        !preparingGame && !verifyingSurfaceFrame
+                                ) {
+                                    Text("Проверить запуск Win32 GDI окна")
+                                }
+                                Text(
+                                    "Встроенное окно проверяет Win32-отрисовку через Wine отдельно от файлов выбранной новеллы.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Button(
                                     onClick = ::launchSelectedGame,
                                     modifier = Modifier.fillMaxWidth(),
                                     enabled = surfaceReady && surfaceFrameVerified &&
@@ -686,7 +726,7 @@ fun RamenWineApp() {
                                     modifier = Modifier.fillMaxWidth(),
                                     enabled = !preparingGame
                                 ) {
-                                    Text("Остановить игру")
+                                    Text(if (activeGameIsDiagnostic) "Остановить GDI-тест" else "Остановить игру")
                                 }
                             }
                             Button(
