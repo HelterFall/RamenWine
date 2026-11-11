@@ -124,20 +124,27 @@ mkdir -p "$WINE_DIR"
 tar --extract --gzip --file "$DOWNLOAD_DIR/$WINE_ARCHIVE_NAME" \
   --directory "$WINE_DIR"
 
+# Prefer the public launcher in bin/. The distribution also contains
+# an ELF named wine64 under lib/wine/; selecting that implementation directly
+# would incorrectly make lib/ the Wine root and hide bin/wineserver.
 WINE_ELF=""
-while IFS= read -r candidate; do
-  [[ -n "$candidate" ]] || continue
-  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
-  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
-  if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
-    WINE_ELF="$candidate"
-    break
-  fi
-done < <(find "$WINE_DIR" \( -type f -o -type l \) \( -name wine64 -o -name wine \) -print)
+for launcher_name in wine64 wine; do
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+    [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+    if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
+      WINE_ELF="$candidate"
+      break
+    fi
+  done < <(find "$WINE_DIR" \( -type f -o -type l \) -path "*/bin/$launcher_name" -print)
+  [[ -n "$WINE_ELF" ]] && break
+done
 [[ -n "$WINE_ELF" ]] || \
-  fail "Could not find an x86-64 ELF Wine launcher (expected bin/wine64)."
+  fail "Could not find an x86-64 ELF Wine launcher in bin/ (expected bin/wine64)."
 
 WINE_ROOT="$(cd "$(dirname "$WINE_ELF")/.." && pwd)"
+echo "Using Wine distribution root: $WINE_ROOT"
 
 # The final LUG binary must use the same mmdevapi system-thread table as
 # the DirectAudio driver built in the audio job. Upstream DirectAudio uses
@@ -369,7 +376,7 @@ cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramen
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v2" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v3" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"
