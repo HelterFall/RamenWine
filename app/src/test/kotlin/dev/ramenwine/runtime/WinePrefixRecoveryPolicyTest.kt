@@ -11,7 +11,8 @@ class WinePrefixRecoveryPolicyTest {
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 3,
                 markerExists = true,
-                markerMatches = true
+                markerMatches = true,
+                prefixHasData = false
             )
         )
     }
@@ -23,7 +24,8 @@ class WinePrefixRecoveryPolicyTest {
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 3,
                 markerExists = false,
-                markerMatches = false
+                markerMatches = false,
+                prefixHasData = true
             )
         )
         assertEquals(
@@ -31,7 +33,8 @@ class WinePrefixRecoveryPolicyTest {
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 3,
                 markerExists = true,
-                markerMatches = false
+                markerMatches = false,
+                prefixHasData = true
             )
         )
     }
@@ -44,7 +47,8 @@ class WinePrefixRecoveryPolicyTest {
                 WinePrefixRecoveryPolicy.decide(
                     populatedRegistryFiles = existingRegistryFiles,
                     markerExists = false,
-                    markerMatches = false
+                    markerMatches = false,
+                    prefixHasData = true
                 )
             )
         }
