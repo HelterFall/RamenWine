@@ -18,7 +18,9 @@ internal class ProcessTreeTerminator(
     private val procDirectory: File = File("/proc"),
     private val sendSignal: (Int, Int) -> Unit = { pid, signal ->
         AndroidProcess.sendSignal(pid, signal)
-    }
+    },
+    private val termSettleMillis: Long = TERM_SETTLE_MILLIS,
+    private val killSettleMillis: Long = KILL_SETTLE_MILLIS
 ) {
     private val observedStartTimes = ConcurrentHashMap<Int, Long>()
 
@@ -28,15 +30,17 @@ internal class ProcessTreeTerminator(
 
     /** Call periodically while the root PRoot process is alive. */
     fun captureDescendants() {
-        val entries = procDirectory.listFiles()
-            ?.asSequence()
-            ?.mapNotNull { directory ->
+        // Process visibility can vary by Android build and transient /proc
+        // entries can disappear while scanning. A failed snapshot must not
+        // crash the process watcher or prevent its normal exit callback.
+        val directories = runCatching { procDirectory.listFiles() }.getOrNull() ?: return
+        val entries = directories.asSequence()
+            .mapNotNull { directory ->
                 val pid = directory.name.toIntOrNull() ?: return@mapNotNull null
                 if (pid <= 0) return@mapNotNull null
                 readProcStat(File(directory, "stat"))
             }
-            ?.associateBy { it.pid }
-            .orEmpty()
+            .associateBy { it.pid }
 
         val childrenByParent = entries.values.groupBy { it.parentPid }
         val visited = HashSet<Int>()
@@ -66,12 +70,12 @@ internal class ProcessTreeTerminator(
             runCatching { sendSignal(pid, SIGTERM) }
         }
 
-        sleepUninterruptibly(TERM_SETTLE_MILLIS)
+        sleepUninterruptibly(termSettleMillis)
 
         currentSurvivors().forEach { pid ->
             runCatching { sendSignal(pid, SIGKILL) }
         }
-        sleepUninterruptibly(KILL_SETTLE_MILLIS)
+        sleepUninterruptibly(killSettleMillis)
     }
 
     internal fun trackedPids(): Set<Int> = observedStartTimes.keys.toSet()
@@ -97,6 +101,7 @@ internal class ProcessTreeTerminator(
     }.getOrNull()
 
     private fun sleepUninterruptibly(durationMillis: Long) {
+        if (durationMillis <= 0L) return
         val deadline = System.nanoTime() + durationMillis * 1_000_000L
         var interrupted = false
         while (true) {
