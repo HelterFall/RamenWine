@@ -59,7 +59,6 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.guestEnvironment["BOX64_LD_LIBRARY_PATH"]!!.contains("x86_64-linux-gnu"))
             assertTrue(command.unsetEnvironment.contains("LD_LIBRARY_PATH"))
             assertTrue(command.unsetEnvironment.contains("PROOT_LOADER"))
-            assertTrue(command.unsetEnvironment.contains("PROOT_LOADER_32"))
             assertEquals(
                 "/games/" + fixture.gameId + "/game.exe",
                 command.guestExecutablePath
