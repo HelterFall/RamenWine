@@ -43,5 +43,15 @@ interface DisplaySession {
     fun detachSurface(surface: Surface)
     fun dispatchTouchEvent(event: MotionEvent): Boolean
     fun dispatchKeyEvent(event: KeyEvent): Boolean
+
+    /** Starts the upstream Weston SHM test client, if this backend provides one. */
+    fun startSurfaceSmokeClient(): Boolean = false
+
+    /** True while the backend's SHM smoke client is still connected. */
+    fun isSurfaceSmokeClientRunning(): Boolean = false
+
+    /** Requests the backend's SHM smoke client to exit. */
+    fun stopSurfaceSmokeClient() {}
+
     fun stop()
 }
