@@ -167,6 +167,15 @@ class RuntimeLayoutSymlinkTest {
         )
         waylandDriver.parentFile?.mkdirs()
         waylandDriver.writeBytes(elf64(62))
+
+        // RuntimeLayout now verifies the bundled Win32 GDI smoke executable
+        // as part of the installed glibc backend contract.
+        val gdiSmoke = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        )
+        gdiSmoke.parentFile?.mkdirs()
+        gdiSmoke.writeBytes(pe32PlusAmd64())
     }
 
 
