@@ -50,9 +50,9 @@ class ProotWineProcessSupervisor(
         timeoutMillis: Long = SETUP_COMMAND_TIMEOUT_MILLIS
     ): Int = withContext(Dispatchers.IO) {
         require(timeoutMillis > 0L) { "Setup timeout must be positive." }
-        // One-shot wineboot/reg.exe commands run under PRoot --kill-on-exit.
-        // Do not force-kill their descendants here: Wine may keep wineserver
-        // alive briefly so the next setup command can reuse the same prefix.
+        // One-shot Wine commands use the guest run-wine-command.sh wrapper.
+        // It asks wineserver to stop and waits for its lock to be released,
+        // allowing registry hives to flush before PRoot itself exits.
         val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
         val outputJob = launch {
             try {
