@@ -337,6 +337,17 @@ def _library_directories(root: Path, info: ElfInfo) -> list[Path]:
     # Box64's configured module search path includes Wine's x86_64-unix
     # directory. Debian also keeps private DSOs beside consumers (for example
     # systemd/libsystemd-core and libsystemd-shared). Treat co-located files as
+    # DirectAudio is staged in its own WINEDLLPATH directory, while its
+    # Wine unixlib dependency (ntdll.so) belongs to the main Wine module tree.
+    # Box64 searches both trees through BOX64_LD_LIBRARY_PATH at launch.
+    relative_to_root = info.path.relative_to(root).as_posix()
+    if relative_to_root.startswith("opt/ramenwine-audio/lib/wine/x86_64-unix/"):
+        wine_module_root = root / "opt/ramenwine-wine"
+        directories.extend(
+            path for path in wine_module_root.glob("**/x86_64-unix")
+            if path.is_dir() and not path.is_symlink()
+        )
+
     # available, but still validate their ELF machine below.
     directories.append(origin)
 

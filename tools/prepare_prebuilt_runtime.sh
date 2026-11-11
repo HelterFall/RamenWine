@@ -267,6 +267,15 @@ readelf -h "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" | \
 mkdir -p "$ROOTFS/opt/ramenwine-audio/lib/wine" "$RUNTIME_ROOT/host/share/ramenwine"
 cp -a "$AUDIO_WINE_ROOT/." "$ROOTFS/opt/ramenwine-audio/lib/wine/"
 
+# The DirectAudio unixlib imports ntdll.so from the main Wine module tree.
+# Fail with a precise packaging error if the pinned Wine distribution lacks it.
+WINE_NTDLL_UNIX="$(find "$ROOTFS/opt/ramenwine-wine" -type f \
+  -path '*/x86_64-unix/ntdll.so' -print -quit)"
+[[ -n "$WINE_NTDLL_UNIX" ]] || \
+  fail "The pinned Wine distribution is missing its x86-64 ntdll.so unix module."
+readelf -h "$WINE_NTDLL_UNIX" | grep -q 'Advanced Micro Devices X86-64' || \
+  fail "Wine ntdll.so unix module is not an x86-64 ELF."
+
 GDI_SMOKE_SOURCE="$AUDIO_BUNDLE_DIR/rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
 [[ -s "$GDI_SMOKE_SOURCE" ]] || fail "Win32 GDI smoke executable is missing from the build artifact."
 mkdir -p "$ROOTFS/opt/ramenwine-tests"

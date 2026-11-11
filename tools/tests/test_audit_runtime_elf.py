@@ -152,6 +152,26 @@ class RuntimeElfAuditTests(unittest.TestCase):
                 for issue in report["issues"]
             ))
 
+    def test_resolves_directaudio_dependency_from_main_wine_module_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rootfs = Path(temporary) / "rootfs"
+            audio_dir = rootfs / "opt/ramenwine-audio/lib/wine/x86_64-unix"
+            wine_dir = rootfs / "opt/ramenwine-wine/lib/wine/x86_64-unix"
+            audio_dir.mkdir(parents=True)
+            wine_dir.mkdir(parents=True)
+            module = audio_dir / "winedirectaudio.so"
+            module.write_bytes(dynamic_elf64(62, "ntdll.so"))
+            (wine_dir / "ntdll.so").write_bytes(elf64(62))
+
+            report = audit_runtime_elf.audit_rootfs(rootfs)
+
+            self.assertFalse(any(
+                issue["kind"] == "missing-library" and
+                issue["file"] == "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so" and
+                issue["detail"] == "ntdll.so"
+                for issue in report["issues"]
+            ))
+
     def test_resolves_private_systemd_library_next_to_consumer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"
