@@ -131,6 +131,13 @@ class RuntimeBinaryValidatorTest {
         wineboot.parentFile?.mkdirs()
         wineboot.writeBytes(pe32PlusAmd64())
 
+        val smokeTest = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        )
+        smokeTest.parentFile?.mkdirs()
+        smokeTest.writeBytes(pe32PlusAmd64())
+
         val audioUnix = File(
             backendRoot,
             "rootfs/opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so"
