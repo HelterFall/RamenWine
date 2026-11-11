@@ -14,7 +14,7 @@ internal object RuntimePackageRequirements {
         "rootfs/usr/bin/box64",
         "rootfs/usr/bin/wine",
         "rootfs/usr/bin/wineserver",
-        "rootfs/bin/sh",
+        "rootfs/usr/bin/sh",
         "rootfs/opt/ramenwine-tools/run-wine-command.sh"
     )
     private val requiredAudioFiles = listOf(
