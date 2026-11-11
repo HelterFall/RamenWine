@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -112,9 +113,11 @@ class ProotWineProcessSupervisor(
             outputJob.cancel()
             throw error
         } finally {
-            processTreeMonitor.cancelAndJoin()
-            processTree?.captureDescendants()
-            processTree?.terminateRemaining()
+            withContext(NonCancellable) {
+                processTreeMonitor.cancelAndJoin()
+                processTree?.captureDescendants()
+                processTree?.terminateRemaining()
+            }
         }
     }
 
@@ -230,9 +233,11 @@ class ProotWineProcessSession internal constructor(
                 Thread.currentThread().interrupt()
                 UNKNOWN_EXIT_CODE
             }
-            processTree?.captureDescendants()
-            processTree?.terminateRemaining()
-            processTreeMonitor.cancelAndJoin()
+            withContext(NonCancellable) {
+                processTree?.captureDescendants()
+                processTree?.terminateRemaining()
+                processTreeMonitor.cancelAndJoin()
+            }
             processExit.complete(exitCode)
             completeAfterOutputDrain(exitCode)
         }
