@@ -312,6 +312,22 @@ readelf -h "$NATIVE_LIBRARY_DIR/libproot.so" | grep -q 'AArch64' || \
 readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || \
   fail "Packaged DirectAudio relay is not an AArch64 ELF."
 
+# PRoot normally extracts its ELF loader into PROOT_TMP_DIR. Android denies
+# executing that writable filesDir/cacheDir copy on targetSdk 29+, so ship
+# both loader variants in nativeLibraryDir and point PRoot at those APK files.
+PROOT_LOADER_BINARY="$(find "$PROOT_DIR" -type f -name loader -print -quit)"
+PROOT_LOADER32_BINARY="$(find "$PROOT_DIR" -type f -name loader-m32 -print -quit)"
+[[ -n "$PROOT_LOADER_BINARY" && -s "$PROOT_LOADER_BINARY" ]] || \
+  fail "The Android PRoot archive does not contain its ELF loader."
+[[ -n "$PROOT_LOADER32_BINARY" && -s "$PROOT_LOADER32_BINARY" ]] || \
+  fail "The Android PRoot archive does not contain its 32-bit ELF loader."
+install -m 0755 "$PROOT_LOADER_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader.so"
+install -m 0755 "$PROOT_LOADER32_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader32.so"
+readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader.so" | grep -q 'AArch64' || \
+  fail "Packaged PRoot ELF loader is not an AArch64 ELF."
+readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader32.so" | grep -q 'AArch64' || \
+  fail "Packaged PRoot 32-bit ELF loader is not an AArch64 ELF."
+
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
 # Emit the exact package format consumed by RuntimePackageInstaller.
