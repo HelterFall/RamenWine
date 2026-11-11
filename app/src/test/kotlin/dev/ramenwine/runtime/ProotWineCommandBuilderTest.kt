@@ -200,6 +200,40 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsWineServerStopAndWaitCommandsWithTheSamePrefix() {
+        val fixture = Fixture()
+        try {
+            val gameCommand = ProotWineCommandBuilder.build(fixture.request())
+            val stop = ProotWineCommandBuilder.buildWineServerControlCommand(
+                gameCommand,
+                waitForExit = false
+            )
+            val wait = ProotWineCommandBuilder.buildWineServerControlCommand(
+                gameCommand,
+                waitForExit = true
+            )
+
+            assertEquals("/usr/bin/wineserver", stop.guestExecutablePath)
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineserver", "-k"),
+                stop.arguments.takeLast(3)
+            )
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineserver", "-w"),
+                wait.arguments.takeLast(3)
+            )
+            assertEquals(gameCommand.guestEnvironment["WINEPREFIX"], stop.guestEnvironment["WINEPREFIX"])
+            assertEquals(
+                gameCommand.arguments.filter { it.startsWith("--bind=") },
+                stop.arguments.filter { it.startsWith("--bind=") }
+            )
+            assertFalse(stop.arguments.contains("--kill-on-exit"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun buildsWineRegistryCommandThatSelectsDirectAudio() {
         val fixture = Fixture()
         try {
