@@ -114,6 +114,8 @@ fun RamenWineApp() {
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
     var gameLaunchOutput by remember { mutableStateOf<List<String>>(emptyList()) }
+    var runtimeReady by remember { mutableStateOf(false) }
+    var runtimeStatus by remember { mutableStateOf("Проверяю системную среду…") }
 
     suspend fun refreshLibrary() {
         importedGames = withContext(Dispatchers.IO) { libraryStore.list() }
@@ -137,16 +139,32 @@ fun RamenWineApp() {
             // Library entries remain available even if optional cleanup fails.
         }
 
-        val installedBackend = RuntimeLayout.inspect(context.filesDir)
-            .backends
-            .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
-
-        if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    RuntimePackageInstaller(context.applicationContext).installBundled()
+        runtimeReady = false
+        runtimeStatus = "Проверяю системную среду…"
+        try {
+            withContext(Dispatchers.IO) {
+                RuntimePackageInstaller(context.applicationContext).installBundledIfOutdated()
+            }
+            val installedBackend = RuntimeLayout.inspect(context.filesDir)
+                .backends
+                .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+            if (installedBackend?.state == RuntimeState.FILES_PRESENT) {
+                runtimeReady = true
+                runtimeStatus = "Среда запуска готова"
+            } else {
+                val details = installedBackend?.missingItems
+                    ?.take(3)
+                    ?.joinToString()
+                    .orEmpty()
+                runtimeStatus = if (details.isBlank()) {
+                    "Runtime не установлен или неполон"
+                } else {
+                    "Runtime неполон: $details"
                 }
             }
+        } catch (error: Exception) {
+            runtimeStatus = "Не удалось обновить runtime: " +
+                (error.message ?: error.javaClass.simpleName)
         }
     }
 
@@ -267,6 +285,10 @@ fun RamenWineApp() {
 
     fun prepareGame(game: ImportedGame) {
         if (preparingGame || activeDisplaySession != null || activeGameSession?.isRunning == true) {
+            return
+        }
+        if (!runtimeReady) {
+            gameLaunchError = runtimeStatus
             return
         }
         gameLaunchError = null
@@ -479,6 +501,16 @@ fun RamenWineApp() {
                     }
                 }
             } else {
+                if (!runtimeReady) {
+                    Text(
+                        runtimeStatus,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 16.dp, top = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (importedGames.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -508,7 +540,7 @@ fun RamenWineApp() {
                         items(importedGames, key = { it.id }) { game ->
                             GameIcon(
                                 game = game,
-                                enabled = !preparingGame,
+                                enabled = runtimeReady && !preparingGame,
                                 onClick = { prepareGame(game) }
                             )
                         }
