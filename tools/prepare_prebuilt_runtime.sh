@@ -162,6 +162,25 @@ WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 [[ "$WINE_ELF_RELATIVE" != "$WINE_ELF" ]] || \
   fail "Wine launcher is outside its expected distribution directory."
 
+# wineserver owns Wine's registry hives. Do not let PRoot kill it on exit:
+# shut it down normally and wait for its lock to be released before leaving PRoot.
+WINE_SERVER_ELF=""
+while IFS= read -r candidate; do
+  [[ -n "$candidate" ]] || continue
+  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  if readelf -h "$resolved_candidate" 2>/dev/null | \
+      grep -q 'Advanced Micro Devices X86-64'; then
+    WINE_SERVER_ELF="$candidate"
+    break
+  fi
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name wineserver -print)
+[[ -n "$WINE_SERVER_ELF" ]] || \
+  fail "LUG Wine archive does not contain an x86-64 wineserver ELF."
+WINE_SERVER_RELATIVE="${WINE_SERVER_ELF#"$WINE_ROOT"/}"
+[[ "$WINE_SERVER_RELATIVE" != "$WINE_SERVER_ELF" ]] || \
+  fail "wineserver is outside the Wine distribution directory."
+
 # WoW64 distributions include both i386 and x86-64 PE tools. Select by
 # the actual PE machine and optional-header magic, not nondeterministic find order.
 WINEBOOT_FILE="$(python3 "$ROOT_DIR/tools/select_wineboot.py" "$WINE_ROOT")" || \
@@ -197,8 +216,50 @@ cp -a "$WINE_ROOT/." "$ROOTFS/opt/ramenwine-wine/"
 # an x86-64 ELF. Keep the upstream Wine directory layout intact.
 mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/lib/wine/x86_64-windows"
 ln -sfn "/opt/ramenwine-wine/${WINE_ELF_RELATIVE}" "$ROOTFS/usr/bin/wine"
+ln -sfn "/opt/ramenwine-wine/${WINE_SERVER_RELATIVE}" "$ROOTFS/usr/bin/wineserver"
 ln -sfn "/opt/ramenwine-wine/${WINEBOOT_RELATIVE}" \
   "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe"
+
+WINE_SERVER_GUEST="$ROOTFS/opt/ramenwine-wine/${WINE_SERVER_RELATIVE}"
+[[ -f "$WINE_SERVER_GUEST" ]] || fail "The copied wineserver binary is missing."
+readelf -h "$WINE_SERVER_GUEST" | grep -q 'Advanced Micro Devices X86-64' || \
+  fail "The selected wineserver is not an x86-64 ELF."
+
+# All Wine commands use this wrapper. After the Windows command exits, it asks
+# wineserver to shut down and waits until the server releases its prefix lock.
+# This lets Wine flush its registry hives before the parent PRoot command exits.
+WINE_COMMAND_WRAPPER="$ROOTFS/opt/ramenwine-tools/run-wine-command.sh"
+mkdir -p "$(dirname "$WINE_COMMAND_WRAPPER")"
+cat > "$WINE_COMMAND_WRAPPER" <<'WINE_WRAPPER'
+#!/bin/sh
+if [ "$#" -lt 1 ]; then
+  echo "RamenWine: run-wine-command.sh requires a Wine program argument." >&2
+  exit 64
+fi
+
+/usr/bin/box64 /usr/bin/wine "$@"
+wine_status=$?
+
+/usr/bin/box64 /usr/bin/wineserver -k
+kill_status=$?
+/usr/bin/box64 /usr/bin/wineserver -w
+wait_status=$?
+
+if [ "$kill_status" -ne 0 ]; then
+  echo "RamenWine: wineserver -k returned $kill_status; waited for server shutdown." >&2
+fi
+if [ "$wait_status" -ne 0 ]; then
+  echo "RamenWine: wineserver did not release its lock (exit $wait_status)." >&2
+fi
+if [ "$wine_status" -ne 0 ]; then
+  exit "$wine_status"
+fi
+exit "$wait_status"
+WINE_WRAPPER
+chmod 0755 "$WINE_COMMAND_WRAPPER"
+test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing /bin/sh."
+test -x "$ROOTFS/usr/bin/wineserver" || fail "Guest wineserver link is not executable."
+test -x "$WINE_COMMAND_WRAPPER" || fail "Wine shutdown wrapper is not executable."
 
 # Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
 # host-side readlink -f on /usr/bin/wine: it would resolve /opt against the
