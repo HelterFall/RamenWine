@@ -68,7 +68,8 @@ class GameSessionCoordinator(
     suspend fun launchGame(
         game: ImportedGame,
         onOutput: (String) -> Unit,
-        onExit: (Int) -> Unit
+        onExit: (Int) -> Unit,
+        launchDiagnosticWindow: Boolean = false
     ): GameSession = withContext(Dispatchers.Main.immediate) {
         checkMainThread()
         check(!launchInProgress) { "A game launch is already being prepared." }
@@ -120,8 +121,16 @@ class GameSessionCoordinator(
                 )
             }
 
+            val processCommand = if (launchDiagnosticWindow) {
+                withContext(Dispatchers.IO) {
+                    ProotWineCommandBuilder.buildWin32GdiSmokeCommand(command)
+                }
+            } else {
+                command
+            }
+
             val process = processSupervisor.start(
-                command = command,
+                command = processCommand,
                 onOutput = onOutput,
                 onExit = { exitCode ->
                     try {
@@ -139,7 +148,7 @@ class GameSessionCoordinator(
                 processSession = process
             }
 
-            GameSession(game, process) {
+            GameSession(game, process, launchDiagnosticWindow) {
                 closeDisplayIfCurrent(display)
             }
         } catch (error: Exception) {
@@ -192,6 +201,7 @@ class GameSessionCoordinator(
 class GameSession internal constructor(
     val game: ImportedGame,
     private val process: ProotWineProcessSession,
+    val isDiagnostic: Boolean,
     private val releaseDisplay: () -> Unit
 ) {
     val isRunning: Boolean
