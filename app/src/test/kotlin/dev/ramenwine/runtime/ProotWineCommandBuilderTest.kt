@@ -537,7 +537,7 @@ class ProotWineCommandBuilderTest {
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
         val wineserver = executable(rootfs, "usr/bin/wineserver")
-        val shell = executable(rootfs, "bin/sh")
+        val shell = executable(rootfs, "usr/bin/dash")
         val wineCommandWrapper = executable(rootfs, "opt/ramenwine-tools/run-wine-command.sh")
         val touch = executable(rootfs, "usr/bin/touch")
         val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
@@ -556,6 +556,9 @@ class ProotWineCommandBuilderTest {
         val displayDirectory = File(cacheDirectory, "wawona-runtime").apply { mkdirs() }
 
         init {
+            // Match Debian Trixie's merged-/usr shell layout.
+            Files.createSymbolicLink(File(rootfs, "usr/bin/sh").toPath(), Paths.get("dash"))
+            Files.createSymbolicLink(File(rootfs, "bin").toPath(), Paths.get("usr/bin"))
             if (createWaylandSocket) {
                 File(displayDirectory, "wayland-0").writeText("socket placeholder")
             }
