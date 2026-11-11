@@ -82,6 +82,9 @@ class RuntimePackagerTests(unittest.TestCase):
         self.write_pe32_plus_amd64(
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
         )
+        self.write_pe32_plus_amd64(
+            root / "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        )
         relay = root / "host/bin/directaudio-relay"
         self.write_elf64(relay, 183)
         with relay.open("ab") as stream:
