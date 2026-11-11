@@ -252,6 +252,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             checkMainThread()
             if (stopped || attachedSurface !== surface) return
             touchMouseInput.cancel(currentTimestamp())
+            stopSurfaceSmokeClient()
             WawonaNative.nativeDestroySurface()
             attachedSurface = null
         }
@@ -321,7 +322,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             check(attachedSurface?.isValid == true) {
                 "Attach the Android Surface before starting the Wayland smoke client."
             }
-            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) return false
+            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) return true
             return WawonaNative.nativeRunWestonSimpleSHM()
         }
 
@@ -345,6 +346,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
                 touchMouseInput.cancel(currentTimestamp())
+                stopSurfaceSmokeClient()
                 WawonaNative.nativeDestroySurface()
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
