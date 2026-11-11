@@ -45,7 +45,7 @@ class ProotWineCommandBuilderTest {
                 command.environment["LD_LIBRARY_PATH"]
             )
             assertEquals(fixture.nativeProotLoader.canonicalPath, command.environment["PROOT_LOADER"])
-            assertEquals(fixture.nativeProotLoader32.canonicalPath, command.environment["PROOT_LOADER_32"])
+            assertTrue(command.unsetEnvironment.contains("PROOT_LOADER"))
             assertTrue(command.environment.containsKey("PROOT_TMP_DIR"))
             assertFalse(command.environment.containsKey("XDG_RUNTIME_DIR"))
             assertFalse(command.environment.containsKey("WINEPREFIX"))
@@ -399,22 +399,6 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
-    fun refusesToBuildWhenApkNativeProot32LoaderIsMissing() {
-        val fixture = Fixture()
-        try {
-            fixture.nativeProotLoader32.delete()
-            val error = runCatching {
-                ProotWineCommandBuilder.build(fixture.request())
-            }.exceptionOrNull()
-
-            assertTrue(error is java.io.IOException)
-            assertTrue(error?.message.orEmpty().contains("libproot-loader32.so"))
-        } finally {
-            fixture.cleanup()
-        }
-    }
-
-    @Test
     fun refusesRuntimeWithMissingProotExecutable() {
         val fixture = Fixture()
         try {
@@ -441,7 +425,6 @@ class ProotWineCommandBuilderTest {
         val nativeProot = executable(nativeLibraryDirectory, "libproot.so")
         val nativeAudioRelay = executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
         val nativeProotLoader = executable(nativeLibraryDirectory, "libproot-loader.so")
-        val nativeProotLoader32 = executable(nativeLibraryDirectory, "libproot-loader32.so")
         val gameId = "12345678-1234-1234-1234-123456789abc"
 
         val backendRoot = File(
