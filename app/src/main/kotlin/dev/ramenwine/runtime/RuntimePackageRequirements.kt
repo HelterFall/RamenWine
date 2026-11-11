@@ -23,6 +23,8 @@ internal object RuntimePackageRequirements {
         "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe",
         "rootfs/usr/lib/x86_64-linux-gnu/wine/x86_64-windows/wineboot.exe"
     )
+    private const val WIN32_GDI_SMOKE_PATH =
+        "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
 
     fun validateManifest(manifest: RuntimePackageManifest): List<String> {
         if (manifest.backend != RuntimeBackendId.GLIBC_PROOT_BOX64) return emptyList()
@@ -47,6 +49,10 @@ internal object RuntimePackageRequirements {
 
         if (winebootCandidates.none { resolveManifestFile(it, files, links) != null }) {
             errors += "Missing Wine prefix initializer (wineboot.exe)."
+        }
+
+        if (resolveManifestFile(WIN32_GDI_SMOKE_PATH, files, links) == null) {
+            errors += "Missing bundled Win32 GDI launch smoke executable."
         }
 
         val waylandDriverPaths = (files.keys + links.keys).filter { path ->
@@ -84,6 +90,11 @@ internal object RuntimePackageRequirements {
             resolveInstalledFile(backendRoot, path)?.let { it.isFile && it.canRead() } == true
         }
         if (!winebootPresent) errors += "Missing readable Wine prefix initializer (wineboot.exe)."
+
+        val smokeTest = resolveInstalledFile(backendRoot, WIN32_GDI_SMOKE_PATH)
+        if (smokeTest == null || !smokeTest.isFile || !smokeTest.canRead()) {
+            errors += "Missing or unreadable Win32 GDI launch smoke executable."
+        }
 
         val hostLibraries = resolveInstalledFile(backendRoot, "host/lib")
         if (hostLibraries == null || !hostLibraries.isDirectory) {
