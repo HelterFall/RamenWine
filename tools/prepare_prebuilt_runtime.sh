@@ -230,32 +230,8 @@ readelf -h "$WINE_SERVER_GUEST" | grep -q 'Advanced Micro Devices X86-64' || \
 # This lets Wine flush its registry hives before the parent PRoot command exits.
 WINE_COMMAND_WRAPPER="$ROOTFS/opt/ramenwine-tools/run-wine-command.sh"
 mkdir -p "$(dirname "$WINE_COMMAND_WRAPPER")"
-cat > "$WINE_COMMAND_WRAPPER" <<'WINE_WRAPPER'
-#!/bin/sh
-if [ "$#" -lt 1 ]; then
-  echo "RamenWine: run-wine-command.sh requires a Wine program argument." >&2
-  exit 64
-fi
-
-/usr/bin/box64 /usr/bin/wine "$@"
-wine_status=$?
-
-/usr/bin/box64 /usr/bin/wineserver -k
-kill_status=$?
-/usr/bin/box64 /usr/bin/wineserver -w
-wait_status=$?
-
-if [ "$kill_status" -ne 0 ]; then
-  echo "RamenWine: wineserver -k returned $kill_status; waited for server shutdown." >&2
-fi
-if [ "$wait_status" -ne 0 ]; then
-  echo "RamenWine: wineserver did not release its lock (exit $wait_status)." >&2
-fi
-if [ "$wine_status" -ne 0 ]; then
-  exit "$wine_status"
-fi
-exit "$wait_status"
-WINE_WRAPPER
+# Keep one canonical wrapper source so the runtime and its unit test cannot drift.
+cp "$ROOT_DIR/tools/run-wine-command.sh" "$WINE_COMMAND_WRAPPER"
 chmod 0755 "$WINE_COMMAND_WRAPPER"
 test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing /bin/sh."
 test -x "$ROOTFS/usr/bin/wineserver" || fail "Guest wineserver link is not executable."
