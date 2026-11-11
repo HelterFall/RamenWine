@@ -61,7 +61,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     window_class.lpfnWndProc = smoke_window_proc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorA(NULL, IDC_ARROW);
-    window_class.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    window_class.hbrBackground = (HBRUSH)(ULONG_PTR)(COLOR_WINDOW + 1);
     window_class.lpszClassName = WINDOW_CLASS;
 
     if (!RegisterClassExA(&window_class)) {
