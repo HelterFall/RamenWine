@@ -300,6 +300,40 @@ object ProotWineCommandBuilder {
         )
     }
 
+    /**
+     * Reuses a selected game's validated private prefix and PRoot mounts, but
+     * launches the bundled Win32 GDI test window instead of the user's EXE.
+     * This exercises Wine/Box64/Wayland without modifying imported game files.
+     */
+    fun buildWin32GdiSmokeCommand(gameCommand: ProotWineCommand): ProotWineCommand {
+        val relativePath = "opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        val smokeExecutable = requireRuntimeFile(gameCommand.guestRootfsDirectory, relativePath)
+        val guestExecutable = "/" + relativePath
+        val guestWorkingDirectory = "/opt/ramenwine-tests"
+        val arguments = gameCommand.arguments.dropLast(3)
+            .map { argument ->
+                if (argument.startsWith("--pwd=")) {
+                    "--pwd=" + guestWorkingDirectory
+                } else {
+                    argument
+                }
+            } + listOf(
+                "/usr/bin/box64",
+                "/usr/bin/wine",
+                guestExecutable
+            )
+
+        if (!smokeExecutable.canRead()) {
+            throw IOException("The bundled Win32 GDI smoke executable is unreadable.")
+        }
+
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = guestExecutable,
+            guestWorkingDirectory = guestWorkingDirectory
+        )
+    }
+
     fun buildWinebootCommand(
         gameCommand: ProotWineCommand,
         updateExistingPrefix: Boolean
