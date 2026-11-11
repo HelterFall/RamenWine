@@ -74,10 +74,17 @@ class RuntimePackagerTests(unittest.TestCase):
         for relative, machine in (
             ("host/bin/proot", 183),
             ("rootfs/usr/bin/env", 183),
+            ("rootfs/bin/sh", 183),
             ("rootfs/usr/bin/box64", 183),
             ("rootfs/usr/bin/wine", 62),
+            ("rootfs/usr/bin/wineserver", 62),
         ):
             self.write_elf64(root / relative, machine)
+
+        wrapper = root / "rootfs/opt/ramenwine-tools/run-wine-command.sh"
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text("#!/bin/sh\\nexit 0\\n", encoding="utf-8")
+        wrapper.chmod(0o755)
 
         self.write_pe32_plus_amd64(
             root / "rootfs/usr/lib/wine/x86_64-windows/wineboot.exe"
