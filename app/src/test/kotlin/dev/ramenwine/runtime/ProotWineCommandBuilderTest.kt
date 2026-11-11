@@ -161,6 +161,54 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsBundledWin32GdiSmokeCommandWithoutChangingGameFilesOrPrefix() {
+        val fixture = Fixture()
+        try {
+            val gameCommand = ProotWineCommandBuilder.build(fixture.request())
+            val smokeCommand = ProotWineCommandBuilder.buildWin32GdiSmokeCommand(gameCommand)
+
+            assertEquals(
+                "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe",
+                smokeCommand.guestExecutablePath
+            )
+            assertEquals("/opt/ramenwine-tests", smokeCommand.guestWorkingDirectory)
+            assertTrue(smokeCommand.arguments.contains("--pwd=/opt/ramenwine-tests"))
+            assertEquals("/usr/bin/box64", smokeCommand.arguments[smokeCommand.arguments.size - 3])
+            assertEquals("/usr/bin/wine", smokeCommand.arguments[smokeCommand.arguments.size - 2])
+            assertEquals(
+                "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe",
+                smokeCommand.arguments.last()
+            )
+            assertEquals(gameCommand.hostPrefixDirectory, smokeCommand.hostPrefixDirectory)
+            assertEquals(
+                gameCommand.arguments.filter { it.startsWith("--bind=") },
+                smokeCommand.arguments.filter { it.startsWith("--bind=") }
+            )
+            assertTrue(fixture.gameExe.isFile)
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesWin32GdiSmokeWhenBundledExecutableIsMissing() {
+        val fixture = Fixture()
+        try {
+            File(fixture.rootfs, "opt/ramenwine-tests/ramenwine-gdi-smoke.exe").delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.buildWin32GdiSmokeCommand(
+                    ProotWineCommandBuilder.build(fixture.request())
+                )
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("missing or unreadable"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun buildsWinebootInitCommandForNewPrefix() {
         val fixture = Fixture()
         try {
@@ -337,6 +385,7 @@ class ProotWineCommandBuilderTest {
         val audioUnix = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         val audioPe64 = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         val audioPe32 = executable(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
+        val gdiSmoke = executable(rootfs, "opt/ramenwine-tests/ramenwine-gdi-smoke.exe")
 
         val gameDirectory = File(filesDirectory, "games/" + gameId).apply { mkdirs() }
         val gameExe = File(gameDirectory, executableRelativePath).apply {
