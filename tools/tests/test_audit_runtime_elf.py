@@ -231,7 +231,7 @@ class RuntimeElfAuditTests(unittest.TestCase):
     def test_unlisted_missing_wine_dependency_remains_fatal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rootfs = Path(temporary) / "rootfs"
-            wine_unix = rootfs / "opt/ramenwine-wine/x86_64-unix"
+            wine_unix = rootfs / "opt/ramenwine-wine/lib/wine/x86_64-unix"
             wine_unix.mkdir(parents=True)
             (wine_unix / "winex11.so").write_bytes(
                 dynamic_elf64(62, "librequired-wine-dependency.so")
