@@ -119,6 +119,7 @@ object ProotWineCommandBuilder {
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/env")
+        executableFile(rootfs, "usr/bin/touch")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
@@ -284,6 +285,30 @@ object ProotWineCommandBuilder {
         )
     }
 
+
+    /**
+     * Exercises the exact guest WINEPREFIX bind before starting Wine.
+     * A successful host-side file check proves the guest path is writable.
+     */
+    fun buildWinePrefixWriteProbeCommand(gameCommand: ProotWineCommand): ProotWineCommand {
+        val guestPrefix = gameCommand.guestEnvironment["WINEPREFIX"]
+            ?: throw IOException("The Wine prefix path is not configured.")
+        if (!WINE_PREFIX_PATH_PATTERN.matches(guestPrefix)) {
+            throw IOException("The Wine prefix path is invalid for the write probe.")
+        }
+
+        val probePath = guestPrefix + "/" + PREFIX_WRITE_PROBE_FILE_NAME
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/touch",
+            probePath
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "/usr/bin/touch"
+        )
+    }
+
+    const val PREFIX_WRITE_PROBE_FILE_NAME = ".ramenwine-prefix-write-probe"
 
     fun buildAudioDriverSelectionCommand(
         gameCommand: ProotWineCommand
@@ -494,8 +519,7 @@ object ProotWineCommandBuilder {
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
         "BOX64_NOBANNER",
-        "PROOT_LOADER",
-        "WINEDLLPATH",
+                "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",
         "LD_PRELOAD",
         "ANDROID_ROOT",
@@ -507,5 +531,7 @@ object ProotWineCommandBuilder {
     )
 
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+    private val WINE_PREFIX_PATH_PATTERN =
+        Regex("/prefixes/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
 }
