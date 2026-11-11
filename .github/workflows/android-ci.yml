@@ -416,6 +416,8 @@ jobs:
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -622,11 +624,17 @@ jobs:
             exit 1
           fi
 
-      - name: Upload debug APK
-        if: success()
-        uses: actions/upload-artifact@v4
+      - name: Publish direct APK download on GitHub Releases
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.build_android
+        uses: softprops/action-gh-release@v2
         with:
-          name: ramenwine-debug-apk-prebuilt-runtime
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          tag_name: ramenwine-ci-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: RamenWine CI #${{ github.run_number }}
+          body: |
+            Installable ARM64 debug APK built from ` ${{ github.sha }} `.
+            Signed with the repository's persistent Android signing key.
+          prerelease: true
+          make_latest: false
+          files: app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
