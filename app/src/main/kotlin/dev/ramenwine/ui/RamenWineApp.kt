@@ -113,6 +113,7 @@ fun RamenWineApp() {
     var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
+    var gameLaunchOutput by remember { mutableStateOf<List<String>>(emptyList()) }
 
     suspend fun refreshLibrary() {
         importedGames = withContext(Dispatchers.IO) { libraryStore.list() }
@@ -317,13 +318,16 @@ fun RamenWineApp() {
 
         preparingGame = true
         gameLaunchError = null
+        gameLaunchOutput = emptyList()
         gameLaunchNotice = "Запускаю игру…"
         scope.launch {
             try {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
                     launchDiagnosticWindow = false,
-                    onOutput = { },
+                    onOutput = { line ->
+                        gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
+                    },
                     onExit = { exitCode ->
                         activeGameSession = null
                         activeDisplaySession = null
@@ -348,7 +352,15 @@ fun RamenWineApp() {
                     gameLaunchNotice = "Процесс завершился до подтверждения запуска."
                 }
             } catch (error: Exception) {
-                gameLaunchError = error.message ?: error.javaClass.simpleName
+                val baseMessage = error.message ?: error.javaClass.simpleName
+                val recentOutput = gameLaunchOutput.takeLast(22)
+                    .joinToString("\n")
+                    .takeLast(2_800)
+                gameLaunchError = if (recentOutput.isBlank()) {
+                    baseMessage
+                } else {
+                    baseMessage + "\n\nПоследний вывод Wine/PRoot:\n" + recentOutput
+                }
                 runCatching { gameSessionCoordinator.closeDisplay() }
                 activeGameSession = null
                 activeDisplaySession = null
@@ -544,7 +556,14 @@ fun RamenWineApp() {
                 AlertDialog(
                     onDismissRequest = { gameLaunchError = null },
                     title = { Text("Не удалось открыть игру") },
-                    text = { Text(message) },
+                    text = {
+                        Text(
+                            message,
+                            modifier = Modifier
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(rememberScrollState())
+                        )
+                    },
                     confirmButton = {
                         TextButton(onClick = { gameLaunchError = null }) {
                             Text("Закрыть")
