@@ -24,7 +24,24 @@ permissions:
   contents: read
 
 jobs:
+  signing:
+    name: Verify persistent Android signing key
+    if: github.event_name != 'workflow_dispatch' || inputs.build_android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout signing verifier
+        uses: actions/checkout@v4
+
+      - name: Verify stable signing secret is configured
+        if: github.event_name != 'pull_request'
+        env:
+          RAMENWINE_SIGNING_BUNDLE_BASE64: ${{ secrets.RAMENWINE_SIGNING_BUNDLE_BASE64 }}
+        run: |
+          python3 tools/prepare_android_signing.py \
+            --output-dir "$RUNNER_TEMP/ramenwine-signing-preflight"
+
   directaudio:
+    needs: [signing]
     name: Build ABI-matched DirectAudio driver and Android relay
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -304,6 +321,7 @@ jobs:
           retention-days: 14
 
   rootfs:
+    needs: [signing]
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     name: Build Debian ARM64 guest rootfs natively
     runs-on: ubuntu-24.04-arm
@@ -345,7 +363,7 @@ jobs:
 
   android:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
-    needs: [directaudio, rootfs]
+    needs: [signing, directaudio, rootfs]
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -353,6 +371,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare persistent APK signing key
+        env:
+          RAMENWINE_SIGNING_BUNDLE_BASE64: ${{ secrets.RAMENWINE_SIGNING_BUNDLE_BASE64 }}
+        run: |
+          python3 tools/prepare_android_signing.py \
+            --output-dir "$RUNNER_TEMP/ramenwine-signing" \
+            --github-env "$GITHUB_ENV"
 
       - name: Download DirectAudio build outputs
         uses: actions/download-artifact@v4
@@ -518,6 +544,25 @@ jobs:
               f"{len(libraries)} ARM64 libraries and {len(manifest['assets'])} support assets"
           )
           PY
+
+      - name: Verify persistent APK signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          ACTUAL_SHA256="$(printf '%s\n' "$SIGNATURE_OUTPUT" | \
+            sed -nE 's/.*certificate SHA-256 digest: ([0-9a-fA-F:]+).*/\1/p' | \
+            head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_SHA256="$(printf '%s' "$RAMENWINE_SIGNING_CERT_SHA256" | \
+            tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$ACTUAL_SHA256" || "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::APK signing certificate does not match the permanent RamenWine key."
+            exit 1
+          fi
 
       - name: Upload debug APK
         if: success()
