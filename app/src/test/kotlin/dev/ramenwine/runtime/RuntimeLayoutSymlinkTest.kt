@@ -4,9 +4,80 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuntimeLayoutSymlinkTest {
+    @Test
+    fun validSymlinkIsAcceptedWhenFilesDirectoryUsesCanonicalAlias() {
+        val root = Files.createTempDirectory("ramenwine-runtime-canonical").toFile()
+        val alias = File(root.parentFile, root.name + "-alias")
+        try {
+            val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
+            val backendRoot = backendRoot(root, backend)
+            createGlibcContract(backendRoot)
+
+            val realLibrary = File(backendRoot, "lib/libwine.so.1")
+            realLibrary.parentFile?.mkdirs()
+            realLibrary.writeText("test library")
+            Files.createSymbolicLink(
+                File(backendRoot, "lib/libwine.so").toPath(),
+                Paths.get("libwine.so.1")
+            )
+
+            writeManifest(
+                backendRoot = backendRoot,
+                backend = backend,
+                requiredFiles = "bin/wine,lib/libwine.so.1",
+                executableFiles = "bin/wine",
+                requiredSymlinks = "lib/libwine.so"
+            )
+
+            // Android's filesDir can be exposed through a path alias. The
+            // verifier must build link paths from the same canonical root
+            // that it uses for containment checks.
+            Files.createSymbolicLink(alias.toPath(), root.toPath())
+            val result = RuntimeLayout.inspect(alias)
+
+            assertEquals(
+                RuntimeState.FILES_PRESENT,
+                result.backends.first { it.backend == backend }.state
+            )
+        } finally {
+            Files.deleteIfExists(alias.toPath())
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun missingDirectAudioAndroidHelperMakesBackendIncomplete() {
+        val root = Files.createTempDirectory("ramenwine-runtime-audio-helper").toFile()
+        try {
+            val backend = RuntimeBackendId.GLIBC_PROOT_BOX64
+            val backendRoot = backendRoot(root, backend)
+            createGlibcContract(backendRoot)
+            File(backendRoot, "host/bin/directaudio-relay").delete()
+
+            writeManifest(
+                backendRoot = backendRoot,
+                backend = backend,
+                requiredFiles = "bin/wine",
+                executableFiles = "bin/wine",
+                requiredSymlinks = ""
+            )
+
+            val result = RuntimeLayout.inspect(root)
+            val inspection = result.backends.first { it.backend == backend }
+
+            assertEquals(RuntimeState.INCOMPLETE, inspection.state)
+            assertTrue(inspection.missingItems.any {
+                it.contains("host/bin/directaudio-relay")
+            })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun validSymlinkInsideBackendIsAccepted() {
         val root = Files.createTempDirectory("ramenwine-runtime").toFile()
@@ -167,6 +238,15 @@ class RuntimeLayoutSymlinkTest {
         )
         waylandDriver.parentFile?.mkdirs()
         waylandDriver.writeBytes(elf64(62))
+
+        // RuntimeLayout now verifies the bundled Win32 GDI smoke executable
+        // as part of the installed glibc backend contract.
+        val gdiSmoke = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        )
+        gdiSmoke.parentFile?.mkdirs()
+        gdiSmoke.writeBytes(pe32PlusAmd64())
     }
 
 
