@@ -37,7 +37,6 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertFalse(command.arguments.contains("--kill-on-exit"))
-            assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertEquals(
                 listOf(
