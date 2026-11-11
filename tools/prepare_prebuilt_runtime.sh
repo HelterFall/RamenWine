@@ -260,6 +260,28 @@ readelf -h "$AUDIO_WINE_ROOT/x86_64-unix/winedirectaudio.so" | \
 
 mkdir -p "$ROOTFS/opt/ramenwine-audio/lib/wine" "$RUNTIME_ROOT/host/share/ramenwine"
 cp -a "$AUDIO_WINE_ROOT/." "$ROOTFS/opt/ramenwine-audio/lib/wine/"
+
+GDI_SMOKE_SOURCE="$AUDIO_BUNDLE_DIR/rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+[[ -s "$GDI_SMOKE_SOURCE" ]] || fail "Win32 GDI smoke executable is missing from the build artifact."
+mkdir -p "$ROOTFS/opt/ramenwine-tests"
+install -m 0644 "$GDI_SMOKE_SOURCE" "$ROOTFS/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+python3 - "$ROOTFS/opt/ramenwine-tests/ramenwine-gdi-smoke.exe" <<'PY'
+import pathlib
+import struct
+import sys
+
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if len(data) < 0x9A or data[:2] != b"MZ":
+    raise SystemExit("Win32 GDI smoke executable is not a DOS/PE image")
+offset = struct.unpack_from("<I", data, 0x3C)[0]
+if offset + 26 > len(data) or data[offset:offset + 4] != b"PE\\0\\0":
+    raise SystemExit("Win32 GDI smoke executable has no PE header")
+machine, = struct.unpack_from("<H", data, offset + 4)
+subsystem, = struct.unpack_from("<H", data, offset + 24)
+if machine != 0x8664 or subsystem != 0x20B:
+    raise SystemExit("Win32 GDI smoke executable must be AMD64 PE32+")
+PY
+
 install -m 0755 "$AUDIO_RELAY" "$RUNTIME_ROOT/host/bin/directaudio-relay"
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
