@@ -170,6 +170,7 @@ class ProotWineProcessSupervisor(
 
         val parentPid = ProcessTreeTerminator.currentProcessPid()
             ?: throw IOException("Could not read the app PID from /proc/self/status.")
+        val appPid = parentPid.toString()
         val (process, processTree) = synchronized(PROCESS_LAUNCH_LOCK) {
             val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
             val startedProcess = createProcess(command)
