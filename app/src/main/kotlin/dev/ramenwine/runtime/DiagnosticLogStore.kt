@@ -112,7 +112,7 @@ class DiagnosticLogStore(private val context: Context) {
             lines.toList() to truncatedLines
         }
         val persistedOutput = runCatching {
-            persistenceExecutor.submit {}.get(LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            persistenceExecutor.submit(Runnable {}).get(LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             if (persistedLaunchLog.isFile) persistedLaunchLog.readText(Charsets.UTF_8) else ""
         }.getOrNull()
         return buildString {
