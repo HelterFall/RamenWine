@@ -133,6 +133,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             }
 
             WawonaNative.loadLibraries()
+            check(!WawonaNative.nativeIsWestonSimpleSHMRunning()) {
+                "A previous Weston SHM test thread has not exited; reopen RamenWine before starting another display session."
+            }
             WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
             WawonaNative.nativeInit(cacheDirectory.absolutePath)
             WawonaNative.nativeSetDisplayDensity(appContext.resources.displayMetrics.density)
