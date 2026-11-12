@@ -30,6 +30,11 @@ if (requirePersistentSigningKey && !hasPersistentSigningKey) {
 }
 
 android {
+    // This runtime currently requires target API 28 for Wine's SELinux execmod
+    // compatibility. Keep the SDK compile level current and document the lint exception.
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+    }
     namespace = "dev.ramenwine"
     compileSdk = 36
     ndkVersion = "30.0.16248370"
