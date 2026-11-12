@@ -134,6 +134,31 @@ internal class ProcessTreeTerminator(
 
     internal companion object {
         /**
+         * Reads this process PID from Linux procfs rather than android.os.Process.
+         * This keeps process bookkeeping usable in local JVM tests while using
+         * the same kernel-provided PID on Android.
+         */
+        internal fun currentProcessPid(procDirectory: File = File("/proc")): Int? {
+            val statusPid = runCatching {
+                File(procDirectory, "self/status").useLines { lines ->
+                    lines.firstOrNull { it.startsWith("Pid:") }
+                        ?.substringAfter(':')
+                        ?.trim()
+                        ?.toIntOrNull()
+                }
+            }.getOrNull()
+            if (statusPid != null && statusPid > 0) return statusPid
+
+            return runCatching {
+                File(procDirectory, "self/stat").useLines { lines ->
+                    lines.firstOrNull()
+                        ?.substringBefore(' ')
+                        ?.toIntOrNull()
+                }
+            }.getOrNull()?.takeIf { it > 0 }
+        }
+
+        /**
          * Returns direct child PIDs for every thread of a process. Android's
          * java.lang.Process API does not expose pid(), so ProcessBuilder callers
          * identify their newly spawned child through this /proc relationship.

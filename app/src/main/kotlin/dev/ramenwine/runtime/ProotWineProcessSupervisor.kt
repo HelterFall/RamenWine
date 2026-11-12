@@ -1,6 +1,5 @@
 package dev.ramenwine.runtime
 
-import android.os.Process as AndroidProcess
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -55,6 +54,7 @@ class ProotWineProcessSupervisor(
         // allowing registry hives to flush before PRoot itself exits.
         val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
         val startedAtNanos = System.nanoTime()
+        val appPid = ProcessTreeTerminator.currentProcessPid()?.toString() ?: "unknown"
         suspend fun emitDiagnostic(message: String) {
             withContext(callbackDispatcher) { onOutput(message) }
         }
@@ -82,7 +82,7 @@ class ProotWineProcessSupervisor(
 
         try {
             emitDiagnostic(
-                "RamenWine: setup PRoot started pid=${AndroidProcess.myPid()} guest=${command.guestExecutablePath} " +
+                "RamenWine: setup PRoot started pid=${appPid} guest=${command.guestExecutablePath} " +
                     "prefix=${command.guestEnvironment["WINEPREFIX"].orEmpty()}"
             )
             emitDiagnostic(
@@ -94,7 +94,7 @@ class ProotWineProcessSupervisor(
             val completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!completed) {
                 emitDiagnostic(
-                    "RamenWine: setup timeout pid=${AndroidProcess.myPid()} alive=${process.isAlive} " +
+                    "RamenWine: setup timeout pid=${appPid} alive=${process.isAlive} " +
                         "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
                 )
                 process.destroy()
@@ -110,7 +110,7 @@ class ProotWineProcessSupervisor(
 
             val exitCode = process.exitValue()
             emitDiagnostic(
-                "RamenWine: setup PRoot exit pid=${AndroidProcess.myPid()} code=$exitCode " +
+                "RamenWine: setup PRoot exit pid=${appPid} code=$exitCode " +
                     "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
             )
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
@@ -168,8 +168,9 @@ class ProotWineProcessSupervisor(
             throw IOException("The PRoot working directory does not exist.")
         }
 
+        val parentPid = ProcessTreeTerminator.currentProcessPid()
+            ?: throw IOException("Could not read the app PID from /proc/self/status.")
         val (process, processTree) = synchronized(PROCESS_LAUNCH_LOCK) {
-            val parentPid = AndroidProcess.myPid()
             val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
             val startedProcess = createProcess(command)
             val rootPid = if (startedProcess.isAlive) {
@@ -186,7 +187,7 @@ class ProotWineProcessSupervisor(
         runCatching {
             withContext(callbackDispatcher) {
                 onOutput(
-                    "RamenWine: game PRoot started pid=${AndroidProcess.myPid()} " +
+                    "RamenWine: game PRoot started pid=${appPid} " +
                         "guest=${command.guestExecutablePath} " +
                         "wayland=${command.guestEnvironment["WAYLAND_DISPLAY"].orEmpty()} " +
                         "runtime=${command.runtimeVersion}"

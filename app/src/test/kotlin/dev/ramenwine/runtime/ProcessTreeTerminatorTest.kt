@@ -9,6 +9,36 @@ import org.junit.Test
 
 class ProcessTreeTerminatorTest {
     @Test
+    fun readsCurrentProcessPidFromProcStatusWithoutAndroidFramework() {
+        val proc = Files.createTempDirectory("ramenwine-proc-self-pid").toFile()
+        try {
+            File(proc, "self/status").apply {
+                parentFile.mkdirs()
+                writeText("Name:\ttest\nState:\tS (sleeping)\nPid:\t2468\n")
+            }
+
+            assertEquals(2468, ProcessTreeTerminator.currentProcessPid(proc))
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun fallsBackToProcStatWhenStatusPidIsUnavailable() {
+        val proc = Files.createTempDirectory("ramenwine-proc-self-stat").toFile()
+        try {
+            File(proc, "self/stat").apply {
+                parentFile.mkdirs()
+                writeText("1357 (test process) S 1 2 3 4 5")
+            }
+
+            assertEquals(1357, ProcessTreeTerminator.currentProcessPid(proc))
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
     fun findsNewDirectChildPidFromProcChildren() {
         val proc = Files.createTempDirectory("ramenwine-proc-child-lookup").toFile()
         try {
