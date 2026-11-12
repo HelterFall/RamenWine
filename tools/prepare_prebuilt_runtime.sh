@@ -31,6 +31,7 @@ fail() {
   exit 1
 }
 
+# Keep this value aligned with the revision copied into runtime-rootfs.Dockerfile.
 BOX64_REVISION_FILE="${ROOT_DIR}/tools/box64-revision.txt"
 [[ -f "$BOX64_REVISION_FILE" ]] || fail "Pinned Box64 revision file is missing."
 BOX64_REVISION="$(tr -d '[:space:]' < "$BOX64_REVISION_FILE")"
