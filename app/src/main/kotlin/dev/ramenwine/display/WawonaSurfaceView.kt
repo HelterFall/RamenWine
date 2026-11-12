@@ -62,9 +62,9 @@ class WawonaSurfaceView(
         var lastCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
         var lastVisiblePixels = 0
         var verification: SurfaceFrameVerification? = null
-        var smokeClientStopped = false
+        var compositorReset = false
         var smokeSurfaceCleared = false
-        var stopFailure: String? = null
+        var resetFailure: String? = null
         try {
             while (SystemClock.elapsedRealtime() < deadline) {
                 if (!isAttachedToWindow || !holder.surface.isValid) {
@@ -112,32 +112,21 @@ class WawonaSurfaceView(
             }
         } finally {
             withContext(NonCancellable) {
-                Log.i(TAG, "Requesting weston-simple-shm smoke client shutdown.")
-                stopFailure = runCatching {
-                    session.stopSurfaceSmokeClient()
-                }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" }
-
-                if (stopFailure == null) {
-                    val stopDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_STOP_TIMEOUT_MS
-                    var clientRunning = runCatching {
-                        session.isSurfaceSmokeClientRunning()
-                    }.getOrDefault(true)
-                    while (clientRunning && SystemClock.elapsedRealtime() < stopDeadline) {
-                        delay(SMOKE_CLIENT_STOP_POLL_MS)
-                        clientRunning = runCatching {
-                            session.isSurfaceSmokeClientRunning()
-                        }.getOrDefault(true)
-                    }
-                    smokeClientStopped = !clientRunning
+                Log.i(TAG, "Restarting Wawona compositor to disconnect weston-simple-shm.")
+                val resetResult = runCatching { session.resetAfterSmokeClient() }
+                resetFailure = resetResult.exceptionOrNull()?.let {
+                    "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                }
+                compositorReset = resetResult.getOrNull() == true
+                if (!compositorReset && resetFailure == null) {
+                    resetFailure = "Display session could not restore its compositor and Android Surface."
                 }
 
-                if (smokeClientStopped) {
-                    // The upstream client uses a detached native thread and has no join API.
-                    // Also verify that its last presented frame disappears from the Android Surface.
+                if (compositorReset) {
+                    // Confirm the old SHM frame is gone after the compositor has been
+                    // restarted and its Android Surface presenter has been recreated.
                     delay(SMOKE_CLIENT_STOP_SETTLE_MS)
-                    if (!isAttachedToWindow || !holder.surface.isValid) {
-                        smokeSurfaceCleared = true
-                    } else {
+                    if (isAttachedToWindow && holder.surface.isValid) {
                         val clearDeadline = SystemClock.elapsedRealtime() + SMOKE_FRAME_CLEAR_TIMEOUT_MS
                         var consecutiveClearFrames = 0
                         while (
@@ -162,32 +151,30 @@ class WawonaSurfaceView(
                             consecutiveClearFrames >= SMOKE_FRAME_CLEAR_CONFIRMATIONS
                     }
                 }
+
                 Log.i(
                     TAG,
-                    "weston-simple-shm shutdown result stopped=$smokeClientStopped " +
+                    "weston-simple-shm reset result compositorReset=$compositorReset " +
                         "surfaceCleared=$smokeSurfaceCleared " +
-                        "requestError=${stopFailure ?: "<none>"}"
+                        "resetError=${resetFailure ?: "<none>"}"
                 )
             }
         }
 
         val measured = requireNotNull(verification)
         return when {
-            stopFailure != null -> SurfaceFrameVerification(
+            resetFailure != null -> SurfaceFrameVerification(
                 visible = false,
-                detail = "Кадр проверен, но запрос закрытия тестового Wayland-окна завершился ошибкой: $stopFailure"
+                detail = "Не удалось безопасно перезапустить Wawona после SHM-проверки: $resetFailure"
             )
-            !smokeClientStopped -> SurfaceFrameVerification(
+            !compositorReset -> SurfaceFrameVerification(
                 visible = false,
-                detail = "Тестовое Wayland-окно не подтвердило остановку за " +
-                    "${SMOKE_CLIENT_STOP_TIMEOUT_MS} мс. Кнопки запуска заблокированы, " +
-                    "чтобы не накладывать тестовое окно на Win32-программу. Исходный результат: ${measured.detail}"
+                detail = "Wawona не подтвердил перезапуск после SHM-проверки. Запуск заблокирован."
             )
             !smokeSurfaceCleared -> SurfaceFrameVerification(
                 visible = false,
-                detail = "SHM-клиент завершился, но тестовый кадр не исчез с Android Surface " +
-                    "за ${SMOKE_FRAME_CLEAR_TIMEOUT_MS} мс. Запуск заблокирован, чтобы не оставить " +
-                    "квадрат проверки поверх Win32-окна."
+                detail = "После перезапуска Wawona тестовый кадр всё ещё виден на Android Surface. " +
+                    "Запуск заблокирован, чтобы не оставить квадрат проверки поверх Win32-окна."
             )
             else -> measured
         }
@@ -524,9 +511,7 @@ class WawonaSurfaceView(
         const val IME_SHOW_RETRY_MS = 120L
         const val SMOKE_CAPTURE_INTERVAL_MS = 200L
         const val SMOKE_CLIENT_STOP_SETTLE_MS = 300L
-        const val SMOKE_CLIENT_STOP_TIMEOUT_MS = 2_000L
-        const val SMOKE_CLIENT_STOP_POLL_MS = 50L
-        const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 2_000L
+        const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 3_000L
         const val SMOKE_FRAME_CLEAR_POLL_MS = 100L
         const val SMOKE_FRAME_CLEAR_CONFIRMATIONS = 3
         const val FRAME_SAMPLE_GRID = 32
