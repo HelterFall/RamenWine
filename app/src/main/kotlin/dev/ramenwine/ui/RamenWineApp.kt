@@ -407,7 +407,11 @@ fun RamenWineApp() {
                         surfaceFrameVerified = false
                         activeSurfaceView = null
                         preparingGame = false
-                        gameLaunchNotice = "Игра завершена (код $exitCode)"
+                        gameLaunchNotice = if (launchDiagnosticWindow) {
+                            "Win32 smoke-test завершён (код $exitCode)"
+                        } else {
+                            "Игра завершена (код $exitCode)"
+                        }
                     }
                 )
                 if (launched.isRunning) {
