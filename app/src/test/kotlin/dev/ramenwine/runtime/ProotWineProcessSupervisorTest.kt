@@ -49,18 +49,30 @@ class ProotWineProcessSupervisorTest {
             val output = CopyOnWriteArrayList<String>()
             val error = runCatching {
                 ProotWineProcessSupervisor(
-                    callbackDispatcher = Dispatchers.Unconfined
+                    callbackDispatcher = Dispatchers.IO
                 ).runToCompletion(
                     command = command,
-                    onOutput = output::add,
+                    onOutput = { line -> output.add(line) },
                     timeoutMillis = 100L
                 )
             }.exceptionOrNull()
 
-            assertTrue(error is IOException)
-            assertTrue(error?.message.orEmpty().contains("timed out"))
-            assertTrue(output.any { it.contains("setup PRoot started") })
-            assertTrue(output.any { it.contains("setup timeout") })
+            assertTrue(
+                "Expected timeout IOException, got ${error?.javaClass?.name}: ${error?.message}",
+                error is IOException
+            )
+            assertTrue(
+                "Expected timeout message, got: ${error?.message}",
+                error?.message.orEmpty().contains("timed out")
+            )
+            assertTrue(
+                "Missing setup-start diagnostic. Output: ${output.joinToString(" | ")}",
+                output.any { it.contains("setup PRoot started") }
+            )
+            assertTrue(
+                "Missing timeout diagnostic. Output: ${output.joinToString(" | ")}",
+                output.any { it.contains("setup timeout") }
+            )
         } finally {
             workingDirectory.deleteRecursively()
         }
