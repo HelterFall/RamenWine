@@ -115,6 +115,8 @@ class DiagnosticLogStore(private val context: Context) {
         appendLine("Supported ABIs: ${Build.SUPPORTED_ABIS.joinToString()}")
         appendLine("Process ABI: ${runCatching { System.getProperty("os.arch") }.getOrNull() ?: "unknown"}")
         appendLine("App UID: ${Process.myUid()}")
+        appendLine("Target SDK: ${context.applicationInfo.targetSdkVersion}")
+        appendLine("SELinux process context: ${runCatching { File("/proc/self/attr/current").readText().trim() }.getOrDefault("unavailable")}")
         appendLine("Available processors: ${Runtime.getRuntime().availableProcessors()}")
         val pageSize = runCatching { Os.sysconf(OsConstants._SC_PAGESIZE) }.getOrNull()
         appendLine("Host page size: ${pageSize?.let { "$it bytes" } ?: readKernelPageSize()}")
@@ -223,6 +225,11 @@ class DiagnosticLogStore(private val context: Context) {
             combined.contains("protection", ignoreCase = true)
         ) {
             appendLine("HIGH: Wine could not assign executable memory protection to a mapped image. Check the mount options above: Wine files and prefix/game files must not be on a noexec mount. The exact affected path and mount are needed before changing storage layout.")
+        }
+        if (combined.contains("avc: denied", ignoreCase = true) &&
+            combined.contains("execmod", ignoreCase = true)
+        ) {
+            appendLine("HIGH: Android SELinux explicitly denied execmod for a Wine DLL. This is not a noexec mount: check the app Target SDK and SELinux process context above. Android AOSP grants this legacy permission to app-private files only to apps targeting API 28 or lower.")
         }
         if (combined.contains("set_mem_area_state", ignoreCase = true) ||
             combined.contains("granularity_mask", ignoreCase = true)
