@@ -1,11 +1,45 @@
+# Build a pinned upstream Box64 revision with the non-4K page-size handling
+# needed by Wine on 16-KB Android kernels. The revision is kept in one source
+# of truth and is copied into the runtime package version by the packager.
+FROM debian:trixie-slim AS box64-builder
+
+COPY tools/box64-revision.txt /tmp/box64-revision.txt
+
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      git \
+      libzydis-dev \
+      python3; \
+    BOX64_REVISION="$(tr -d '[:space:]' < /tmp/box64-revision.txt)"; \
+    test "${#BOX64_REVISION}" -eq 40; \
+    git clone --filter=blob:none https://github.com/ptitSeb/box64.git /tmp/box64-source; \
+    git -C /tmp/box64-source checkout --detach "$BOX64_REVISION"; \
+    cmake -S /tmp/box64-source -B /tmp/box64-build \
+      -DARM_DYNAREC=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DHAVE_TRACE=0; \
+    cmake --build /tmp/box64-build --parallel 2; \
+    DESTDIR=/box64-install cmake --install /tmp/box64-build; \
+    test -x /box64-install/usr/bin/box64; \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
 FROM debian:trixie-slim AS guest-rootfs
+
+# Copy only the installed Box64 runtime and its x86-64 support libraries.
+# Build tools stay in the previous stage and are not included in the APK.
+COPY --from=box64-builder /box64-install/ /
 
 RUN set -eux; \
     export DEBIAN_FRONTEND=noninteractive; \
     dpkg --add-architecture amd64; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      box64:arm64=0.3.4+dfsg-1 \
       ca-certificates \
       fontconfig \
       fonts-dejavu-core \
@@ -72,13 +106,13 @@ RUN set -eux; \
       'en_US.UTF-8 UTF-8' \
       'ru_RU.UTF-8 UTF-8' \
       'zh_CN.UTF-8 UTF-8' \
-      'zh_TW.UTF-8 UTF-8' \
-      'ko_KR.UTF-8 UTF-8' > /etc/locale.gen; \
+      'zh_TW.UTF-8 UTF-8' > /etc/locale.gen; \
     locale-gen; \
     locale -a | grep -qi 'ja_JP'; \
     locale -a | grep -qi 'zh_CN'; \
     test -d /usr/share/fonts/opentype/noto; \
     test -x /usr/bin/env; \
+    test -x /usr/bin/sh; \
     test -x /usr/bin/box64; \
     test -e /lib64/ld-linux-x86-64.so.2 || test -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; \
     apt-get clean; \
