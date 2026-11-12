@@ -5,6 +5,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
@@ -429,12 +430,6 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         }
     }
 
-    private companion object {
-        const val TAG = "RamenWineDisplay"
-        const val SMOKE_CLIENT_EXIT_TIMEOUT_MS = 5_000L
-        const val SMOKE_CLIENT_EXIT_POLL_MS = 50L
-    }
-
     private object WawonaSessionGate {
         private var active = false
 
@@ -452,6 +447,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
     }
 
     private companion object {
+        const val TAG = "RamenWineDisplay"
+        const val SMOKE_CLIENT_EXIT_TIMEOUT_MS = 5_000L
+        const val SMOKE_CLIENT_EXIT_POLL_MS = 50L
         const val RUNTIME_DIRECTORY_NAME = "wawona-runtime"
         const val WAYLAND_SOCKET_NAME = "wayland-0"
         const val MAX_UNIX_SOCKET_PATH_BYTES = 108
