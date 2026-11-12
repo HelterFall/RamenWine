@@ -47,7 +47,9 @@ class ProotWineProcessSupervisorTest {
             )
 
             val error = runCatching {
-                ProotWineProcessSupervisor().runToCompletion(
+                ProotWineProcessSupervisor(
+                    callbackDispatcher = Dispatchers.Unconfined
+                ).runToCompletion(
                     command = command,
                     onOutput = {},
                     timeoutMillis = 100L
