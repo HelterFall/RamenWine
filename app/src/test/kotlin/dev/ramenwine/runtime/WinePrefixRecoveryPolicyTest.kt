@@ -18,9 +18,9 @@ class WinePrefixRecoveryPolicyTest {
     }
 
     @Test
-    fun updatesACompletePrefixWhenRuntimeMarkerIsMissingOrStale() {
+    fun recoversMarkerForACompletePrefixWhenMarkerWasNotWritten() {
         assertEquals(
-            WinePrefixRecoveryAction.UPDATE,
+            WinePrefixRecoveryAction.RECOVER_MARKER,
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 3,
                 markerExists = false,
@@ -28,6 +28,10 @@ class WinePrefixRecoveryPolicyTest {
                 prefixHasData = true
             )
         )
+    }
+
+    @Test
+    fun updatesACompletePrefixWhenRuntimeMarkerIsStale() {
         assertEquals(
             WinePrefixRecoveryAction.UPDATE,
             WinePrefixRecoveryPolicy.decide(
