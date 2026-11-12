@@ -46,18 +46,21 @@ class ProotWineProcessSupervisorTest {
                 runtimeVersion = "test"
             )
 
+            val output = CopyOnWriteArrayList<String>()
             val error = runCatching {
                 ProotWineProcessSupervisor(
                     callbackDispatcher = Dispatchers.Unconfined
                 ).runToCompletion(
                     command = command,
-                    onOutput = {},
+                    onOutput = output::add,
                     timeoutMillis = 100L
                 )
             }.exceptionOrNull()
 
             assertTrue(error is IOException)
             assertTrue(error?.message.orEmpty().contains("timed out"))
+            assertTrue(output.any { it.contains("setup PRoot started") })
+            assertTrue(output.any { it.contains("setup timeout") })
         } finally {
             workingDirectory.deleteRecursively()
         }
