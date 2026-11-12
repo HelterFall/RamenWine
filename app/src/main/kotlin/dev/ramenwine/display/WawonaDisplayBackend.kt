@@ -157,7 +157,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 cacheDirectory = cacheDirectory
             )
         } catch (error: Exception) {
-            runCatching { WawonaNative.nativeDestroySurface(null) }
+            runCatching { WawonaNative.nativeDestroySurface() }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             if (error is DisplayBackendUnavailableException) throw error
@@ -166,7 +166,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 error
             )
         } catch (error: LinkageError) {
-            runCatching { WawonaNative.nativeDestroySurface(null) }
+            runCatching { WawonaNative.nativeDestroySurface() }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             throw DisplayBackendUnavailableException(
@@ -239,12 +239,12 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 return
             }
 
-            attachedSurface?.let {
+            if (attachedSurface != null) {
                 touchMouseInput.cancel(currentTimestamp())
                 // Preserve connected Wayland clients across Android Surface recreation.
                 // Destroying the presenter does not stop the compositor or falsify
                 // the upstream SHM client's actual running state.
-                WawonaNative.nativeDestroySurface(it)
+                WawonaNative.nativeDestroySurface()
             }
             attachedDensity = density
             WawonaNative.nativeSetDisplayDensity(density)
@@ -268,7 +268,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             touchMouseInput.cancel(currentTimestamp())
             // Keep the Wayland compositor alive across a temporary Android
             // Surface detach. A later Surface can be attached to the same session.
-            WawonaNative.nativeDestroySurface(surface)
+            WawonaNative.nativeDestroySurface()
             attachedSurface = null
             attachedWidth = 0
             attachedHeight = 0
