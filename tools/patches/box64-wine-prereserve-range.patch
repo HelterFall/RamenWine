@@ -13,8 +13,8 @@ diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 -        if(*reserve>='0' && *reserve<='9')  r=r*16+(*reserve)-'0';
 -        else if(*reserve>='A' && *reserve<='F')  r=r*16+(*reserve)-'A'+10;
 -        else if(*reserve>='a' && *reserve<='f')  r=r*16+(*reserve)-'a'+10;
--        else if(*reserve=='-') {if(first) {*addr=(void*)(r&~(box64_pagesize-1)); r=0; first=0;} else {printf_log(LOG_NONE, "Warning, Wine prereserve badly formatted\\n"); return 0;}}
--        else {printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n"); return 0;}
+-        else if(*reserve=='-') {if(first) {*addr=(void*)(r&~(box64_pagesize-1)); r=0; first=0;} else {printf_log(LOG_NONE, "Warning, Wine prereserve badly formatted\n"); return 0;}}
+-        else {printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n"); return 0;}
 -        ++reserve;
 -    }
 -    *size = r;
@@ -35,19 +35,19 @@ diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 +        else if(*reserve>='a' && *reserve<='f') digit = *reserve - 'a' + 10;
 +        else if(*reserve=='-') {
 +            if(!first) {
-+                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n");
++                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
 +                return 0;
 +            }
 +            start = r & ~wine_granularity_mask;
 +            r = 0;
 +            first = 0;
 +        } else {
-+            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n");
++            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
 +            return 0;
 +        }
 +        if(digit >= 0) {
 +            if(r > (UINTPTR_MAX - (uintptr_t)digit) / 16) {
-+                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n");
++                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
 +                return 0;
 +            }
 +            r = r * 16 + (uintptr_t)digit;
@@ -60,7 +60,7 @@ diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 +    // granularity before exposing the resulting addr/size pair to ntdll.
 +    if(first) {
 +        if(r) {
-+            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n");
++            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
 +            return 0;
 +        }
 +        *addr = NULL;
@@ -68,7 +68,7 @@ diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 +        return 1;
 +    }
 +    if(r > UINTPTR_MAX - wine_granularity_mask) {
-+        printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\\n");
++        printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
 +        return 0;
 +    }
 +    uintptr_t end = (r + wine_granularity_mask) & ~wine_granularity_mask;
