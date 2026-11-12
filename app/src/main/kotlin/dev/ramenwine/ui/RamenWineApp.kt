@@ -378,20 +378,22 @@ fun RamenWineApp() {
         }
     }
 
-    fun startSelectedSession() {
+    fun startSelectedSession(launchDiagnosticWindow: Boolean = false) {
         val game = selectedDisplayGame ?: return
         if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
 
         preparingGame = true
         gameLaunchError = null
         gameLaunchOutput = emptyList()
-        diagnosticLogStore.record("UI: launching Wine/PRoot session.")
-        gameLaunchNotice = "Запускаю игру…"
+        diagnosticLogStore.record(
+            "UI: launching " + if (launchDiagnosticWindow) "bundled Win32 GDI smoke test." else "selected Win32 executable."
+        )
+        gameLaunchNotice = if (launchDiagnosticWindow) "Проверяю запуск Win32-окна…" else "Запускаю игру…"
         scope.launch {
             try {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
-                    launchDiagnosticWindow = false,
+                    launchDiagnosticWindow = launchDiagnosticWindow,
                     onOutput = { line ->
                         diagnosticLogStore.record("PROCESS: $line")
                         gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
@@ -410,7 +412,11 @@ fun RamenWineApp() {
                 )
                 if (launched.isRunning) {
                     activeGameSession = launched
-                    gameLaunchNotice = null
+                    gameLaunchNotice = if (launched.isDiagnostic) {
+                        "Win32 smoke-test запущен. Проверь появление отдельного окна."
+                    } else {
+                        null
+                    }
                 } else {
                     activeGameSession = null
                     activeDisplaySession = null
@@ -418,7 +424,11 @@ fun RamenWineApp() {
                     surfaceReady = false
                     surfaceFrameVerified = false
                     activeSurfaceView = null
-                    gameLaunchNotice = "Процесс завершился до подтверждения запуска."
+                    gameLaunchNotice = if (launchDiagnosticWindow) {
+                        "Win32 smoke-test завершился до подтверждения запуска."
+                    } else {
+                        "Процесс завершился до подтверждения запуска."
+                    }
                 }
             } catch (error: Exception) {
                 diagnosticLogStore.recordException("launching Wine/PRoot", error)
@@ -530,19 +540,35 @@ fun RamenWineApp() {
                                     }
                                 )
                             }
-                            Button(
-                                onClick = ::startSelectedSession,
-                                enabled = surfaceReady && surfaceFrameVerified &&
-                                    !preparingGame && !verifyingSurfaceFrame
-                            ) {
-                                Text(if (preparingGame) "Запуск…" else "Запустить")
-                            }
                         } else {
                             Button(
                                 onClick = ::stopSelectedGame,
                                 enabled = !preparingGame
                             ) {
                                 Text("Закрыть игру")
+                            }
+                        }
+                    }
+                    if (activeGameSession == null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { startSelectedSession(launchDiagnosticWindow = true) },
+                                modifier = Modifier.weight(1f),
+                                enabled = surfaceReady && surfaceFrameVerified &&
+                                    !preparingGame && !verifyingSurfaceFrame
+                            ) {
+                                Text("Проверить Wine")
+                            }
+                            Button(
+                                onClick = { startSelectedSession() },
+                                modifier = Modifier.weight(1f),
+                                enabled = surfaceReady && surfaceFrameVerified &&
+                                    !preparingGame && !verifyingSurfaceFrame
+                            ) {
+                                Text(if (preparingGame) "Запуск…" else "Запустить")
                             }
                         }
                     }
