@@ -19,7 +19,9 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import com.aspauldingcode.wawona.WawonaNative
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -108,34 +110,36 @@ class WawonaSurfaceView(
                 )
             }
         } finally {
-            Log.i(TAG, "Requesting weston-simple-shm smoke client shutdown.")
-            stopFailure = runCatching {
-                session.stopSurfaceSmokeClient()
-            }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" }
+            withContext(NonCancellable) {
+                Log.i(TAG, "Requesting weston-simple-shm smoke client shutdown.")
+                stopFailure = runCatching {
+                    session.stopSurfaceSmokeClient()
+                }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" }
 
-            if (stopFailure == null) {
-                val stopDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_STOP_TIMEOUT_MS
-                var clientRunning = runCatching {
-                    session.isSurfaceSmokeClientRunning()
-                }.getOrDefault(true)
-                while (clientRunning && SystemClock.elapsedRealtime() < stopDeadline) {
-                    delay(SMOKE_CLIENT_STOP_POLL_MS)
-                    clientRunning = runCatching {
+                if (stopFailure == null) {
+                    val stopDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_STOP_TIMEOUT_MS
+                    var clientRunning = runCatching {
                         session.isSurfaceSmokeClientRunning()
                     }.getOrDefault(true)
+                    while (clientRunning && SystemClock.elapsedRealtime() < stopDeadline) {
+                        delay(SMOKE_CLIENT_STOP_POLL_MS)
+                        clientRunning = runCatching {
+                            session.isSurfaceSmokeClientRunning()
+                        }.getOrDefault(true)
+                    }
+                    smokeClientStopped = !clientRunning
                 }
-                smokeClientStopped = !clientRunning
-            }
 
-            if (smokeClientStopped) {
-                // The upstream client uses a detached native thread and has no join API.
-                delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+                if (smokeClientStopped) {
+                    // The upstream client uses a detached native thread and has no join API.
+                    delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+                }
+                Log.i(
+                    TAG,
+                    "weston-simple-shm shutdown result stopped=$smokeClientStopped " +
+                        "requestError=${stopFailure ?: "<none>"}"
+                )
             }
-            Log.i(
-                TAG,
-                "weston-simple-shm shutdown result stopped=$smokeClientStopped " +
-                    "requestError=${stopFailure ?: "<none>"}"
-            )
         }
 
         val measured = requireNotNull(verification)
