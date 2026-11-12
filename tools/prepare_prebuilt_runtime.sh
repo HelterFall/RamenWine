@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assemble a RamenWine runtime from prebuilt binaries and binary OS packages.
-# This script does not compile PRoot, Box64 or Wine from source.
+# Assemble the runtime from prebuilt PRoot/Wine binaries, a pinned source-built
+# Box64 rootfs and binary OS packages. Box64 is built by runtime-rootfs.Dockerfile.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,15 +26,16 @@ WINE_ARCHIVE_NAME="lug-wine-tkg-experimental-wayland-git-11.20-2.tar.gz"
 WINE_URL="https://github.com/starcitizen-lug/lug-wine-experimental/releases/download/11.20-2/${WINE_ARCHIVE_NAME}"
 WINE_SHA256="f20505464d0b54f685ba1862f99895f357fc44b9b3367562e8926ddb924e5136"
 
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
 BOX64_REVISION_FILE="${ROOT_DIR}/tools/box64-revision.txt"
 [[ -f "$BOX64_REVISION_FILE" ]] || fail "Pinned Box64 revision file is missing."
 BOX64_REVISION="$(tr -d '[:space:]' < "$BOX64_REVISION_FILE")"
 [[ "$BOX64_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "Pinned Box64 revision is not a full Git commit SHA."
 
-fail() {
-  echo "ERROR: $*" >&2
-  exit 1
-}
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
