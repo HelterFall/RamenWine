@@ -368,10 +368,16 @@ fun RamenWineApp() {
                 )
                 surfaceFrameVerified = result.visible
                 surfaceFrameResult = if (result.visible) "Экран готов" else result.detail
+                gameLaunchNotice = if (result.visible) {
+                    "Экран готов. Тестовое окно закрыто; можно проверить Wine или запустить программу."
+                } else {
+                    "Проверка экрана не пройдена: ${result.detail}"
+                }
             } catch (error: Exception) {
                 diagnosticLogStore.recordException("Wayland SHM/PixelCopy verification", error)
                 surfaceFrameVerified = false
                 surfaceFrameResult = error.message ?: error.javaClass.simpleName
+                gameLaunchNotice = "Ошибка проверки экрана: ${error.message ?: error.javaClass.simpleName}"
             } finally {
                 verifyingSurfaceFrame = false
             }
@@ -396,6 +402,43 @@ fun RamenWineApp() {
                     launchDiagnosticWindow = launchDiagnosticWindow,
                     onOutput = { line ->
                         diagnosticLogStore.record("PROCESS: $line")
+                        val stageNotice = when {
+                            line.contains("stage=audio-relay status=starting") ->
+                                "Запускаю аудиомост Android…"
+                            line.contains("stage=audio-relay status=ready") ->
+                                "Аудиомост готов. Подготавливаю Wine…"
+                            line.contains("stage=command-build status=starting") ->
+                                "Собираю команду запуска Wine…"
+                            line.contains("stage=prefix-probe status=starting") ->
+                                "Проверяю доступ Wine к каталогу prefix…"
+                            line.contains("stage=prefix-check status=starting") ||
+                                line.contains("RamenWine: wineboot ") ->
+                                "Проверяю Wine prefix. Первый запуск может занять несколько минут…"
+                            line.contains("stage=prefix-check status=complete") ->
+                                "Wine prefix готов. Настраиваю звук…"
+                            line.contains("stage=audio-driver status=starting") ->
+                                "Настраиваю DirectAudio в Wine…"
+                            line.contains("stage=audio-driver status=complete") ->
+                                if (launchDiagnosticWindow) {
+                                    "Запускаю тестовое Win32-окно…"
+                                } else {
+                                    "Запускаю выбранный Windows EXE…"
+                                }
+                            line.contains("stage=win32-smoke status=launching") ->
+                                "Запускаю встроенный Win32 GDI-тест…"
+                            line.contains("stage=selected-exe status=launching") ->
+                                "Запускаю выбранный Windows EXE…"
+                            line.contains("game PRoot started") ->
+                                if (launchDiagnosticWindow) {
+                                    "Win32 GDI-тест запущен. Ожидаю появления окна Windows…"
+                                } else {
+                                    "Windows EXE запущен через Wine. Ожидаю его окно…"
+                                }
+                            line.contains("setup timeout") ->
+                                "Подготовка Wine превысила лимит времени. Остановка процесса…"
+                            else -> null
+                        }
+                        if (stageNotice != null) gameLaunchNotice = stageNotice
                         gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
                     },
                     onExit = { exitCode ->
@@ -509,9 +552,16 @@ fun RamenWineApp() {
                         onSurfaceStateChanged = { attached ->
                             diagnosticLogStore.record("UI: Android game Surface attached=$attached")
                             surfaceReady = attached
-                            if (!attached) {
+                            if (attached) {
+                                gameLaunchNotice = if (surfaceFrameVerified) {
+                                    "Экран подключён и проверен. Можно запускать Win32-программу."
+                                } else {
+                                    "Экран подключён. Теперь проверь вывод изображения."
+                                }
+                            } else {
                                 surfaceFrameVerified = false
                                 surfaceFrameResult = null
+                                gameLaunchNotice = "Ожидаю подключения Android Surface…"
                             }
                         },
                         onSurfaceViewChanged = { view ->
