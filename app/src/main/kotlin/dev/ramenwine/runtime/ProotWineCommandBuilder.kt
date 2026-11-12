@@ -227,6 +227,8 @@ object ProotWineCommandBuilder {
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/opt/ramenwine-wine/bin:/usr/local/bin:/usr/bin:/bin",
+            // Capture Box64 Wine pre-reservation diagnostics without verbose tracing.
+            "BOX64_LOG" to "1",
             "BOX64_NOBANNER" to "1",
             "WINEDLLPATH" to "/opt/ramenwine-audio/lib/wine",
             "BANNER_AUDIO_DIRECT_RELAY" to
@@ -545,6 +547,7 @@ object ProotWineCommandBuilder {
         "WINEPREFIX",
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
+        "BOX64_LOG",
         "BOX64_NOBANNER",
         "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",
