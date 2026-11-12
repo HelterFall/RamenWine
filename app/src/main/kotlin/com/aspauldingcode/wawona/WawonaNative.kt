@@ -28,7 +28,7 @@ object WawonaNative {
     external fun nativeInit(cacheDir: String)
     external fun nativeIsCompositorReady(): Boolean
     external fun nativeSetSurface(surface: Surface)
-    external fun nativeDestroySurface(surface: Surface?)
+    external fun nativeDestroySurface()
     external fun nativeResizeSurface(width: Int, height: Int)
     external fun nativeSyncOutputSize(width: Int, height: Int)
     external fun nativeSetDisplayDensity(density: Float)
