@@ -428,8 +428,16 @@ object ProotWineCommandBuilder {
             "/" + selected,
             if (updateExistingPrefix) "-u" else "-i"
         )
+        val diagnosticEnvironment = gameCommand.guestEnvironment.toMutableMap().apply {
+            // wineboot is the first failing stage. Capture Box64 loader decisions and
+            // Wine's virtual-memory bookkeeping here, without flooding game sessions.
+            this["BOX64_LOG"] = "2"
+            this["BOX64_DLSYM_ERROR"] = "1"
+            this["WINEDEBUG"] = "err+all,+virtual,+mem_areas,+module"
+        }
         return gameCommand.copy(
             arguments = arguments,
+            guestEnvironment = diagnosticEnvironment,
             guestExecutablePath = "/" + selected
         )
     }
@@ -548,6 +556,7 @@ object ProotWineCommandBuilder {
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
         "BOX64_LOG",
+        "BOX64_DLSYM_ERROR",
         "BOX64_NOBANNER",
         "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",

@@ -358,10 +358,18 @@ fun RamenWineApp() {
         surfaceFrameResult = "Проверяю вывод изображения…"
         scope.launch {
             try {
+                diagnosticLogStore.record(
+                    "UI: starting Wayland SHM/PixelCopy check view=${view.width}x${view.height} " +
+                        "density=${view.resources.displayMetrics.density}"
+                )
                 val result = view.verifyWaylandShmOutput()
+                diagnosticLogStore.record(
+                    "UI: Wayland SHM/PixelCopy result visible=${result.visible}: ${result.detail}"
+                )
                 surfaceFrameVerified = result.visible
                 surfaceFrameResult = if (result.visible) "Экран готов" else result.detail
             } catch (error: Exception) {
+                diagnosticLogStore.recordException("Wayland SHM/PixelCopy verification", error)
                 surfaceFrameVerified = false
                 surfaceFrameResult = error.message ?: error.javaClass.simpleName
             } finally {
@@ -485,6 +493,7 @@ fun RamenWineApp() {
                             .fillMaxWidth()
                             .weight(1f),
                         onSurfaceStateChanged = { attached ->
+                            diagnosticLogStore.record("UI: Android game Surface attached=$attached")
                             surfaceReady = attached
                             if (!attached) {
                                 surfaceFrameVerified = false

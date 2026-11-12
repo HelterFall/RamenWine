@@ -54,6 +54,10 @@ class ProotWineProcessSupervisor(
         // It asks wineserver to stop and waits for its lock to be released,
         // allowing registry hives to flush before PRoot itself exits.
         val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
+        val startedAtNanos = System.nanoTime()
+        suspend fun emitDiagnostic(message: String) {
+            withContext(callbackDispatcher) { onOutput(message) }
+        }
         val outputJob = launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
@@ -77,8 +81,22 @@ class ProotWineProcessSupervisor(
         }
 
         try {
+            emitDiagnostic(
+                "RamenWine: setup PRoot started pid=${process.pid()} guest=${command.guestExecutablePath} " +
+                    "prefix=${command.guestEnvironment["WINEPREFIX"].orEmpty()}"
+            )
+            emitDiagnostic(
+                "RamenWine: setup config BOX64_LOG=${command.guestEnvironment["BOX64_LOG"].orEmpty()} " +
+                    "BOX64_DLSYM_ERROR=${command.guestEnvironment["BOX64_DLSYM_ERROR"].orEmpty()} " +
+                    "WINEDEBUG=${command.guestEnvironment["WINEDEBUG"].orEmpty()} " +
+                    "BOX64_LD_LIBRARY_PATH=${command.guestEnvironment["BOX64_LD_LIBRARY_PATH"].orEmpty()}"
+            )
             val completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!completed) {
+                emitDiagnostic(
+                    "RamenWine: setup timeout pid=${process.pid()} alive=${process.isAlive} " +
+                        "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
+                )
                 process.destroy()
                 if (!process.waitFor(SETUP_COMMAND_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
@@ -91,6 +109,10 @@ class ProotWineProcessSupervisor(
             }
 
             val exitCode = process.exitValue()
+            emitDiagnostic(
+                "RamenWine: setup PRoot exit pid=${process.pid()} code=$exitCode " +
+                    "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
+            )
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
                 outputJob.join()
                 true
@@ -160,6 +182,16 @@ class ProotWineProcessSupervisor(
                 null
             }
             startedProcess to rootPid?.let { ProcessTreeTerminator(it) }
+        }
+        runCatching {
+            withContext(callbackDispatcher) {
+                onOutput(
+                    "RamenWine: game PRoot started pid=${process.pid()} " +
+                        "guest=${command.guestExecutablePath} " +
+                        "wayland=${command.guestEnvironment["WAYLAND_DISPLAY"].orEmpty()} " +
+                        "runtime=${command.runtimeVersion}"
+                )
+            }
         }
         ProotWineProcessSession(
             process = process,

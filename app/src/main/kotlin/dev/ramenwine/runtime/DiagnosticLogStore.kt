@@ -87,6 +87,7 @@ class DiagnosticLogStore(private val context: Context) {
             appendLine("It does not include game file contents or logs from other apps.")
             appendLine()
             appendDeviceSection()
+            appendHostResourceSection()
             appendStorageSection()
             appendRuntimeSection()
             appendLine()
@@ -121,6 +122,37 @@ class DiagnosticLogStore(private val context: Context) {
         val pageSize = runCatching { Os.sysconf(OsConstants._SC_PAGESIZE) }.getOrNull()
         appendLine("Host page size: ${pageSize?.let { "$it bytes" } ?: readKernelPageSize()}")
         appendLine("Kernel: ${System.getProperty("os.version") ?: "unknown"}")
+        appendLine()
+    }
+
+    private fun StringBuilder.appendHostResourceSection() {
+        appendLine("=== HOST MEMORY / PROCESS LIMITS ===")
+        val status = runCatching { File("/proc/self/status").readLines() }.getOrDefault(emptyList())
+        val statusFields = listOf(
+            "Name:", "Pid:", "PPid:", "VmPeak:", "VmSize:", "VmHWM:", "VmRSS:",
+            "VmData:", "VmStk:", "VmExe:", "VmLib:", "Threads:", "FDSize:"
+        )
+        appendLine("App process:")
+        status.filter { line -> statusFields.any(line::startsWith) }.forEach { appendLine("  $it") }
+        val memory = runCatching { File("/proc/meminfo").readLines() }.getOrDefault(emptyList())
+        val memoryFields = listOf(
+            "MemTotal:", "MemAvailable:", "MemFree:", "SwapTotal:", "SwapFree:",
+            "CommitLimit:", "Committed_AS:"
+        )
+        appendLine("Android host memory:")
+        memory.filter { line -> memoryFields.any(line::startsWith) }.forEach { appendLine("  $it") }
+        listOf(
+            "vm.max_map_count",
+            "vm.mmap_rnd_bits",
+            "vm.overcommit_memory",
+            "vm.overcommit_ratio"
+        ).forEach { name ->
+            val value = runCatching {
+                File("/proc/sys/$name").readText().trim()
+            }.getOrDefault("unavailable")
+            appendLine("$name: $value")
+        }
+        appendLine("Note: these are Android-host values after the failed launch; the guest preflight values are in LAUNCH OUTPUT.")
         appendLine()
     }
 
@@ -193,6 +225,8 @@ class DiagnosticLogStore(private val context: Context) {
             val file = File(backendRoot, relative)
             appendLine("$relative: exists=${file.exists()} read=${file.canRead()} execute=${file.canExecute()} size=${file.length()}")
         }
+        appendGuestPackageVersions(backendRoot)
+        appendGuestGraphicsLibraries(backendRoot)
 
         val selected = synchronized(lock) { game }
         if (selected != null) {
@@ -207,8 +241,75 @@ class DiagnosticLogStore(private val context: Context) {
                 val file = File(prefix, name)
                 appendLine("Prefix registry $name: exists=${file.isFile}, nonempty=${file.length() > 0L}, size=${file.length()}")
             }
+            val marker = File(prefix, ".ramenwine-prefix")
+            appendLine("Prefix completion marker: exists=${marker.isFile}, size=${marker.length()}")
+            if (marker.isFile) {
+                appendLine("Prefix completion marker contents:")
+                marker.readLines().take(8).forEach { appendLine("  $it") }
+            }
         }
         appendLine()
+    }
+
+    private fun StringBuilder.appendGuestPackageVersions(backendRoot: File) {
+        appendLine("Guest Debian package versions:")
+        val statusFile = File(backendRoot, "rootfs/var/lib/dpkg/status")
+        if (!statusFile.isFile) {
+            appendLine("  dpkg status database unavailable")
+            return
+        }
+        val wanted = setOf(
+            "libc6:amd64",
+            "libgcc-s1:amd64",
+            "libstdc++6:amd64",
+            "libgl1-mesa-dri:amd64",
+            "libegl-mesa0:amd64",
+            "libglx-mesa0:amd64",
+            "libgbm1:amd64",
+            "libvulkan1:amd64",
+            "libwayland-client0:amd64"
+        )
+        val paragraphs = runCatching {
+            statusFile.readText().split("\\n\\s*\\n".toRegex())
+        }.getOrDefault(emptyList())
+        paragraphs.forEach { paragraph ->
+            val fields = paragraph.lineSequence().mapNotNull { line ->
+                val separator = line.indexOf(": ")
+                if (separator <= 0) null else line.substring(0, separator) to line.substring(separator + 2)
+            }.toMap()
+            val name = fields["Package"] ?: return@forEach
+            val architecture = fields["Architecture"].orEmpty()
+            val key = if (architecture.isBlank()) name else "$name:$architecture"
+            if (key in wanted && fields["Status"]?.endsWith(" installed") == true) {
+                appendLine("  $key ${fields["Version"].orEmpty()}")
+            }
+        }
+    }
+
+    private fun StringBuilder.appendGuestGraphicsLibraries(backendRoot: File) {
+        appendLine("Guest graphics / C++ loader candidates:")
+        val rootfs = File(backendRoot, "rootfs")
+        val directories = listOf(
+            "usr/lib/x86_64-linux-gnu",
+            "lib/x86_64-linux-gnu",
+            "usr/lib/x86_64-linux-gnu/dri"
+        ).map { File(rootfs, it) }
+        val candidates = directories.flatMap { directory ->
+            directory.listFiles()?.filter { file ->
+                val name = file.name.lowercase(Locale.US)
+                name.contains("gallium") || name.contains("stdc++") ||
+                    name.contains("glx_mesa") || name.contains("egl_mesa") ||
+                    name.contains("glvnd") || name.contains("vulkan")
+            }.orEmpty()
+        }.distinctBy { it.absolutePath }.take(80)
+        if (candidates.isEmpty()) {
+            appendLine("  no matching graphics/C++ libraries found")
+        } else {
+            candidates.forEach { file ->
+                val target = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+                appendLine("  ${file.absolutePath} -> $target (exists=${file.exists()}, size=${file.length()})")
+            }
+        }
     }
 
     private fun StringBuilder.appendLogcatSection() {
@@ -235,6 +336,11 @@ class DiagnosticLogStore(private val context: Context) {
             combined.contains("granularity_mask", ignoreCase = true)
         ) {
             appendLine("HIGH: Wine hit a virtual-memory alignment assertion. Compare Host page size above with the Box64 build revision included in the runtime version.")
+        }
+        if (combined.contains("GLIBCXX_3.4", ignoreCase = true) &&
+            combined.contains("not found", ignoreCase = true)
+        ) {
+            appendLine("HIGH: Box64 could not resolve a versioned GLIBCXX symbol while loading a guest graphics library. Compare the Guest Debian package versions and the printed libstdc++/libgallium paths; this is a separate loader failure from Wine's memory-alignment assertion until the logs prove otherwise.")
         }
         if (combined.contains("libGLX_nvidia.so", ignoreCase = true)) {
             appendLine("NOTE: Box64 reported a missing NVIDIA GLX library. This may be an optional host GPU-wrapper probe; do not assume it caused prefix initialization to fail unless later graphics errors confirm it.")
@@ -280,7 +386,7 @@ class DiagnosticLogStore(private val context: Context) {
     private fun readOwnLogcat(): String {
         val process = try {
             ProcessBuilder(
-                "logcat", "-d", "-v", "threadtime", "--uid",
+                "logcat", "-d", "-b", "all", "-v", "threadtime", "--uid",
                 Process.myUid().toString(), "-t", LOGCAT_LINE_LIMIT.toString()
             ).redirectErrorStream(true).start()
         } catch (error: Exception) {
@@ -325,8 +431,8 @@ class DiagnosticLogStore(private val context: Context) {
         const val MAX_LINE_LENGTH = 8_000
         const val MAX_LINES = 20_000
         const val MAX_LOG_CHARACTERS = 2_500_000
-        const val LOGCAT_LINE_LIMIT = 2_000
-        const val MAX_LOGCAT_CHARACTERS = 350_000
+        const val LOGCAT_LINE_LIMIT = 4_000
+        const val MAX_LOGCAT_CHARACTERS = 650_000
         const val LOGCAT_TIMEOUT_SECONDS = 5L
     }
 }

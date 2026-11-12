@@ -345,6 +345,12 @@ class ProotWineCommandBuilderTest {
                 updateExistingPrefix = true
             )
             assertEquals("-u", command.arguments.last())
+            assertEquals("2", command.guestEnvironment["BOX64_LOG"])
+            assertEquals("1", command.guestEnvironment["BOX64_DLSYM_ERROR"])
+            assertEquals(
+                "err+all,+virtual,+mem_areas,+module",
+                command.guestEnvironment["WINEDEBUG"]
+            )
         } finally {
             fixture.cleanup()
         }

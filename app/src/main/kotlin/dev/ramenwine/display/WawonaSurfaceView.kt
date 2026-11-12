@@ -270,6 +270,7 @@ class WawonaSurfaceView(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        Log.i(TAG, "Surface destroyed: view=${width}x${height}, valid=${holder.surface.isValid}")
         stopImePolling()
         hideSoftwareKeyboard()
         session.detachSurface(holder.surface)
@@ -280,7 +281,19 @@ class WawonaSurfaceView(
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             parent?.requestDisallowInterceptTouchEvent(true)
         }
+        val diagnosticAction = when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> "DOWN"
+            MotionEvent.ACTION_UP -> "UP"
+            MotionEvent.ACTION_CANCEL -> "CANCEL"
+            else -> null
+        }
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch begin action=$diagnosticAction view=${width}x${height}")
+        }
         val handled = session.dispatchTouchEvent(event)
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch end action=$diagnosticAction consumed=$handled")
+        }
         if (event.actionMasked == MotionEvent.ACTION_UP ||
             event.actionMasked == MotionEvent.ACTION_CANCEL
         ) {
