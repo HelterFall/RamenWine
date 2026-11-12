@@ -601,7 +601,7 @@ fun RamenWineApp() {
                         status,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(horizontal = 16.dp, bottom = 76.dp),
+                            .padding(start = 16.dp, end = 16.dp, bottom = 76.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
