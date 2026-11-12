@@ -63,6 +63,7 @@ class WawonaSurfaceView(
         var lastVisiblePixels = 0
         var verification: SurfaceFrameVerification? = null
         var smokeClientStopped = false
+        var smokeSurfaceCleared = false
         var stopFailure: String? = null
         try {
             while (SystemClock.elapsedRealtime() < deadline) {
@@ -132,11 +133,39 @@ class WawonaSurfaceView(
 
                 if (smokeClientStopped) {
                     // The upstream client uses a detached native thread and has no join API.
+                    // Also verify that its last presented frame disappears from the Android Surface.
                     delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+                    if (!isAttachedToWindow || !holder.surface.isValid) {
+                        smokeSurfaceCleared = true
+                    } else {
+                        val clearDeadline = SystemClock.elapsedRealtime() + SMOKE_FRAME_CLEAR_TIMEOUT_MS
+                        var consecutiveClearFrames = 0
+                        while (
+                            consecutiveClearFrames < SMOKE_FRAME_CLEAR_CONFIRMATIONS &&
+                            SystemClock.elapsedRealtime() < clearDeadline
+                        ) {
+                            val capture = runCatching { captureSurfaceFrame() }.getOrNull()
+                            if (
+                                capture != null &&
+                                capture.copyStatus == PixelCopy.SUCCESS &&
+                                capture.visiblePixelSamples < capture.requiredVisiblePixelSamples
+                            ) {
+                                consecutiveClearFrames++
+                            } else {
+                                consecutiveClearFrames = 0
+                            }
+                            if (consecutiveClearFrames < SMOKE_FRAME_CLEAR_CONFIRMATIONS) {
+                                delay(SMOKE_FRAME_CLEAR_POLL_MS)
+                            }
+                        }
+                        smokeSurfaceCleared =
+                            consecutiveClearFrames >= SMOKE_FRAME_CLEAR_CONFIRMATIONS
+                    }
                 }
                 Log.i(
                     TAG,
                     "weston-simple-shm shutdown result stopped=$smokeClientStopped " +
+                        "surfaceCleared=$smokeSurfaceCleared " +
                         "requestError=${stopFailure ?: "<none>"}"
                 )
             }
@@ -153,6 +182,12 @@ class WawonaSurfaceView(
                 detail = "Тестовое Wayland-окно не подтвердило остановку за " +
                     "${SMOKE_CLIENT_STOP_TIMEOUT_MS} мс. Кнопки запуска заблокированы, " +
                     "чтобы не накладывать тестовое окно на Win32-программу. Исходный результат: ${measured.detail}"
+            )
+            !smokeSurfaceCleared -> SurfaceFrameVerification(
+                visible = false,
+                detail = "SHM-клиент завершился, но тестовый кадр не исчез с Android Surface " +
+                    "за ${SMOKE_FRAME_CLEAR_TIMEOUT_MS} мс. Запуск заблокирован, чтобы не оставить " +
+                    "квадрат проверки поверх Win32-окна."
             )
             else -> measured
         }
@@ -491,6 +526,9 @@ class WawonaSurfaceView(
         const val SMOKE_CLIENT_STOP_SETTLE_MS = 300L
         const val SMOKE_CLIENT_STOP_TIMEOUT_MS = 2_000L
         const val SMOKE_CLIENT_STOP_POLL_MS = 50L
+        const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 2_000L
+        const val SMOKE_FRAME_CLEAR_POLL_MS = 100L
+        const val SMOKE_FRAME_CLEAR_CONFIRMATIONS = 3
         const val FRAME_SAMPLE_GRID = 32
         const val MIN_VISIBLE_PIXEL_SAMPLES = 8
         const val MIN_VISIBLE_PIXEL_PERCENT_DIVISOR = 100
