@@ -49,6 +49,11 @@ android {
     defaultConfig {
         applicationId = "dev.ramenwine"
         minSdk = 28
+        // Wine needs SELinux execmod for its private PE-module mappings.
+        // Android grants this legacy permission to app-private files only
+        // for target API <= 28 (untrusted_app_27); newer app domains deny it.
+        // Keep compileSdk current while preserving this runtime requirement.
+        targetSdk = 28
         targetSdk = 36
         // GitHub run numbers make every CI APK an Android-upgrade (never downgrade).
         versionCode = ciRunNumber ?: 1
