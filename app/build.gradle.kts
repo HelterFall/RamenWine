@@ -54,7 +54,6 @@ android {
         // for target API <= 28 (untrusted_app_27); newer app domains deny it.
         // Keep compileSdk current while preserving this runtime requirement.
         targetSdk = 28
-        targetSdk = 36
         // GitHub run numbers make every CI APK an Android-upgrade (never downgrade).
         versionCode = ciRunNumber ?: 1
         versionName = ciRunNumber?.let { "0.1.0-ci.$it" } ?: "0.1.0"
