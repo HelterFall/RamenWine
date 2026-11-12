@@ -350,13 +350,16 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
         override suspend fun resetAfterSmokeClient(): Boolean {
             checkMainThread()
-            if (stopped) return false
+            check(!stopped) { "Wawona display session is stopped." }
 
-            val surface = attachedSurface?.takeIf { it.isValid } ?: return false
+            val surface = attachedSurface?.takeIf { it.isValid }
+                ?: throw IllegalStateException("Android Surface detached before the SHM reset.")
             val width = attachedWidth
             val height = attachedHeight
             val density = attachedDensity
-            if (width <= 0 || height <= 0 || density <= 0f) return false
+            check(width > 0 && height > 0 && density > 0f) {
+                "Android Surface dimensions or density are invalid during SHM reset."
+            }
 
             touchMouseInput.cancel(currentTimestamp())
 
@@ -376,21 +379,23 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 delay(SMOKE_CLIENT_EXIT_POLL_MS)
             }
             if (WawonaNative.nativeIsWestonSimpleSHMRunning()) {
-                Log.w(TAG, "weston-simple-shm thread did not exit after compositor shutdown.")
-                return false
+                val detail = "weston-simple-shm thread did not return within " +
+                    "${SMOKE_CLIENT_EXIT_TIMEOUT_MS} ms after compositor shutdown."
+                Log.w(TAG, detail)
+                throw IllegalStateException(detail)
             }
 
-            if (!surface.isValid) return false
+            check(surface.isValid) {
+                "Android Surface became invalid while Wawona was resetting after the SHM test."
+            }
             WawonaNative.nativeInit(cacheDirectory.absolutePath)
-            if (!WawonaNative.nativeIsCompositorReady()) {
-                Log.e(TAG, "Wawona compositor did not become ready after SHM reset.")
-                return false
+            check(WawonaNative.nativeIsCompositorReady()) {
+                "Wawona compositor did not become ready after SHM reset."
             }
 
             val socketPath = File(endpoint.hostRuntimeDirectory, endpoint.socketName).absolutePath
-            if (!isUnixSocket(socketPath)) {
-                Log.e(TAG, "Wawona Wayland socket was not restored after SHM reset: $socketPath")
-                return false
+            check(isUnixSocket(socketPath)) {
+                "Wawona Wayland socket was not restored after SHM reset: $socketPath"
             }
 
             WawonaNative.nativeSetDisplayDensity(density)
