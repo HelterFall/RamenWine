@@ -1,6 +1,5 @@
 package dev.ramenwine.display
 
-import android.view.Surface
 import com.aspauldingcode.wawona.WawonaNative
 import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
@@ -43,10 +42,8 @@ class WawonaNativeContractTest {
             nativeMethods
         )
         assertEquals(
-            1,
-            WawonaNative::class.java.getDeclaredMethod(
-                "nativeDestroySurface", Surface::class.java
-            ).parameterCount
+            0,
+            WawonaNative::class.java.getDeclaredMethod("nativeDestroySurface").parameterCount
         )
         assertFalse("nativeApplyHostKeyLevels" in nativeMethods)
         assertFalse("nativeReloadHostKeymap" in nativeMethods)
