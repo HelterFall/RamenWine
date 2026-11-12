@@ -422,7 +422,7 @@ object ProotWineCommandBuilder {
 
         // wineboot starts wineserver and services.exe. Run it through the
         // clean-shutdown wrapper so registry hives are flushed before PRoot exits.
-        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+        val commandTail = listOf(
             "/bin/sh",
             "/opt/ramenwine-tools/run-wine-command.sh",
             "/" + selected,
@@ -435,6 +435,24 @@ object ProotWineCommandBuilder {
             this["BOX64_DLSYM_ERROR"] = "1"
             this["WINEDEBUG"] = "err+all,+virtual,+mem_areas,+module"
         }
+
+        // The PRoot argument vector contains a serialized copy of guestEnvironment
+        // after /usr/bin/env. Updating only the data-class property leaves those
+        // original KEY=value arguments untouched, so the wrapper and Wine never see
+        // the diagnostic overrides. Replace that serialized environment as well.
+        val envCommandIndex = gameCommand.arguments.indexOf("/usr/bin/env")
+        val shellCommandIndex = if (envCommandIndex >= 0) {
+            gameCommand.arguments.indexOf("/bin/sh", envCommandIndex + 1)
+        } else {
+            -1
+        }
+        if (envCommandIndex < 0 || shellCommandIndex < 0) {
+            throw IOException("The PRoot guest environment command is malformed.")
+        }
+        val arguments = gameCommand.arguments.take(shellCommandIndex) +
+            diagnosticEnvironment.map { (name, value) -> "$name=$value" } +
+            commandTail
+
         return gameCommand.copy(
             arguments = arguments,
             guestEnvironment = diagnosticEnvironment,
