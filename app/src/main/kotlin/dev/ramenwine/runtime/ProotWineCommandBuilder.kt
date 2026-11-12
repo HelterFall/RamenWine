@@ -442,11 +442,11 @@ object ProotWineCommandBuilder {
         // the diagnostic overrides. Replace that serialized environment as well.
         val envCommandIndex = gameCommand.arguments.indexOf("/usr/bin/env")
         val shellCommandIndex = if (envCommandIndex >= 0) {
-            gameCommand.arguments.indexOf("/bin/sh", envCommandIndex + 1)
+            gameCommand.arguments.indexOfFirst { it == "/bin/sh" }
         } else {
             -1
         }
-        if (envCommandIndex < 0 || shellCommandIndex < 0) {
+        if (envCommandIndex < 0 || shellCommandIndex <= envCommandIndex) {
             throw IOException("The PRoot guest environment command is malformed.")
         }
         val arguments = gameCommand.arguments.take(shellCommandIndex) +
