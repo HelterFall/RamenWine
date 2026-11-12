@@ -3,20 +3,67 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val ciRunNumber = providers.environmentVariable("GITHUB_RUN_NUMBER")
+    .orNull
+    ?.toIntOrNull()
+    ?.takeIf { it > 0 }
+
+val signingStorePath = providers.environmentVariable("RAMENWINE_SIGNING_KEYSTORE").orNull
+val signingStorePassword = providers.environmentVariable("RAMENWINE_SIGNING_STORE_PASSWORD").orNull
+val signingKeyAlias = providers.environmentVariable("RAMENWINE_SIGNING_KEY_ALIAS").orNull
+val signingKeyPassword = providers.environmentVariable("RAMENWINE_SIGNING_KEY_PASSWORD").orNull
+val hasPersistentSigningKey = listOf(
+    signingStorePath,
+    signingStorePassword,
+    signingKeyAlias,
+    signingKeyPassword
+).all { !it.isNullOrBlank() }
+
+val requirePersistentSigningKey =
+    providers.environmentVariable("RAMENWINE_REQUIRE_PERSISTENT_SIGNING").orNull == "true"
+
+if (requirePersistentSigningKey && !hasPersistentSigningKey) {
+    throw org.gradle.api.GradleException(
+        "CI APK signing is not configured. Add the RAMENWINE_SIGNING_BUNDLE_BASE64 " +
+            "GitHub Actions secret before building an installable APK."
+    )
+}
+
 android {
     namespace = "dev.ramenwine"
     compileSdk = 36
     ndkVersion = "30.0.16248370"
 
+    signingConfigs {
+        if (hasPersistentSigningKey) {
+            create("persistentDebug") {
+                storeFile = file(signingStorePath!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.ramenwine"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // GitHub run numbers make every CI APK an Android-upgrade (never downgrade).
+        versionCode = ciRunNumber ?: 1
+        versionName = ciRunNumber?.let { "0.1.0-ci.$it" } ?: "0.1.0"
 
         ndk {
             abiFilters += setOf("arm64-v8a")
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (hasPersistentSigningKey) {
+                signingConfig = signingConfigs.getByName("persistentDebug")
+            }
         }
     }
 
@@ -65,4 +112,5 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
