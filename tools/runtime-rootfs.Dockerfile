@@ -23,7 +23,6 @@ RUN set -eux; \
     git -C /tmp/box64-source apply --check /tmp/box64-wine-prereserve-range.patch; \
     git -C /tmp/box64-source apply /tmp/box64-wine-prereserve-range.patch; \
     grep -q 'wine_granularity_mask = 0xffff' /tmp/box64-source/src/tools/wine_tools.c; \
-
     cmake -S /tmp/box64-source -B /tmp/box64-build \
       -DARM_DYNAREC=ON \
       -DCMAKE_BUILD_TYPE=Release \
