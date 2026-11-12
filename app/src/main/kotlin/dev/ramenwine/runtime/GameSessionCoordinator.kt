@@ -85,12 +85,14 @@ class GameSessionCoordinator(
 
         launchInProgress = true
         try {
+            onOutput("RamenWine: stage=audio-relay status=starting")
             val relay = withContext(Dispatchers.IO) {
                 DirectAudioRelaySupervisor(File(appContext.applicationInfo.nativeLibraryDir)).start(
                     display.endpoint.hostRuntimeDirectory
                 )
             }
             audioRelaySession = relay
+            onOutput("RamenWine: stage=audio-relay status=ready")
             audioRelayDisplay = display
 
             val request = ProotWineLaunchRequest(
@@ -102,11 +104,17 @@ class GameSessionCoordinator(
                 hostUid = Process.myUid(),
                 locale = game.locale
             )
+            onOutput("RamenWine: stage=command-build status=starting")
             val command = withContext(Dispatchers.IO) {
                 ProotWineCommandBuilder.build(request)
             }
+            onOutput(
+                "RamenWine: stage=command-build status=complete guest-exe=" +
+                    command.guestExecutablePath
+            )
 
             val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
+            onOutput("RamenWine: stage=prefix-probe status=starting")
             val prefixProbeFile = File(
                 command.hostPrefixDirectory,
                 ProotWineCommandBuilder.PREFIX_WRITE_PROBE_FILE_NAME
@@ -127,15 +135,19 @@ class GameSessionCoordinator(
                     )
                 }
                 onOutput("RamenWine: WINEPREFIX bind is visible and writable from the guest.")
+                onOutput("RamenWine: stage=prefix-probe status=complete exit_code=$probeExitCode")
             } finally {
                 prefixProbeFile.delete()
             }
 
-            WinePrefixManager(processSupervisor).ensureInitialized(
+            onOutput("RamenWine: stage=prefix-check status=starting")
+            val winebootRan = WinePrefixManager(processSupervisor).ensureInitialized(
                 gameCommand = command,
                 onOutput = onOutput
             )
+            onOutput("RamenWine: stage=prefix-check status=complete wineboot_ran=$winebootRan")
 
+            onOutput("RamenWine: stage=audio-driver status=starting")
             val audioDriverExitCode = processSupervisor.runToCompletion(
                 command = ProotWineCommandBuilder.buildAudioDriverSelectionCommand(command),
                 onOutput = onOutput,
@@ -148,6 +160,7 @@ class GameSessionCoordinator(
                 )
             }
 
+            onOutput("RamenWine: stage=audio-driver status=complete exit_code=$audioDriverExitCode")
             val processCommand = if (launchDiagnosticWindow) {
                 withContext(Dispatchers.IO) {
                     ProotWineCommandBuilder.buildWin32GdiSmokeCommand(command)
@@ -156,10 +169,20 @@ class GameSessionCoordinator(
                 command
             }
 
+            onOutput(
+                if (launchDiagnosticWindow) {
+                    "RamenWine: stage=win32-smoke status=launching executable=/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+                } else {
+                    "RamenWine: stage=selected-exe status=launching executable=" + command.guestExecutablePath
+                }
+            )
             val process = processSupervisor.start(
                 command = processCommand,
                 onOutput = onOutput,
                 onExit = { exitCode ->
+                    runCatching {
+                        onOutput("RamenWine: stage=process status=exited exit_code=$exitCode")
+                    }
                     try {
                         closeDisplayIfCurrent(display)
                     } finally {
@@ -212,6 +235,12 @@ class GameSessionCoordinator(
                 releaseDisplay = { closeDisplayIfCurrent(display) }
             )
         } catch (error: Exception) {
+            runCatching {
+                onOutput(
+                    "RamenWine: stage=launch-preparation status=failed " +
+                        "error=${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                )
+            }
             closeDisplayIfCurrent(display)
             throw error
         } finally {
