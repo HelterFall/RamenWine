@@ -133,6 +133,64 @@ internal class ProcessTreeTerminator(
     )
 
     internal companion object {
+        /**
+         * Returns direct child PIDs for every thread of a process. Android's
+         * java.lang.Process API does not expose pid(), so ProcessBuilder callers
+         * identify their newly spawned child through this /proc relationship.
+         */
+        internal fun directChildPids(
+            parentPid: Int,
+            procDirectory: File = File("/proc")
+        ): Set<Int> {
+            val taskDirectory = File(procDirectory, "$parentPid/task")
+            val tasks = runCatching { taskDirectory.listFiles()?.toList() }.getOrNull()
+                ?: return emptySet()
+            val result = LinkedHashSet<Int>()
+            for (task in tasks) {
+                val childPids = runCatching {
+                    File(task, "children").readText(Charsets.US_ASCII)
+                        .trim()
+                        .split(Regex("\\s+"))
+                        .mapNotNull(String::toIntOrNull)
+                }.getOrDefault(emptyList())
+                result.addAll(childPids.filter { it > 0 })
+            }
+            return result
+        }
+
+        /**
+         * Finds a newly spawned direct child with the expected argv[0].
+         * Existing children are excluded to avoid attaching a second session
+         * to an already-running PRoot process.
+         */
+        internal fun findNewDirectChildPid(
+            parentPid: Int,
+            executable: File,
+            existingPids: Set<Int>,
+            procDirectory: File = File("/proc")
+        ): Int? {
+            val expectedPaths = linkedSetOf(executable.absolutePath)
+            runCatching { executable.canonicalPath }.getOrNull()?.let(expectedPaths::add)
+
+            return directChildPids(parentPid, procDirectory).firstOrNull { pid ->
+                if (pid in existingPids) return@firstOrNull false
+                val commandLine = runCatching {
+                    File(procDirectory, "$pid/cmdline").readBytes()
+                }.getOrNull() ?: return@firstOrNull false
+                val argumentEnd = commandLine.indexOf(0.toByte()).let { index ->
+                    if (index < 0) commandLine.size else index
+                }
+                if (argumentEnd == 0) return@firstOrNull false
+                val executableArgument = String(
+                    commandLine,
+                    0,
+                    argumentEnd,
+                    Charsets.UTF_8
+                )
+                executableArgument in expectedPaths
+            }
+        }
+
         private const val SIGTERM = 15
         private const val SIGKILL = 9
         private const val ZOMBIE_STATE = 'Z'

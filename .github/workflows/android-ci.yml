@@ -22,7 +22,23 @@ permissions:
   contents: read
 
 jobs:
+  dispatch-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    name: Validate manual APK build request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the full Android build
+        env:
+          RAMENWINE_BUILD_ANDROID: ${{ inputs.build_android }}
+        run: |
+          if [[ "$RAMENWINE_BUILD_ANDROID" != "true" ]]; then
+            echo "::error::Select build_android=true to run the APK build. No build jobs were started."
+            exit 1
+          fi
+          echo "Full Android APK build requested."
+
   directaudio:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     name: Build ABI-matched DirectAudio driver and Android relay
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -130,6 +146,14 @@ jobs:
             --without-gstreamer --without-vulkan --without-wayland \
             --without-mingw --disable-tests
           make -j"$(nproc)" __tooldeps__ nls/all
+
+      - name: Cache Wine compiler objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ramenwine-wine-11.20-${{ runner.os }}-${{ env.DIRECTAUDIO_REVISION }}
+          restore-keys: |
+            ramenwine-wine-11.20-${{ runner.os }}-
 
       - name: Configure only the x86-64 glibc driver and x86 PE modules
         working-directory: wine
@@ -302,7 +326,7 @@ jobs:
           retention-days: 14
 
   rootfs:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     name: Build Debian ARM64 guest rootfs natively
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -342,15 +366,24 @@ jobs:
           retention-days: 1
 
   android:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     needs: [directaudio, rootfs]
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 45
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare persistent APK signing key
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RAMENWINE_SIGNING_BUNDLE_BASE64: ${{ secrets.RAMENWINE_SIGNING_BUNDLE_BASE64 }}
+        run: |
+          python3 tools/prepare_android_signing.py \
+            --output-dir "$RUNNER_TEMP/ramenwine-signing" \
+            --github-env "$GITHUB_ENV"
+          echo "RAMENWINE_REQUIRE_PERSISTENT_SIGNING=true" >> "$GITHUB_ENV"
 
       - name: Download DirectAudio build outputs
         uses: actions/download-artifact@v4
@@ -433,12 +466,22 @@ jobs:
         with:
           packages: 'platform-tools'
 
+      - name: Cache Android build tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/platforms/android-36
+            /usr/local/lib/android/sdk/build-tools/36.0.0
+            /usr/local/lib/android/sdk/ndk/30.0.16248370
+            /usr/local/lib/android/sdk/cmake/3.22.1
+          key: ramenwine-android-sdk-${{ runner.os }}-api36-ndk30-cmake322
+
       - name: Install Android toolchain
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370" "cmake;3.22.1"
 
-      - name: Run Android runtime and Wawona adapter tests
-        run: gradle --no-daemon --stacktrace testDebugUnitTest
+      - name: Run Android unit tests and lint
+        run: gradle --no-daemon --stacktrace testDebugUnitTest lintDebug
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
@@ -454,6 +497,9 @@ jobs:
           test -s "$APK"
           test -s "$MANIFEST"
 
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot-loader.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libdirectaudio-relay.so"
           unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
           unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
           test -s "$RUNTIME_ZIP"
@@ -515,11 +561,66 @@ jobs:
           )
           PY
 
-      - name: Upload debug APK
-        if: success()
+      - name: Verify persistent APK signing identity
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          ACTUAL_SHA256="$(printf '%s\n' "$SIGNATURE_OUTPUT" | \
+            sed -nE 's/.*certificate SHA-256 digest: ([0-9a-fA-F:]+).*/\1/p' | \
+            head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_SHA256="$(printf '%s' "$RAMENWINE_SIGNING_CERT_SHA256" | \
+            tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$ACTUAL_SHA256" || "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::APK signing certificate does not match the permanent RamenWine key."
+            exit 1
+          fi
+
+      - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ramenwine-debug-apk-prebuilt-runtime
+          name: ramenwine-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    # Publish this owner-controlled PR build so the installable APK is directly downloadable.
+    # Keep the exception scoped to PR #3 from the repository's own feature branch.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.build_android) ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.number == 3 &&
+       github.event.pull_request.head.ref == 'feature/minimal-game-grid' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login == 'HelterFall')
+    needs: [android]
+    name: Publish signed APK on GitHub Releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installable APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ramenwine-debug-apk
+          path: release
+
+      - name: Publish direct APK download on GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ramenwine-ci-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: "RamenWine CI #${{ github.run_number }}"
+          body: |
+            Installable ARM64 debug APK built from commit ${{ github.sha }}.
+            Signed with the repository's persistent Android signing key.
+          prerelease: true
+          make_latest: false
+          files: release/app-debug.apk
+          fail_on_unmatched_files: true
