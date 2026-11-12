@@ -63,7 +63,7 @@ The builder requires:
 - an app-private Wayland runtime directory containing the selected socket;
 - a socket path below the Android AF_UNIX sun_path limit.
 
-The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
+The argument vector includes PRoot's --link2symlink and --sysvipc options, the rootfs, binds for /dev, /proc, and the host CPU sysfs subtree at /sys/devices/system/cpu, per-game directories, the Wayland runtime directory and the guest working directory. The CPU sysfs bind allows guest lscpu and Box64's CPU detection to read the host CPU topology rather than failing because the rootfs's /sys is intentionally not populated. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
 
 The two environments are deliberately separate:
 

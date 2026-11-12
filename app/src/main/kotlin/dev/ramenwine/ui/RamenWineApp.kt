@@ -1,25 +1,35 @@
 package dev.ramenwine.ui
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -33,9 +43,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.ramenwine.display.DisplaySession
 import dev.ramenwine.display.WawonaDisplayBackend
@@ -48,13 +64,9 @@ import dev.ramenwine.inspection.FolderScanResult
 import dev.ramenwine.inspection.GameFolderScanner
 import dev.ramenwine.inspection.PeArchitecture
 import dev.ramenwine.library.GameLibraryStore
-import dev.ramenwine.library.GameLocaleProfile
-import dev.ramenwine.library.GameStorageManager
-import dev.ramenwine.library.GameStorageUsage
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.GameSession
 import dev.ramenwine.runtime.GameSessionCoordinator
-import dev.ramenwine.runtime.NativeRuntime
 import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
@@ -63,6 +75,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 @Composable
 fun RamenWineApp() {
@@ -71,36 +85,16 @@ fun RamenWineApp() {
     val libraryStore = remember(context.filesDir) {
         GameLibraryStore(context.applicationContext)
     }
-    val storageManager = remember(context.filesDir) {
-        GameStorageManager(context.filesDir, context.cacheDir, libraryStore::remove)
-    }
 
+    var importedGames by remember { mutableStateOf(libraryStore.list()) }
     var selectedFolder by remember { mutableStateOf<Uri?>(null) }
     var scanResult by remember { mutableStateOf<FolderScanResult?>(null) }
     var selectedExecutable by remember { mutableStateOf<ExecutableCandidate?>(null) }
-    var importedGames by remember { mutableStateOf(libraryStore.list()) }
-    var gameStorageUsage by remember {
-        mutableStateOf<Map<String, GameStorageUsage>>(emptyMap())
-    }
-    var sharedRuntimeBytes by remember { mutableStateOf(0L) }
-    var pendingDeletionGame by remember { mutableStateOf<ImportedGame?>(null) }
-    var deletingGameId by remember { mutableStateOf<String?>(null) }
-    var storageError by remember { mutableStateOf<String?>(null) }
-    var storageNotice by remember { mutableStateOf<String?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var importProgress by remember { mutableStateOf(ImportProgress(0, 0L)) }
     var scanError by remember { mutableStateOf<String?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
-    var importNotice by remember { mutableStateOf<String?>(null) }
-
-    var runtimeInspection by remember(context.filesDir) {
-        mutableStateOf(RuntimeLayout.inspect(context.filesDir))
-    }
-    var installingRuntime by remember { mutableStateOf(false) }
-    var runtimePackageError by remember { mutableStateOf<String?>(null) }
-    var runtimePackageNotice by remember { mutableStateOf<String?>(null) }
-    val nativeDiagnostic = remember { NativeRuntime.diagnostic() }
 
     val displayBackend = remember(context.applicationContext) {
         WawonaDisplayBackend(context.applicationContext)
@@ -111,7 +105,6 @@ fun RamenWineApp() {
     var selectedDisplayGame by remember { mutableStateOf<ImportedGame?>(null) }
     var activeDisplaySession by remember { mutableStateOf<DisplaySession?>(null) }
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
-    var activeGameIsDiagnostic by remember { mutableStateOf(false) }
     var surfaceReady by remember { mutableStateOf(false) }
     var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
     var surfaceFrameVerified by remember { mutableStateOf(false) }
@@ -120,65 +113,58 @@ fun RamenWineApp() {
     var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
-    var processOutput by remember { mutableStateOf("") }
+    var gameLaunchOutput by remember { mutableStateOf<List<String>>(emptyList()) }
+    var runtimeReady by remember { mutableStateOf(false) }
+    var runtimeStatus by remember { mutableStateOf("Проверяю системную среду…") }
 
-    suspend fun refreshLibraryStorage() {
-        val snapshot = withContext(Dispatchers.IO) {
-            val games = libraryStore.list()
-            val usage = games.associate { game ->
-                game.id to storageManager.usage(game)
-            }
-            Triple(games, usage, storageManager.sharedRuntimeBytes())
-        }
-        importedGames = snapshot.first
-        gameStorageUsage = snapshot.second
-        sharedRuntimeBytes = snapshot.third
+    suspend fun refreshLibrary() {
+        importedGames = withContext(Dispatchers.IO) { libraryStore.list() }
     }
 
     LaunchedEffect(context.filesDir) {
         try {
             withContext(Dispatchers.IO) {
+                val storageManager = dev.ramenwine.library.GameStorageManager(
+                    context.filesDir,
+                    context.cacheDir,
+                    libraryStore::remove
+                )
                 releaseUnusedPersistedTreePermissions(context)
                 storageManager.cleanupAbandonedData(
                     registeredGameIds = libraryStore.list().map { it.id }.toSet(),
                     canPruneUnlistedData = libraryStore.hasTrustworthyIndex()
                 )
             }
-            refreshLibraryStorage()
-            if (!libraryStore.hasTrustworthyIndex() &&
-                java.io.File(context.filesDir, "games/library.json").exists()
-            ) {
-                storageError = "Индекс библиотеки повреждён или имеет неизвестную версию. " +
-                    "Неиспользуемые папки не удалялись автоматически, чтобы сохранить данные."
-            }
-        } catch (error: Exception) {
-            storageError = error.message ?: error.javaClass.simpleName
+        } catch (_: Exception) {
+            // Library entries remain available even if optional cleanup fails.
         }
 
-        val installedBackend = RuntimeLayout.inspect(context.filesDir)
-            .backends
-            .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
-
-        if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
-            installingRuntime = true
-            runtimePackageError = null
-            runtimePackageNotice = null
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    RuntimePackageInstaller(context.applicationContext).installBundled()
-                }
-                runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-                runtimePackageNotice = result.runtimeVersion +
-                    " · " + result.installedFileCount + " файлов"
-                // The shared runtime is installed after the initial storage
-                // snapshot. Refresh the summary so it never keeps showing 0 B.
-                refreshLibraryStorage()
-            } catch (error: Exception) {
-                runtimePackageError = error.message ?: error.javaClass.simpleName
-                runtimeInspection = RuntimeLayout.inspect(context.filesDir)
-            } finally {
-                installingRuntime = false
+        runtimeReady = false
+        runtimeStatus = "Проверяю системную среду…"
+        try {
+            withContext(Dispatchers.IO) {
+                RuntimePackageInstaller(context.applicationContext).installBundledIfOutdated()
             }
+            val installedBackend = RuntimeLayout.inspect(context.filesDir)
+                .backends
+                .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+            if (installedBackend?.state == RuntimeState.FILES_PRESENT) {
+                runtimeReady = true
+                runtimeStatus = "Среда запуска готова"
+            } else {
+                val details = installedBackend?.missingItems
+                    ?.take(3)
+                    ?.joinToString()
+                    .orEmpty()
+                runtimeStatus = if (details.isBlank()) {
+                    "Runtime не установлен или неполон"
+                } else {
+                    "Runtime неполон: $details"
+                }
+            }
+        } catch (error: Exception) {
+            runtimeStatus = "Не удалось обновить runtime: " +
+                (error.message ?: error.javaClass.simpleName)
         }
     }
 
@@ -199,15 +185,12 @@ fun RamenWineApp() {
             selectedExecutable = null
             scanError = null
             importError = null
-            importNotice = null
-
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-
             scanning = true
             scope.launch {
                 try {
@@ -223,28 +206,47 @@ fun RamenWineApp() {
         }
     }
 
+    fun cancelAddFlow() {
+        if (importing) return
+        selectedFolder?.let { uri ->
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+        }
+        selectedFolder = null
+        scanResult = null
+        selectedExecutable = null
+        scanError = null
+        importError = null
+        scanning = false
+    }
+
     fun startImport() {
         val folderUri = selectedFolder ?: return
         val candidate = selectedExecutable ?: return
-        val title = scanResult?.folderName ?: "Visual novel"
+        val result = scanResult ?: return
+        val architecture = candidate.peInspection?.architecture
+        val supported = candidate.peInspection?.isValidPe == true &&
+            (architecture == PeArchitecture.X86 || architecture == PeArchitecture.X86_64)
+        if (!result.canImport || !supported || importing || scanning) return
 
         importing = true
         importProgress = ImportProgress(0, 0L)
         importError = null
-        importNotice = null
 
         scope.launch {
             try {
                 val imported = withContext(Dispatchers.IO) {
                     GameFolderImporter(context.applicationContext).importGame(
                         treeUri = folderUri,
-                        gameTitle = title,
+                        gameTitle = result.folderName.ifBlank { "Visual novel" },
                         selectedExecutableRelativePath = candidate.relativePath,
                         selectedExecutableUri = candidate.uri,
                         onProgress = { progress ->
-                            scope.launch {
-                                importProgress = progress
-                            }
+                            scope.launch { importProgress = progress }
                         }
                     )
                 }
@@ -255,10 +257,22 @@ fun RamenWineApp() {
                     )
                 }
                 selectedFolder = null
-                selectedExecutable = null
                 scanResult = null
-                refreshLibraryStorage()
-                importNotice = "Игра импортирована: " + imported.title
+                selectedExecutable = null
+                refreshLibrary()
+
+                // Show the new game immediately; discover its cover in the background.
+                scope.launch {
+                    val coverUrl = withContext(Dispatchers.IO) {
+                        runCatching { GameCoverSearch.findCover(imported.title) }.getOrNull()
+                    }
+                    if (!coverUrl.isNullOrBlank()) {
+                        withContext(Dispatchers.IO) {
+                            libraryStore.add(imported.copy(coverImageUrl = coverUrl))
+                        }
+                        refreshLibrary()
+                    }
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -270,17 +284,18 @@ fun RamenWineApp() {
     }
 
     fun prepareGame(game: ImportedGame) {
-        if (preparingGame || activeDisplaySession != null ||
-            activeGameSession?.isRunning == true
-        ) return
-
+        if (preparingGame || activeDisplaySession != null || activeGameSession?.isRunning == true) {
+            return
+        }
+        if (!runtimeReady) {
+            gameLaunchError = runtimeStatus
+            return
+        }
         gameLaunchError = null
-        gameLaunchNotice = "Проверяю Wawona и подготавливаю ресурсы…"
+        gameLaunchNotice = "Открываю игровой экран…"
         surfaceFrameVerified = false
         surfaceFrameResult = null
-        processOutput = ""
         preparingGame = true
-
         scope.launch {
             try {
                 activeDisplaySession = gameSessionCoordinator.openDisplay()
@@ -288,7 +303,7 @@ fun RamenWineApp() {
                 surfaceReady = false
                 activeSurfaceView = null
                 surfaceFrameVerified = false
-                gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
+                gameLaunchNotice = "Подключаю игровой экран…"
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
                 gameLaunchNotice = null
@@ -304,84 +319,72 @@ fun RamenWineApp() {
 
         verifyingSurfaceFrame = true
         surfaceFrameVerified = false
-        surfaceFrameResult = "Запускаю настоящий Wayland SHM-клиент и проверяю пиксели Android Surface…"
+        surfaceFrameResult = "Проверяю вывод изображения…"
         scope.launch {
             try {
                 val result = view.verifyWaylandShmOutput()
                 surfaceFrameVerified = result.visible
-                surfaceFrameResult = result.detail
+                surfaceFrameResult = if (result.visible) "Экран готов" else result.detail
             } catch (error: Exception) {
                 surfaceFrameVerified = false
-                surfaceFrameResult = "Проверка не завершилась: " +
-                    (error.message ?: error.javaClass.simpleName)
+                surfaceFrameResult = error.message ?: error.javaClass.simpleName
             } finally {
                 verifyingSurfaceFrame = false
             }
         }
     }
 
-    fun startSelectedSession(launchDiagnosticWindow: Boolean) {
+    fun startSelectedSession() {
         val game = selectedDisplayGame ?: return
         if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
 
         preparingGame = true
         gameLaunchError = null
-        gameLaunchNotice = if (launchDiagnosticWindow) {
-            "Проверяю запуск встроенного Win32 GDI окна…"
-        } else {
-            "Проверяю runtime и запускаю Windows EXE…"
-        }
+        gameLaunchOutput = emptyList()
+        gameLaunchNotice = "Запускаю игру…"
         scope.launch {
             try {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
-                    launchDiagnosticWindow = launchDiagnosticWindow,
+                    launchDiagnosticWindow = false,
                     onOutput = { line ->
-                        processOutput = (processOutput + line + "\\n").takeLast(8_000)
+                        gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
                     },
                     onExit = { exitCode ->
                         activeGameSession = null
-                        activeGameIsDiagnostic = false
                         activeDisplaySession = null
                         selectedDisplayGame = null
                         surfaceReady = false
                         surfaceFrameVerified = false
                         activeSurfaceView = null
                         preparingGame = false
-                        gameLaunchNotice = if (launchDiagnosticWindow) {
-                            "Win32 GDI тест завершился (код $exitCode)."
-                        } else {
-                            "Windows-процесс завершился (код $exitCode)."
-                        }
+                        gameLaunchNotice = "Игра завершена (код $exitCode)"
                     }
                 )
                 if (launched.isRunning) {
                     activeGameSession = launched
-                    activeGameIsDiagnostic = launchDiagnosticWindow
-                    gameLaunchNotice = if (launchDiagnosticWindow) {
-                        "Тестовое Win32 GDI окно запущено. Проверь, видно ли цветное окно с надписью RAMENWINE."
-                    } else {
-                        "Процесс игры запущен. Диагностика доступна ниже."
-                    }
+                    gameLaunchNotice = null
                 } else {
                     activeGameSession = null
-                    activeGameIsDiagnostic = false
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
                     surfaceFrameVerified = false
                     activeSurfaceView = null
-                    gameLaunchNotice = if (launchDiagnosticWindow) {
-                        "Win32 GDI тест завершился до подтверждения запуска."
-                    } else {
-                        "Процесс завершился до подтверждения запуска."
-                    }
+                    gameLaunchNotice = "Процесс завершился до подтверждения запуска."
                 }
             } catch (error: Exception) {
-                gameLaunchError = error.message ?: error.javaClass.simpleName
+                val baseMessage = error.message ?: error.javaClass.simpleName
+                val recentOutput = gameLaunchOutput.takeLast(22)
+                    .joinToString("\n")
+                    .takeLast(2_800)
+                gameLaunchError = if (recentOutput.isBlank()) {
+                    baseMessage
+                } else {
+                    baseMessage + "\n\nПоследний вывод Wine/PRoot:\n" + recentOutput
+                }
                 runCatching { gameSessionCoordinator.closeDisplay() }
                 activeGameSession = null
-                activeGameIsDiagnostic = false
                 activeDisplaySession = null
                 selectedDisplayGame = null
                 surfaceReady = false
@@ -392,10 +395,6 @@ fun RamenWineApp() {
             }
         }
     }
-
-    fun launchSelectedGame() = startSelectedSession(launchDiagnosticWindow = false)
-
-    fun launchWin32GdiSmokeTest() = startSelectedSession(launchDiagnosticWindow = true)
 
     fun stopSelectedGame() {
         scope.launch {
@@ -410,11 +409,8 @@ fun RamenWineApp() {
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
             } finally {
-                // Do not remove the Surface or forget the session while the
-                // process is still alive; that would strand a running game.
                 if (running == null || !running.isRunning) {
                     activeGameSession = null
-                    activeGameIsDiagnostic = false
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
@@ -426,703 +422,470 @@ fun RamenWineApp() {
         }
     }
 
-    fun changeGameLocale(game: ImportedGame, locale: String) {
-        if (!GameLocaleProfile.isSupported(locale)) return
-        val updatedGame = game.copy(locale = locale)
-        try {
-            libraryStore.add(updatedGame)
-            importedGames = importedGames.map { current ->
-                if (current.id == game.id) updatedGame else current
-            }
-            storageError = null
-            storageNotice = "Язык среды Wine для «" + game.title +
-                "» сохранён. Изменение применяется при следующем запуске."
-        } catch (error: Exception) {
-            storageError = error.message ?: error.javaClass.simpleName
-        }
-    }
-
-    fun deleteImportedGame(game: ImportedGame) {
-        if (preparingGame || importing ||
-            selectedDisplayGame?.id == game.id ||
-            activeGameSession?.game?.id == game.id
-        ) {
-            storageError = "Сначала закрой экран этой игры, затем удаляй её."
-            return
-        }
-        deletingGameId = game.id
-        storageError = null
-        storageNotice = null
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    storageManager.deleteGame(game)
-                }
-                refreshLibraryStorage()
-                storageNotice = "Игра и её сохранения удалены. Общий runtime оставлен для остальных игр."
-            } catch (error: Exception) {
-                storageError = error.message ?: error.javaClass.simpleName
-            } finally {
-                deletingGameId = null
-            }
-        }
-    }
-
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
+        val currentDisplay = activeDisplaySession
+        val currentGame = selectedDisplayGame
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "RAMENWINE",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        text = "Windows visual novel runtime for Android",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Development build · Phase 1: import and EXE inspection",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-
-                RuntimeStatusCard(
-                    runtimeInspection = runtimeInspection,
-                    nativeDiagnostic = nativeDiagnostic
-                )
-
-                StorageSummaryCard(
-                    games = importedGames,
-                    usage = gameStorageUsage,
-                    sharedRuntimeBytes = sharedRuntimeBytes
-                )
-                storageError?.let {
-                    Text("Хранилище: " + it, color = MaterialTheme.colorScheme.error)
-                }
-                storageNotice?.let {
-                    Text(it, color = MaterialTheme.colorScheme.secondary)
-                }
-
-                if (installingRuntime) {
-                    Text(
-                        "Проверяю и устанавливаю локальный runtime-пакет…",
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                runtimePackageError?.let {
-                    Text(
-                        text = "Runtime-пакет не установлен: " + it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                runtimePackageNotice?.let {
-                    Text(
-                        text = "Runtime установлен: " + it,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-
-                Button(
-                    onClick = { folderPicker.launch(null) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !scanning && !importing
+            if (currentDisplay != null && currentGame != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        when {
-                            scanning -> "Сканирование…"
-                            importing -> "Импортирование…"
-                            else -> "Выбрать папку игры"
+                    WawonaSurfaceHost(
+                        session = currentDisplay,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        onSurfaceStateChanged = { attached ->
+                            surfaceReady = attached
+                            if (!attached) {
+                                surfaceFrameVerified = false
+                                surfaceFrameResult = null
+                            }
+                        },
+                        onSurfaceViewChanged = { view ->
+                            activeSurfaceView = view
+                            if (view == null) surfaceFrameVerified = false
                         }
                     )
-                }
 
-                selectedFolder?.let {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = ::stopSelectedGame,
+                            enabled = !preparingGame
+                        ) {
+                            Text("Назад")
+                        }
+                        if (activeGameSession == null) {
+                            Button(
+                                onClick = ::verifyWaylandSurfaceOutput,
+                                enabled = surfaceReady && !verifyingSurfaceFrame && !preparingGame
+                            ) {
+                                Text(
+                                    when {
+                                        verifyingSurfaceFrame -> "Проверяю…"
+                                        surfaceFrameVerified -> "Экран готов"
+                                        else -> "Проверить экран"
+                                    }
+                                )
+                            }
+                            Button(
+                                onClick = ::startSelectedSession,
+                                enabled = surfaceReady && surfaceFrameVerified &&
+                                    !preparingGame && !verifyingSurfaceFrame
+                            ) {
+                                Text(if (preparingGame) "Запуск…" else "Запустить")
+                            }
+                        } else {
+                            Button(
+                                onClick = ::stopSelectedGame,
+                                enabled = !preparingGame
+                            ) {
+                                Text("Закрыть игру")
+                            }
+                        }
+                    }
+                    gameLaunchNotice?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            } else {
+                if (!runtimeReady) {
                     Text(
-                        text = "Выбрана папка: " + (it.lastPathSegment ?: it.toString()),
+                        runtimeStatus,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 16.dp, top = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                when {
-                    scanning -> Text("Безопасно просматриваю файлы…")
-                    scanError != null -> Text(
-                        text = "Ошибка сканирования: " + scanError,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    scanResult != null -> ScanResultCard(
-                        result = scanResult!!,
-                        selectedExecutable = selectedExecutable,
-                        onSelectExecutable = {
-                            selectedExecutable = it
-                            importError = null
-                            importNotice = null
-                        }
-                    )
-                }
-
-                selectedExecutable?.let { candidate ->
-                    SelectedExecutableCard(
-                        candidate = candidate,
-                        importing = importing,
-                        canImport = scanResult?.canImport == true,
-                        onImport = ::startImport
-                    )
-                }
-
-                if (importing) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (importedGames.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 84.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            "Копирую игру в приватное хранилище приложения…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(
-                            text = "Файлов: " + importProgress.copiedFiles +
-                                " · Скопировано: " + formatFileSize(importProgress.copiedBytes),
-                            style = MaterialTheme.typography.labelSmall,
+                            "Добавь игру через +",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                }
-
-                importError?.let {
-                    Text(
-                        text = "Ошибка импорта: " + it,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                importNotice?.let {
-                    Text(it, color = MaterialTheme.colorScheme.secondary)
-                }
-
-                if (importedGames.isNotEmpty()) {
-                    LibraryCard(
-                        games = importedGames,
-                        storageUsage = gameStorageUsage,
-                        canPrepareGame = activeDisplaySession == null &&
-                            activeGameSession?.isRunning != true && !preparingGame,
-                        preparingGame = preparingGame,
-                        deletingGameId = deletingGameId,
-                        canDeleteGame = { game ->
-                            deletingGameId == null && !importing && !preparingGame &&
-                                selectedDisplayGame?.id != game.id &&
-                                activeGameSession?.game?.id != game.id
-                        },
-                        onPrepareGame = ::prepareGame,
-                        onDeleteGame = { pendingDeletionGame = it },
-                        onChangeLocale = ::changeGameLocale
-                    )
-                }
-
-                gameLaunchError?.let {
-                    Text(
-                        text = "Не удалось открыть игру: $it",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                gameLaunchNotice?.let {
-                    Text(text = it, color = MaterialTheme.colorScheme.secondary)
-                }
-
-                val currentDisplay = activeDisplaySession
-                val currentGame = selectedDisplayGame
-                if (currentDisplay != null && currentGame != null) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(currentGame.title, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (surfaceReady) {
-                                    "Wawona Surface подключён · Wayland socket готов"
-                                } else {
-                                    "Ожидаю Android Surface…"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            WawonaSurfaceHost(
-                                session = currentDisplay,
-                                modifier = Modifier.fillMaxWidth().height(320.dp),
-                                onSurfaceStateChanged = { attached ->
-                                    surfaceReady = attached
-                                    if (!attached) {
-                                        surfaceFrameVerified = false
-                                        surfaceFrameResult = null
-                                    }
-                                },
-                                onSurfaceViewChanged = { view ->
-                                    activeSurfaceView = view
-                                    if (view == null) surfaceFrameVerified = false
-                                }
-                            )
-                            if (activeGameSession == null) {
-                                Button(
-                                    onClick = ::verifyWaylandSurfaceOutput,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && !preparingGame && !verifyingSurfaceFrame
-                                ) {
-                                    Text(
-                                        if (verifyingSurfaceFrame) "Проверяю кадр Wayland…"
-                                        else "Проверить реальный вывод Wayland"
-                                    )
-                                }
-                                surfaceFrameResult?.let { detail ->
-                                    Text(
-                                        text = detail,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (detail.startsWith("Успех:")) {
-                                            MaterialTheme.colorScheme.secondary
-                                        } else {
-                                            MaterialTheme.colorScheme.error
-                                        }
-                                    )
-                                }
-                            }
-                            if (activeGameSession == null) {
-                                Button(
-                                    onClick = ::launchWin32GdiSmokeTest,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && surfaceFrameVerified &&
-                                        !preparingGame && !verifyingSurfaceFrame
-                                ) {
-                                    Text("Проверить запуск Win32 GDI окна")
-                                }
-                                Text(
-                                    "Встроенное окно проверяет Win32-отрисовку через Wine отдельно от файлов выбранной новеллы.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Button(
-                                    onClick = ::launchSelectedGame,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && surfaceFrameVerified &&
-                                        !preparingGame && !verifyingSurfaceFrame
-                                ) {
-                                    Text(
-                                        if (preparingGame) "Подготовка…"
-                                        else if (!surfaceFrameVerified) "Сначала проверь вывод Wayland"
-                                        else "Запустить Windows EXE"
-                                    )
-                                }
-                            } else {
-                                Button(
-                                    onClick = ::stopSelectedGame,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = !preparingGame
-                                ) {
-                                    Text(if (activeGameIsDiagnostic) "Остановить GDI-тест" else "Остановить игру")
-                                }
-                            }
-                            Button(
-                                onClick = ::stopSelectedGame,
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = !preparingGame
-                            ) {
-                                Text("Закрыть игровой экран")
-                            }
-                            if (processOutput.isNotBlank()) {
-                                HorizontalDivider()
-                                Text("Вывод runtime", fontWeight = FontWeight.Medium)
-                                Text(
-                                    text = processOutput.takeLast(8_000),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 16
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Text(
-                    text = "Запуск разрешается только после подключения Wawona Surface и проверки " +
-                        "локального PRoot/Wine runtime. Отсутствующие компоненты блокируют запуск.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        pendingDeletionGame?.let { game ->
-            AlertDialog(
-                onDismissRequest = { pendingDeletionGame = null },
-                title = { Text("Удалить «" + game.title + "»?") },
-                text = {
-                    Text(
-                        "Будут удалены копия игры, сохранения и настройки Wine, " +
-                            "а также временные файлы. Исходная папка, которую ты выбрал " +
-                            "при импорте, не изменится. Общий runtime останется для других игр."
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            pendingDeletionGame = null
-                            deleteImportedGame(game)
-                        }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            top = 18.dp,
+                            end = 16.dp,
+                            bottom = 104.dp
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("Удалить игру и сохранения")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDeletionGame = null }) {
-                        Text("Отмена")
+                        items(importedGames, key = { it.id }) { game ->
+                            GameIcon(
+                                game = game,
+                                enabled = runtimeReady && !preparingGame,
+                                onClick = { prepareGame(game) }
+                            )
+                        }
                     }
                 }
-            )
-        }
-    }
-}
 
-@Composable
-private fun StorageSummaryCard(
-    games: List<ImportedGame>,
-    usage: Map<String, GameStorageUsage>,
-    sharedRuntimeBytes: Long
-) {
-    val gameBytes = games.fold(0L) { total, game ->
-        val bytes = usage[game.id]?.totalBytes ?: game.totalBytes
-        if (bytes > 0L && total > Long.MAX_VALUE - bytes) Long.MAX_VALUE
-        else total + bytes
-    }
+                FloatingActionButton(
+                    onClick = { if (!scanning && !importing && !preparingGame) folderPicker.launch(null) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(22.dp),
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Text("+", style = MaterialTheme.typography.headlineMedium)
+                }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Text("Память RamenWine", fontWeight = FontWeight.Bold)
-            Text("Игры, сохранения и временные данные: " + formatFileSize(gameBytes))
-            Text("Общий runtime: " + formatFileSize(sharedRuntimeBytes))
-            Text(
-                "Данные находятся в приватной памяти приложения. Удалять папки через " +
-                    "файловый менеджер не нужно: для каждой игры есть отдельная очистка ниже.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
+                if (preparingGame) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
 
-@Composable
-private fun RuntimeStatusCard(
-    runtimeInspection: dev.ramenwine.runtime.RuntimeInspection,
-    nativeDiagnostic: String
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Runtime environment", fontWeight = FontWeight.Bold)
-            when (runtimeInspection.state) {
-                RuntimeState.NOT_INSTALLED -> Text("Windows runtime ещё не установлен.")
-                RuntimeState.INCOMPLETE -> Text(
-                    "Найдена неполная установка runtime. Проверь отсутствующие файлы ниже."
-                )
-                RuntimeState.FILES_PRESENT -> Text(
-                    "Найден как минимум один комплект runtime-файлов. Реальный запуск ещё нужно проверить."
+            if (selectedFolder != null) {
+                AddGameDialog(
+                    scanning = scanning,
+                    importing = importing,
+                    result = scanResult,
+                    selectedExecutable = selectedExecutable,
+                    progress = importProgress,
+                    scanError = scanError,
+                    importError = importError,
+                    onSelectExecutable = { selectedExecutable = it },
+                    onImport = ::startImport,
+                    onDismiss = ::cancelAddFlow
                 )
             }
-            runtimeInspection.backends.forEach { backend ->
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    val stateLabel = when (backend.state) {
-                        RuntimeState.NOT_INSTALLED -> "не установлен"
-                        RuntimeState.INCOMPLETE -> "неполный"
-                        RuntimeState.FILES_PRESENT -> "файлы на месте"
-                    }
-                    Text(
-                        text = backend.backend.displayName + " · " + stateLabel,
-                        fontWeight = FontWeight.Medium
-                    )
-                    backend.runtimeVersion?.let {
+
+            gameLaunchError?.let { message ->
+                AlertDialog(
+                    onDismissRequest = { gameLaunchError = null },
+                    title = { Text("Не удалось открыть игру") },
+                    text = {
                         Text(
-                            text = "Версия: " + it,
-                            style = MaterialTheme.typography.labelSmall
+                            message,
+                            modifier = Modifier
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(rememberScrollState())
                         )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { gameLaunchError = null }) {
+                            Text("Закрыть")
+                        }
                     }
-                    backend.missingItems.forEach { missing ->
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GameIcon(
+    game: ImportedGame,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.70f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            GameCoverImage(
+                imageUrl = game.coverImageUrl,
+                fallbackTitle = game.title
+            )
+        }
+        Text(
+            text = game.title,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun GameCoverImage(
+    imageUrl: String?,
+    fallbackTitle: String
+) {
+    var bitmap by remember(imageUrl) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(imageUrl) {
+        bitmap = if (imageUrl.isNullOrBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = (URL(imageUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 7_000
+                        readTimeout = 7_000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", "RamenWine/0.1.0")
+                    }
+                    try {
+                        if (connection.responseCode !in 200..299) {
+                            null
+                        } else {
+                            connection.inputStream.use { stream ->
+                                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                            }
+                        }
+                    } finally {
+                        connection.disconnect()
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!,
+            contentDescription = fallbackTitle,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Text(
+            text = fallbackTitle.take(2).uppercase(),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun AddGameDialog(
+    scanning: Boolean,
+    importing: Boolean,
+    result: FolderScanResult?,
+    selectedExecutable: ExecutableCandidate?,
+    progress: ImportProgress,
+    scanError: String?,
+    importError: String?,
+    onSelectExecutable: (ExecutableCandidate) -> Unit,
+    onImport: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val selectedArchitecture = selectedExecutable?.peInspection?.architecture
+    val selectedIsSupported = selectedExecutable?.peInspection?.isValidPe == true &&
+        (selectedArchitecture == PeArchitecture.X86 ||
+            selectedArchitecture == PeArchitecture.X86_64)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (importing) "Добавление игры" else "Добавить игру") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when {
+                    scanning -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("Сканирую папку игры…")
+                    }
+                    scanError != null -> {
                         Text(
-                            text = "• " + missing,
-                            style = MaterialTheme.typography.labelSmall,
+                            text = scanError,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
-                }
-            }
-            Text(
-                text = "Путь runtime: " + runtimeInspection.runtimeRoot.path,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            HorizontalDivider()
-            Text("Native bridge", fontWeight = FontWeight.Bold)
-            Text(text = nativeDiagnostic, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun SelectedExecutableCard(
-    candidate: ExecutableCandidate,
-    importing: Boolean,
-    canImport: Boolean,
-    onImport: () -> Unit
-) {
-    val isValidPe = candidate.peInspection?.isValidPe == true
-    val architecture = candidate.peInspection?.architecture
-    val isSupportedArchitecture =
-        architecture == PeArchitecture.X86 || architecture == PeArchitecture.X86_64
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Главный EXE выбран", fontWeight = FontWeight.Bold)
-            Text(candidate.relativePath)
-            Text(
-                text = "Архитектура: " +
-                    (candidate.peInspection?.architecture?.displayName ?: "не определена"),
-                style = MaterialTheme.typography.bodySmall
-            )
-            candidate.peInspection?.diagnostic?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall)
-            }
-
-            if (!isValidPe) {
-                Text(
-                    "Заголовок PE не прошёл проверку. Выбери другой EXE.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            } else if (!isSupportedArchitecture) {
-                Text(
-                    "Этот EXE собран для " +
-                        (candidate.peInspection?.architecture?.displayName ?: "неизвестной архитектуры") +
-                        ". Сейчас доступны только Windows x86 и x86-64. " +
-                        "Файлы игры не будут копироваться.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (!canImport) {
-                Text(
-                    "Импорт пока заблокирован: сканирование обнаружило недоступные, " +
-                        "неподдерживаемые или непроверенные элементы. Выбери более узкую " +
-                        "папку игры или исправь указанные проблемы и просканируй снова.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            Button(
-                onClick = onImport,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = isValidPe && isSupportedArchitecture && canImport && !importing
-            ) {
-                Text(if (importing) "Импортирование…" else "Импортировать игру")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScanResultCard(
-    result: FolderScanResult,
-    selectedExecutable: ExecutableCandidate?,
-    onSelectExecutable: (ExecutableCandidate) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("Результат сканирования", fontWeight = FontWeight.Bold)
-            Text("Папка: " + result.folderName)
-            Text("Просмотрено файлов: " + result.visitedFiles)
-            Text("Найдено EXE: " + result.executableCandidates.size)
-
-            if (result.wasTruncated) {
-                Text(
-                    "Достигнут лимит сканирования. Часть папки не проверена; импорт отключён.",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-            if (result.hasBlockingIssues) {
-                Text(
-                    "Есть ошибки чтения или несовместимые имена/элементы. " +
-                        "Импорт отключён, чтобы не получить неполную копию игры.",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-
-            result.executableCandidates.forEach { candidate ->
-                ExecutableRow(
-                    candidate = candidate,
-                    isSelected = selectedExecutable?.uri == candidate.uri,
-                    onSelect = { onSelectExecutable(candidate) }
-                )
-            }
-
-            result.warnings.forEach { warning ->
-                Text(
-                    text = warning,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-
-            if (result.executableCandidates.isEmpty()) {
-                Text("EXE-файлы не найдены в пределах лимитов сканирования.")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ExecutableRow(
-    candidate: ExecutableCandidate,
-    isSelected: Boolean,
-    onSelect: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(candidate.relativePath, fontWeight = FontWeight.Medium)
-        val architecture = candidate.peInspection?.architecture?.displayName
-            ?: "Заголовок PE не распознан"
-        Text(
-            text = architecture,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        candidate.sizeBytes?.let { size ->
-            Text(
-                text = formatFileSize(size),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        candidate.peInspection?.diagnostic?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall)
-        }
-        Button(
-            onClick = onSelect,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (isSelected) "Выбран" else "Выбрать этот EXE")
-        }
-        HorizontalDivider()
-    }
-}
-
-@Composable
-private fun LibraryCard(
-    games: List<ImportedGame>,
-    storageUsage: Map<String, GameStorageUsage>,
-    canPrepareGame: Boolean,
-    preparingGame: Boolean,
-    deletingGameId: String?,
-    canDeleteGame: (ImportedGame) -> Boolean,
-    onPrepareGame: (ImportedGame) -> Unit,
-    onDeleteGame: (ImportedGame) -> Unit,
-    onChangeLocale: (ImportedGame, String) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("Библиотека", fontWeight = FontWeight.Bold)
-            games.forEach { game ->
-                var localeMenuExpanded by remember(game.id) { mutableStateOf(false) }
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(game.title, fontWeight = FontWeight.Medium)
-                    Text(
-                        text = game.executableRelativePath + " · " + game.architecture,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Box {
-                        TextButton(onClick = { localeMenuExpanded = true }) {
-                            Text("Язык среды Wine: " + GameLocaleProfile.labelFor(game.locale))
+                    result != null -> {
+                        Text("Выбери EXE-файл игры")
+                        if (result.wasTruncated || result.hasBlockingIssues || !result.canImport) {
+                            Text(
+                                "Папку нельзя импортировать целиком: обнаружены ограничения или ошибки сканирования.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
-                        DropdownMenu(
-                            expanded = localeMenuExpanded,
-                            onDismissRequest = { localeMenuExpanded = false }
-                        ) {
-                            GameLocaleProfile.options.forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option.label) },
-                                    enabled = option.locale != game.locale,
-                                    onClick = {
-                                        localeMenuExpanded = false
-                                        onChangeLocale(game, option.locale)
+                        if (result.executableCandidates.isEmpty()) {
+                            Text("EXE-файлы не найдены.")
+                        }
+                        result.executableCandidates.forEach { candidate ->
+                            val isSelected = selectedExecutable?.uri == candidate.uri
+                            val architecture = candidate.peInspection?.architecture
+                                ?.displayName ?: "Архитектура не определена"
+                            Card(
+                                onClick = { onSelectExecutable(candidate) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) {
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
                                     }
                                 )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = candidate.relativePath,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = architecture,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
                     }
-                    val usage = storageUsage[game.id] ?: GameStorageUsage(
-                        gameFilesBytes = game.totalBytes
-                    )
-                    Text(
-                        text = "Файлы игры: " + formatFileSize(usage.gameFilesBytes),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Сохранения и настройки Wine: " +
-                            formatFileSize(usage.wineDataBytes) +
-                            " · временные файлы: " + formatFileSize(usage.temporaryBytes),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Button(
-                        onClick = { onPrepareGame(game) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = canPrepareGame
-                    ) {
-                        Text(if (preparingGame) "Подготовка…" else "Открыть игровой экран")
-                    }
-                    Button(
-                        onClick = { onDeleteGame(game) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = canDeleteGame(game)
-                    ) {
-                        Text(
-                            if (deletingGameId == game.id) "Удаляю данные…"
-                            else "Удалить игру и сохранения"
-                        )
-                    }
                 }
-                HorizontalDivider()
+
+                if (importing) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        "Файлов: " + progress.copiedFiles +
+                            " · Скопировано: " + formatFileSize(progress.copiedBytes),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                importError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+                if (selectedExecutable != null && !selectedIsSupported) {
+                    Text(
+                        "Поддерживаются проверенные Windows x86 и x86-64 EXE.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onImport,
+                enabled = !scanning && !importing && result?.canImport == true &&
+                    selectedExecutable != null && selectedIsSupported
+            ) {
+                Text(if (importing) "Добавляю…" else "Добавить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !importing) {
+                Text("Отмена")
             }
         }
+    )
+}
+
+private object GameCoverSearch {
+    fun findCover(gameTitle: String): String? {
+        val title = gameTitle.trim()
+        if (title.isEmpty()) return null
+
+        val queries = listOf("$title video game", title)
+        for (query in queries) {
+            val image = searchWikipedia(query, title)
+            if (!image.isNullOrBlank()) return image
+        }
+        return null
+    }
+
+    private fun searchWikipedia(query: String, originalTitle: String): String? {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val requestUrl = URL(
+            "https://en.wikipedia.org/w/api.php?action=query&generator=search" +
+                "&gsrsearch=$encoded&gsrnamespace=0&gsrlimit=8" +
+                "&prop=pageimages&piprop=thumbnail&pithumbsize=640&format=json"
+        )
+        val connection = requestUrl.openConnection() as HttpURLConnection
+        connection.connectTimeout = 7_000
+        connection.readTimeout = 7_000
+        connection.setRequestProperty("User-Agent", "RamenWine/0.1.0")
+
+        return try {
+            if (connection.responseCode !in 200..299) return null
+            val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use {
+                org.json.JSONObject(it.readText())
+            }
+            val pages = json.optJSONObject("query")?.optJSONObject("pages") ?: return null
+            val normalizedTitle = normalizeTitle(originalTitle)
+            val pageIds = pages.keys()
+            val candidates = buildList {
+                while (pageIds.hasNext()) {
+                    val page = pages.optJSONObject(pageIds.next()) ?: continue
+                    val pageTitle = normalizeTitle(page.optString("title"))
+                    val imageUrl = page.optJSONObject("thumbnail")?.optString("source")
+                    if (
+                        imageUrl.isNullOrBlank() ||
+                        !imageUrl.startsWith("https://upload.wikimedia.org/") ||
+                        pageTitle.isBlank()
+                    ) {
+                        continue
+                    }
+                    val score = when {
+                        pageTitle == normalizedTitle -> 0
+                        pageTitle.startsWith(normalizedTitle) ||
+                            normalizedTitle.startsWith(pageTitle) -> 1
+                        titleTokenSimilarity(normalizedTitle, pageTitle) >= 0.7 -> 2
+                        else -> 99
+                    }
+                    if (score < 99) add(score to imageUrl)
+                }
+            }
+            candidates.minByOrNull { it.first }?.second
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun normalizeTitle(value: String): String =
+        value.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun titleTokenSimilarity(left: String, right: String): Double {
+        val leftTokens = left.split(" ").filter(String::isNotBlank).toSet()
+        val rightTokens = right.split(" ").filter(String::isNotBlank).toSet()
+        if (leftTokens.isEmpty() || rightTokens.isEmpty()) return 0.0
+        return leftTokens.intersect(rightTokens).size.toDouble() /
+            leftTokens.size.coerceAtLeast(rightTokens.size).toDouble()
     }
 }
 
