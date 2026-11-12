@@ -18,9 +18,9 @@ class WinePrefixRecoveryPolicyTest {
     }
 
     @Test
-    fun recoversMarkerForACompletePrefixWhenMarkerWasNotWritten() {
+    fun updatesACompletePrefixWhenTheCompletionMarkerIsMissing() {
         assertEquals(
-            WinePrefixRecoveryAction.RECOVER_MARKER,
+            WinePrefixRecoveryAction.UPDATE,
             WinePrefixRecoveryPolicy.decide(
                 populatedRegistryFiles = 3,
                 markerExists = false,
