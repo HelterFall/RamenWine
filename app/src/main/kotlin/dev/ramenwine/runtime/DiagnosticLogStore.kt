@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Process
 import android.os.StatFs
+import android.util.Log
 import android.system.Os
 import android.system.OsConstants
 import dev.ramenwine.library.ImportedGame
@@ -59,6 +60,12 @@ class DiagnosticLogStore(private val context: Context) {
             lines += "${timestamp(System.currentTimeMillis())}  $safeMessage"
             trimIfNeeded()
         }
+        // Mirror launch output into the app-UID logcat buffer. If Android kills
+        // or restarts RamenWine while the game screen is frozen, the next report
+        // can still recover Wine/Box64 output from the previous process.
+        safeMessage.chunked(LOGCAT_MESSAGE_CHUNK).forEachIndexed { index, chunk ->
+            Log.i(DIAGNOSTIC_LOG_TAG, "[$index] $chunk")
+        }
     }
 
     fun recordException(stage: String, error: Throwable) {
@@ -97,8 +104,9 @@ class DiagnosticLogStore(private val context: Context) {
             }
             snapshot.first.forEach(::appendLine)
             appendLine()
-            appendLogcatSection()
-            appendFindings(snapshot.first)
+            val logcatOutput = readOwnLogcat()
+            appendLogcatSection(logcatOutput)
+            appendFindings(snapshot.first + logcatOutput.lineSequence())
         }
     }
 
@@ -312,9 +320,9 @@ class DiagnosticLogStore(private val context: Context) {
         }
     }
 
-    private fun StringBuilder.appendLogcatSection() {
-        appendLine("=== ANDROID LOGCAT (THIS APP UID ONLY) ===")
-        appendLine(readOwnLogcat())
+    private fun StringBuilder.appendLogcatSection(logcatOutput: String) {
+        appendLine("=== ANDROID LOGCAT (THIS APP UID ONLY; INCLUDES PERSISTED LAUNCH OUTPUT) ===")
+        appendLine(logcatOutput)
         appendLine()
     }
 
@@ -433,6 +441,8 @@ class DiagnosticLogStore(private val context: Context) {
         const val MAX_LOG_CHARACTERS = 2_500_000
         const val LOGCAT_LINE_LIMIT = 4_000
         const val MAX_LOGCAT_CHARACTERS = 650_000
+        const val LOGCAT_MESSAGE_CHUNK = 3_000
+        const val DIAGNOSTIC_LOG_TAG = "RamenWineDiag"
         const val LOGCAT_TIMEOUT_SECONDS = 5L
     }
 }
