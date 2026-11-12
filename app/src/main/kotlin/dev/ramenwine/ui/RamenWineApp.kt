@@ -67,6 +67,7 @@ import dev.ramenwine.library.GameLibraryStore
 import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.runtime.GameSession
 import dev.ramenwine.runtime.GameSessionCoordinator
+import dev.ramenwine.runtime.DiagnosticLogStore
 import dev.ramenwine.runtime.RuntimeBackendId
 import dev.ramenwine.runtime.RuntimeLayout
 import dev.ramenwine.runtime.RuntimePackageInstaller
@@ -82,6 +83,30 @@ import java.net.URL
 fun RamenWineApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val diagnosticLogStore = remember(context.filesDir) {
+        DiagnosticLogStore(context.applicationContext)
+    }
+    var diagnosticSaveStatus by remember { mutableStateOf<String?>(null) }
+    val diagnosticExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val report = diagnosticLogStore.buildReport()
+                        context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                            output.write(report.toByteArray(Charsets.UTF_8))
+                            output.flush()
+                        } ?: throw IllegalStateException("Не удалось открыть файл для записи.")
+                    }
+                    diagnosticSaveStatus = "Диагностика сохранена в выбранный файл."
+                } catch (error: Exception) {
+                    diagnosticSaveStatus = "Не удалось сохранить диагностику: ${error.message ?: error.javaClass.simpleName}"
+                }
+            }
+        }
+    }
     val libraryStore = remember(context.filesDir) {
         GameLibraryStore(context.applicationContext)
     }
@@ -116,6 +141,10 @@ fun RamenWineApp() {
     var gameLaunchOutput by remember { mutableStateOf<List<String>>(emptyList()) }
     var runtimeReady by remember { mutableStateOf(false) }
     var runtimeStatus by remember { mutableStateOf("Проверяю системную среду…") }
+
+    fun exportDiagnostics() {
+        diagnosticExportLauncher.launch("RamenWine-diagnostics.txt")
+    }
 
     suspend fun refreshLibrary() {
         importedGames = withContext(Dispatchers.IO) { libraryStore.list() }
@@ -284,10 +313,15 @@ fun RamenWineApp() {
     }
 
     fun prepareGame(game: ImportedGame) {
+        diagnosticLogStore.beginSession(game)
+        diagnosticLogStore.record("UI: launch requested.")
+        diagnosticLogStore.record("Runtime status: $runtimeStatus")
         if (preparingGame || activeDisplaySession != null || activeGameSession?.isRunning == true) {
+            diagnosticLogStore.record("UI: launch ignored because another session is active.")
             return
         }
         if (!runtimeReady) {
+            diagnosticLogStore.record("ERROR: runtime is not ready: $runtimeStatus")
             gameLaunchError = runtimeStatus
             return
         }
@@ -298,6 +332,7 @@ fun RamenWineApp() {
         preparingGame = true
         scope.launch {
             try {
+                diagnosticLogStore.record("UI: opening Wawona display session.")
                 activeDisplaySession = gameSessionCoordinator.openDisplay()
                 selectedDisplayGame = game
                 surfaceReady = false
@@ -305,6 +340,7 @@ fun RamenWineApp() {
                 surfaceFrameVerified = false
                 gameLaunchNotice = "Подключаю игровой экран…"
             } catch (error: Exception) {
+                diagnosticLogStore.recordException("opening the display", error)
                 gameLaunchError = error.message ?: error.javaClass.simpleName
                 gameLaunchNotice = null
             } finally {
@@ -341,6 +377,7 @@ fun RamenWineApp() {
         preparingGame = true
         gameLaunchError = null
         gameLaunchOutput = emptyList()
+        diagnosticLogStore.record("UI: launching Wine/PRoot session.")
         gameLaunchNotice = "Запускаю игру…"
         scope.launch {
             try {
@@ -348,9 +385,11 @@ fun RamenWineApp() {
                     game = game,
                     launchDiagnosticWindow = false,
                     onOutput = { line ->
+                        diagnosticLogStore.record("PROCESS: $line")
                         gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
                     },
                     onExit = { exitCode ->
+                        diagnosticLogStore.record("PROCESS EXIT: $exitCode")
                         activeGameSession = null
                         activeDisplaySession = null
                         selectedDisplayGame = null
@@ -374,6 +413,7 @@ fun RamenWineApp() {
                     gameLaunchNotice = "Процесс завершился до подтверждения запуска."
                 }
             } catch (error: Exception) {
+                diagnosticLogStore.recordException("launching Wine/PRoot", error)
                 val baseMessage = error.message ?: error.javaClass.simpleName
                 val recentOutput = gameLaunchOutput.takeLast(22)
                     .joinToString("\n")
@@ -407,6 +447,7 @@ fun RamenWineApp() {
                     gameSessionCoordinator.closeDisplay()
                 }
             } catch (error: Exception) {
+                diagnosticLogStore.recordException("stopping the game", error)
                 gameLaunchError = error.message ?: error.javaClass.simpleName
             } finally {
                 if (running == null || !running.isRunning) {
@@ -547,6 +588,25 @@ fun RamenWineApp() {
                     }
                 }
 
+                TextButton(
+                    onClick = ::exportDiagnostics,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 14.dp, bottom = 24.dp)
+                ) {
+                    Text("Сохранить логи")
+                }
+                diagnosticSaveStatus?.let { status ->
+                    Text(
+                        status,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 16.dp, bottom = 76.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 FloatingActionButton(
                     onClick = { if (!scanning && !importing && !preparingGame) folderPicker.launch(null) },
                     modifier = Modifier
@@ -599,6 +659,11 @@ fun RamenWineApp() {
                     confirmButton = {
                         TextButton(onClick = { gameLaunchError = null }) {
                             Text("Закрыть")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = ::exportDiagnostics) {
+                            Text("Сохранить полный лог")
                         }
                     }
                 )
