@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.PixelCopy
 import android.text.InputType
 import android.view.KeyEvent
@@ -18,7 +19,9 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import com.aspauldingcode.wawona.WawonaNative
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -58,13 +61,18 @@ class WawonaSurfaceView(
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
         var lastCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
         var lastVisiblePixels = 0
+        var verification: SurfaceFrameVerification? = null
+        var smokeClientStopped = false
+        var smokeSurfaceCleared = false
+        var stopFailure: String? = null
         try {
             while (SystemClock.elapsedRealtime() < deadline) {
                 if (!isAttachedToWindow || !holder.surface.isValid) {
-                    return SurfaceFrameVerification(
+                    verification = SurfaceFrameVerification(
                         visible = false,
                         detail = "Android Surface was detached during the Wayland test."
                     )
+                    break
                 }
 
                 val capture = captureSurfaceFrame()
@@ -74,34 +82,114 @@ class WawonaSurfaceView(
                     capture.copyStatus == PixelCopy.SUCCESS &&
                     capture.visiblePixelSamples >= capture.requiredVisiblePixelSamples
                 ) {
-                    return SurfaceFrameVerification(
+                    verification = SurfaceFrameVerification(
                         visible = true,
-                        detail = "Успех: PixelCopy прочитал ${capture.visiblePixelSamples} " +
+                        detail = "PixelCopy прочитал ${capture.visiblePixelSamples} " +
                             "нечёрных точек из ${capture.sampledPixels} на Android Surface. " +
                             "Wayland SHM-клиент действительно отобразился."
                     )
+                    break
                 }
 
                 if (!session.isSurfaceSmokeClientRunning()) {
-                    return SurfaceFrameVerification(
+                    verification = SurfaceFrameVerification(
                         visible = false,
                         detail = "weston-simple-shm завершился до появления видимого кадра " +
                             "(PixelCopy status=$lastCopyStatus)."
                     )
+                    break
                 }
                 delay(SMOKE_CAPTURE_INTERVAL_MS)
             }
 
-            return SurfaceFrameVerification(
-                visible = false,
-                detail = "За ${timeoutMillis} мс не найден видимый кадр. " +
-                    "PixelCopy status=$lastCopyStatus, нечёрных точек=$lastVisiblePixels. " +
-                    "Это уже проверка содержимого Surface, а не только флага готовности Wawona."
-            )
+            if (verification == null) {
+                verification = SurfaceFrameVerification(
+                    visible = false,
+                    detail = "За ${timeoutMillis} мс не найден видимый кадр. " +
+                        "PixelCopy status=$lastCopyStatus, нечёрных точек=$lastVisiblePixels. " +
+                        "Это проверка содержимого Surface, а не только флага готовности Wawona."
+                )
+            }
         } finally {
-            session.stopSurfaceSmokeClient()
-            // The upstream client uses a detached native thread; settle before teardown.
-            delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+            withContext(NonCancellable) {
+                Log.i(TAG, "Requesting weston-simple-shm smoke client shutdown.")
+                stopFailure = runCatching {
+                    session.stopSurfaceSmokeClient()
+                }.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty()}" }
+
+                if (stopFailure == null) {
+                    val stopDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_STOP_TIMEOUT_MS
+                    var clientRunning = runCatching {
+                        session.isSurfaceSmokeClientRunning()
+                    }.getOrDefault(true)
+                    while (clientRunning && SystemClock.elapsedRealtime() < stopDeadline) {
+                        delay(SMOKE_CLIENT_STOP_POLL_MS)
+                        clientRunning = runCatching {
+                            session.isSurfaceSmokeClientRunning()
+                        }.getOrDefault(true)
+                    }
+                    smokeClientStopped = !clientRunning
+                }
+
+                if (smokeClientStopped) {
+                    // The upstream client uses a detached native thread and has no join API.
+                    // Also verify that its last presented frame disappears from the Android Surface.
+                    delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+                    if (!isAttachedToWindow || !holder.surface.isValid) {
+                        smokeSurfaceCleared = true
+                    } else {
+                        val clearDeadline = SystemClock.elapsedRealtime() + SMOKE_FRAME_CLEAR_TIMEOUT_MS
+                        var consecutiveClearFrames = 0
+                        while (
+                            consecutiveClearFrames < SMOKE_FRAME_CLEAR_CONFIRMATIONS &&
+                            SystemClock.elapsedRealtime() < clearDeadline
+                        ) {
+                            val capture = runCatching { captureSurfaceFrame() }.getOrNull()
+                            if (
+                                capture != null &&
+                                capture.copyStatus == PixelCopy.SUCCESS &&
+                                capture.visiblePixelSamples < capture.requiredVisiblePixelSamples
+                            ) {
+                                consecutiveClearFrames++
+                            } else {
+                                consecutiveClearFrames = 0
+                            }
+                            if (consecutiveClearFrames < SMOKE_FRAME_CLEAR_CONFIRMATIONS) {
+                                delay(SMOKE_FRAME_CLEAR_POLL_MS)
+                            }
+                        }
+                        smokeSurfaceCleared =
+                            consecutiveClearFrames >= SMOKE_FRAME_CLEAR_CONFIRMATIONS
+                    }
+                }
+                Log.i(
+                    TAG,
+                    "weston-simple-shm shutdown result stopped=$smokeClientStopped " +
+                        "surfaceCleared=$smokeSurfaceCleared " +
+                        "requestError=${stopFailure ?: "<none>"}"
+                )
+            }
+        }
+
+        val measured = requireNotNull(verification)
+        return when {
+            stopFailure != null -> SurfaceFrameVerification(
+                visible = false,
+                detail = "Кадр проверен, но запрос закрытия тестового Wayland-окна завершился ошибкой: $stopFailure"
+            )
+            !smokeClientStopped -> SurfaceFrameVerification(
+                visible = false,
+                detail = "Тестовое Wayland-окно не подтвердило остановку за " +
+                    "${SMOKE_CLIENT_STOP_TIMEOUT_MS} мс. Кнопки запуска заблокированы, " +
+                    "чтобы не накладывать тестовое окно на Win32-программу. Исходный результат: ${measured.detail}"
+            )
+            !smokeSurfaceCleared -> SurfaceFrameVerification(
+                visible = false,
+                detail = "SHM-клиент завершился, но тестовый кадр не исчез с Android Surface " +
+                    "за ${SMOKE_FRAME_CLEAR_TIMEOUT_MS} мс. Запуск заблокирован, чтобы не оставить " +
+                    "квадрат проверки поверх Win32-окна."
+            )
+            else -> measured
         }
     }
 
@@ -240,6 +328,9 @@ class WawonaSurfaceView(
         val frame = holder.surfaceFrame
         val targetWidth = (width.takeIf { it > 0 } ?: frame.width()).coerceAtLeast(1)
         val targetHeight = (height.takeIf { it > 0 } ?: frame.height()).coerceAtLeast(1)
+        Log.i(TAG, "Surface created: view=${width}x${height}, " +
+            "holder=${frame.width()}x${frame.height()}, target=${targetWidth}x${targetHeight}, " +
+            "density=${resources.displayMetrics.density}")
         session.attachSurface(
             surface = holder.surface,
             width = targetWidth,
@@ -257,10 +348,14 @@ class WawonaSurfaceView(
         width: Int,
         height: Int
     ) {
-        if (holder.surface.isValid) session.resizeSurface(width, height)
+        if (holder.surface.isValid) {
+            Log.i(TAG, "Surface changed: view=${this.width}x${this.height}, holder=${width}x${height}")
+            session.resizeSurface(width, height)
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        Log.i(TAG, "Surface destroyed: view=${width}x${height}, valid=${holder.surface.isValid}")
         stopImePolling()
         hideSoftwareKeyboard()
         session.detachSurface(holder.surface)
@@ -271,7 +366,19 @@ class WawonaSurfaceView(
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             parent?.requestDisallowInterceptTouchEvent(true)
         }
+        val diagnosticAction = when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> "DOWN"
+            MotionEvent.ACTION_UP -> "UP"
+            MotionEvent.ACTION_CANCEL -> "CANCEL"
+            else -> null
+        }
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch begin action=$diagnosticAction view=${width}x${height}")
+        }
         val handled = session.dispatchTouchEvent(event)
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch end action=$diagnosticAction consumed=$handled")
+        }
         if (event.actionMasked == MotionEvent.ACTION_UP ||
             event.actionMasked == MotionEvent.ACTION_CANCEL
         ) {
@@ -412,10 +519,16 @@ class WawonaSurfaceView(
     }
 
     private companion object {
+        const val TAG = "RamenWineSurface"
         const val IME_POLL_INTERVAL_MS = 200L
         const val IME_SHOW_RETRY_MS = 120L
         const val SMOKE_CAPTURE_INTERVAL_MS = 200L
         const val SMOKE_CLIENT_STOP_SETTLE_MS = 300L
+        const val SMOKE_CLIENT_STOP_TIMEOUT_MS = 2_000L
+        const val SMOKE_CLIENT_STOP_POLL_MS = 50L
+        const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 2_000L
+        const val SMOKE_FRAME_CLEAR_POLL_MS = 100L
+        const val SMOKE_FRAME_CLEAR_CONFIRMATIONS = 3
         const val FRAME_SAMPLE_GRID = 32
         const val MIN_VISIBLE_PIXEL_SAMPLES = 8
         const val MIN_VISIBLE_PIXEL_PERCENT_DIVISOR = 100
