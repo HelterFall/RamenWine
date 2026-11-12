@@ -2,6 +2,7 @@ package dev.ramenwine.display
 
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import android.view.KeyEvent
@@ -9,6 +10,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import com.aspauldingcode.wawona.WawonaNative
 import dev.ramenwine.runtime.WaylandDisplayEndpoint
+import kotlinx.coroutines.delay
 import java.io.File
 
 class DisplayBackendUnavailableException(
@@ -150,7 +152,8 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 endpoint = WaylandDisplayEndpoint(
                     hostRuntimeDirectory = runtimeDirectory,
                     socketName = WAYLAND_SOCKET_NAME
-                )
+                ),
+                cacheDirectory = cacheDirectory
             )
         } catch (error: Exception) {
             runCatching { WawonaNative.nativeDestroySurface() }
@@ -183,9 +186,13 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
     }
 
     private class WawonaDisplaySession(
-        override val endpoint: WaylandDisplayEndpoint
+        override val endpoint: WaylandDisplayEndpoint,
+        private val cacheDirectory: File
     ) : DisplaySession {
         private var attachedSurface: Surface? = null
+        private var attachedWidth = 0
+        private var attachedHeight = 0
+        private var attachedDensity = 1f
         private var stopped = false
         private val touchMouseInput = TouchToPointerBridge(
             object : WaylandPointerSink {
@@ -226,15 +233,19 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             require(density > 0f) { "Display density must be positive." }
 
             if (attachedSurface === surface) {
+                attachedDensity = density
                 resizeSurface(width, height)
                 return
             }
 
             attachedSurface?.let {
                 touchMouseInput.cancel(currentTimestamp())
-                stopSurfaceSmokeClient()
+                // Preserve connected Wayland clients across Android Surface recreation.
+                // Destroying the presenter does not stop the compositor or falsify
+                // the upstream SHM client's actual running state.
                 WawonaNative.nativeDestroySurface()
             }
+            attachedDensity = density
             WawonaNative.nativeSetDisplayDensity(density)
             WawonaNative.nativeSetSurface(surface)
             attachedSurface = surface
@@ -244,6 +255,8 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
         override fun resizeSurface(width: Int, height: Int) {
             checkMainThread()
             if (stopped || attachedSurface == null || width <= 0 || height <= 0) return
+            attachedWidth = width
+            attachedHeight = height
             WawonaNative.nativeResizeSurface(width, height)
             WawonaNative.nativeSyncOutputSize(width, height)
         }
@@ -252,9 +265,12 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             checkMainThread()
             if (stopped || attachedSurface !== surface) return
             touchMouseInput.cancel(currentTimestamp())
-            stopSurfaceSmokeClient()
+            // Keep the Wayland compositor alive across a temporary Android
+            // Surface detach. A later Surface can be attached to the same session.
             WawonaNative.nativeDestroySurface()
             attachedSurface = null
+            attachedWidth = 0
+            attachedHeight = 0
         }
 
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -331,11 +347,56 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             return !stopped && WawonaNative.nativeIsWestonSimpleSHMRunning()
         }
 
-        override fun stopSurfaceSmokeClient() {
+        override suspend fun resetAfterSmokeClient(): Boolean {
             checkMainThread()
-            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) {
-                WawonaNative.nativeStopWestonSimpleSHM()
+            if (stopped) return false
+
+            val surface = attachedSurface?.takeIf { it.isValid } ?: return false
+            val width = attachedWidth
+            val height = attachedHeight
+            val density = attachedDensity
+            if (width <= 0 || height <= 0 || density <= 0f) return false
+
+            touchMouseInput.cancel(currentTimestamp())
+
+            // Do not call nativeStopWestonSimpleSHM(): upstream clears its
+            // running counter as soon as stop is requested, before the detached
+            // client thread has returned. Stopping the compositor instead
+            // disconnects the Wayland client; the counter then reaches zero
+            // only in weston_simple_shm_thread_func after the function returns.
+            WawonaNative.nativeDestroySurface()
+            WawonaNative.nativeShutdown()
+
+            val exitDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_EXIT_TIMEOUT_MS
+            while (
+                WawonaNative.nativeIsWestonSimpleSHMRunning() &&
+                SystemClock.elapsedRealtime() < exitDeadline
+            ) {
+                delay(SMOKE_CLIENT_EXIT_POLL_MS)
             }
+            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) {
+                Log.w(TAG, "weston-simple-shm thread did not exit after compositor shutdown.")
+                return false
+            }
+
+            if (!surface.isValid) return false
+            WawonaNative.nativeInit(cacheDirectory.absolutePath)
+            if (!WawonaNative.nativeIsCompositorReady()) {
+                Log.e(TAG, "Wawona compositor did not become ready after SHM reset.")
+                return false
+            }
+
+            val socketPath = File(endpoint.hostRuntimeDirectory, endpoint.socketName).absolutePath
+            if (!isUnixSocket(socketPath)) {
+                Log.e(TAG, "Wawona Wayland socket was not restored after SHM reset: $socketPath")
+                return false
+            }
+
+            WawonaNative.nativeSetDisplayDensity(density)
+            WawonaNative.nativeSetSurface(surface)
+            resizeSurface(width, height)
+            Log.i(TAG, "Wawona compositor restarted and Android Surface reattached after SHM test.")
+            return true
         }
 
         override fun stop() {
@@ -346,7 +407,6 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
                 touchMouseInput.cancel(currentTimestamp())
-                stopSurfaceSmokeClient()
                 WawonaNative.nativeDestroySurface()
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
@@ -354,6 +414,10 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 WawonaSessionGate.release()
             }
         }
+
+        private fun isUnixSocket(path: String): Boolean = runCatching {
+            OsConstants.S_ISSOCK(Os.lstat(path).st_mode)
+        }.getOrDefault(false)
 
         private fun currentTimestamp(): Int =
             (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
@@ -363,6 +427,12 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 "Wawona Surface and input events must run on the Android main thread."
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "RamenWineDisplay"
+        const val SMOKE_CLIENT_EXIT_TIMEOUT_MS = 5_000L
+        const val SMOKE_CLIENT_EXIT_POLL_MS = 50L
     }
 
     private object WawonaSessionGate {
