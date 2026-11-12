@@ -50,6 +50,7 @@ class DiagnosticLogStore(private val context: Context) {
             }
             lines += "----------------------------------------"
         }
+        Log.i(DIAGNOSTIC_LOG_TAG, "DIAGNOSTIC_SESSION_START ${timestamp(sessionStartedAt)}")
     }
 
     fun record(message: String) {
@@ -414,7 +415,16 @@ class DiagnosticLogStore(private val context: Context) {
                 process.destroyForcibly()
                 output.appendLine("[logcat collection timed out]")
             }
-            output.toString()
+            val captured = output.toString()
+            val capturedLines = captured.lineSequence().toList()
+            val latestSessionStart = capturedLines.indexOfLast { line ->
+                line.contains(DIAGNOSTIC_LOG_TAG) && line.contains("DIAGNOSTIC_SESSION_START")
+            }
+            if (latestSessionStart >= 0) {
+                capturedLines.drop(latestSessionStart).joinToString("\n")
+            } else {
+                captured
+            }
         } catch (error: Exception) {
             process.destroyForcibly()
             "logcat collection failed: ${error.javaClass.simpleName}: ${error.message}"
