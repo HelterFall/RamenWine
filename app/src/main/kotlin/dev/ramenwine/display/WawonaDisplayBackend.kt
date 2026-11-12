@@ -157,7 +157,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 cacheDirectory = cacheDirectory
             )
         } catch (error: Exception) {
-            runCatching { WawonaNative.nativeDestroySurface() }
+            runCatching { WawonaNative.nativeDestroySurface(null) }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             if (error is DisplayBackendUnavailableException) throw error
@@ -166,7 +166,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 error
             )
         } catch (error: LinkageError) {
-            runCatching { WawonaNative.nativeDestroySurface() }
+            runCatching { WawonaNative.nativeDestroySurface(null) }
             runCatching { WawonaNative.nativeShutdown() }
             WawonaSessionGate.release()
             throw DisplayBackendUnavailableException(
@@ -244,7 +244,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 // Preserve connected Wayland clients across Android Surface recreation.
                 // Destroying the presenter does not stop the compositor or falsify
                 // the upstream SHM client's actual running state.
-                WawonaNative.nativeDestroySurface()
+                WawonaNative.nativeDestroySurface(it)
             }
             attachedDensity = density
             WawonaNative.nativeSetDisplayDensity(density)
@@ -268,7 +268,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             touchMouseInput.cancel(currentTimestamp())
             // Keep the Wayland compositor alive across a temporary Android
             // Surface detach. A later Surface can be attached to the same session.
-            WawonaNative.nativeDestroySurface()
+            WawonaNative.nativeDestroySurface(surface)
             attachedSurface = null
             attachedWidth = 0
             attachedHeight = 0
@@ -368,7 +368,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             // client thread has returned. Stopping the compositor instead
             // disconnects the Wayland client; the counter then reaches zero
             // only in weston_simple_shm_thread_func after the function returns.
-            WawonaNative.nativeDestroySurface()
+            WawonaNative.nativeDestroySurface(surface)
             WawonaNative.nativeShutdown()
 
             val exitDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_EXIT_TIMEOUT_MS
@@ -413,7 +413,8 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
                 touchMouseInput.cancel(currentTimestamp())
-                WawonaNative.nativeDestroySurface()
+                val surface = attachedSurface
+                WawonaNative.nativeDestroySurface(surface)
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
             } finally {
