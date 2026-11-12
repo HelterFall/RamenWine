@@ -38,7 +38,6 @@ class WawonaNativeContractTest {
                 "nativeTextEntryWanted",
                 "nativeGetTextInputContentType",
                 "nativeRunWestonSimpleSHM",
-                "nativeStopWestonSimpleSHM",
                 "nativeIsWestonSimpleSHMRunning"
             ),
             nativeMethods
@@ -59,10 +58,6 @@ class WawonaNativeContractTest {
         assertEquals(
             Boolean::class.javaPrimitiveType,
             WawonaNative::class.java.getDeclaredMethod("nativeRunWestonSimpleSHM").returnType
-        )
-        assertEquals(
-            0,
-            WawonaNative::class.java.getDeclaredMethod("nativeStopWestonSimpleSHM").parameterCount
         )
         assertEquals(
             Boolean::class.javaPrimitiveType,
