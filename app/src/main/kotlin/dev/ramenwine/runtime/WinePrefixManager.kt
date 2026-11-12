@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 
 internal enum class WinePrefixRecoveryAction {
     SKIP,
+    RECOVER_MARKER,
     INITIALIZE,
     UPDATE
 }
@@ -26,18 +27,18 @@ internal object WinePrefixRecoveryPolicy {
             "Registry file count is outside the supported range."
         }
 
-        if (
-            populatedRegistryFiles == REQUIRED_REGISTRY_FILE_COUNT &&
-            markerExists &&
-            markerMatches
-        ) {
-            return WinePrefixRecoveryAction.SKIP
+        if (populatedRegistryFiles == REQUIRED_REGISTRY_FILE_COUNT) {
+            if (markerExists && markerMatches) return WinePrefixRecoveryAction.SKIP
+
+            // wineboot may finish writing all registry hives and then have a
+            // helper process fail during shutdown. With no marker, the three
+            // complete hives are enough to resume without rerunning wineboot.
+            // A present but stale marker still requires a version update.
+            if (!markerExists) return WinePrefixRecoveryAction.RECOVER_MARKER
         }
 
-        // A failed first boot may leave only .update-timestamp or drive_c.
-        // Wine's -i can then skip wine.inf when the timestamp matches, even
-        // though the prefix registry hives were never flushed. Any state in
-        // the prefix therefore means recovery must use -u.
+        // A failed first boot may leave only .update-timestamp, drive_c, or
+        // one/two registry hives. Those prefixes still require wineboot -u.
         return if (populatedRegistryFiles > 0 || markerExists || prefixHasData) {
             WinePrefixRecoveryAction.UPDATE
         } else {
@@ -85,11 +86,18 @@ internal class WinePrefixManager(
         )
 
         if (recoveryAction == WinePrefixRecoveryAction.SKIP) return false
+        if (recoveryAction == WinePrefixRecoveryAction.RECOVER_MARKER) {
+            onOutput(
+                "RamenWine: all three Wine registry files are present; " +
+                    "restoring the prefix marker without rerunning wineboot."
+            )
+            writeMarkerAtomically(marker, expectedMarker)
+            return true
+        }
 
-        // An interrupted first-time wineboot may have created only a timestamp
-        // or directory tree, without registry hives. Treat any non-empty
-        // prefix as partial state and run wineboot -u rather than retrying -i.
-        // The recovery path does not delete or replace existing files.
+        // An interrupted first-time wineboot may have created only a timestamp,
+        // a directory tree, or one/two registry hives. Such partial state still
+        // requires wineboot -u rather than retrying -i. Existing files are kept.
         val updateExistingPrefix = recoveryAction == WinePrefixRecoveryAction.UPDATE
         val winebootCommand = ProotWineCommandBuilder.buildWinebootCommand(
             gameCommand = gameCommand,
