@@ -16,6 +16,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.Properties
 import java.util.TimeZone
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,6 +30,10 @@ import java.util.concurrent.TimeUnit
 class DiagnosticLogStore(private val context: Context) {
     private val lock = Any()
     private val lines = ArrayList<String>()
+    private val persistedLaunchLog = File(context.filesDir, "diagnostics/latest-launch.log")
+    private val persistenceExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "RamenWineDiagnostics").apply { isDaemon = true }
+    }
     private var game: ImportedGame? = null
     private var sessionStartedAt: Long = System.currentTimeMillis()
     private var truncatedLines = 0
@@ -49,6 +54,15 @@ class DiagnosticLogStore(private val context: Context) {
                 lines += "Game locale: ${it.locale}"
             }
             lines += "----------------------------------------"
+            val initialContents = lines.joinToString(separator = "\n", postfix = "\n")
+            persistenceExecutor.execute {
+                runCatching {
+                    persistedLaunchLog.parentFile?.mkdirs()
+                    persistedLaunchLog.writeText(initialContents, Charsets.UTF_8)
+                }.onFailure { error ->
+                    Log.e(DIAGNOSTIC_LOG_TAG, "Could not initialize persistent launch log.", error)
+                }
+            }
         }
         Log.i(DIAGNOSTIC_LOG_TAG, "DIAGNOSTIC_SESSION_START ${timestamp(sessionStartedAt)}")
     }
@@ -58,8 +72,17 @@ class DiagnosticLogStore(private val context: Context) {
             .replace("\u0000", "")
             .take(MAX_LINE_LENGTH)
         synchronized(lock) {
-            lines += "${timestamp(System.currentTimeMillis())}  $safeMessage"
+            val persistedLine = "${timestamp(System.currentTimeMillis())}  $safeMessage"
+            lines += persistedLine
             trimIfNeeded()
+            persistenceExecutor.execute {
+                runCatching {
+                    persistedLaunchLog.parentFile?.mkdirs()
+                    persistedLaunchLog.appendText(persistedLine + "\n", Charsets.UTF_8)
+                }.onFailure { error ->
+                    Log.e(DIAGNOSTIC_LOG_TAG, "Could not append persistent launch log.", error)
+                }
+            }
         }
         // Mirror launch output into the app-UID logcat buffer. If Android kills
         // or restarts RamenWine while the game screen is frozen, the next report
@@ -88,6 +111,10 @@ class DiagnosticLogStore(private val context: Context) {
         val snapshot = synchronized(lock) {
             lines.toList() to truncatedLines
         }
+        val persistedOutput = runCatching {
+            persistenceExecutor.submit {}.get(LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (persistedLaunchLog.isFile) persistedLaunchLog.readText(Charsets.UTF_8) else ""
+        }.getOrNull()
         return buildString {
             appendLine("RAMENWINE DIAGNOSTICS")
             appendLine("Generated: ${timestamp(System.currentTimeMillis())}")
@@ -100,10 +127,18 @@ class DiagnosticLogStore(private val context: Context) {
             appendRuntimeSection()
             appendLine()
             appendLine("=== LAUNCH OUTPUT ===")
-            if (snapshot.second > 0) {
-                appendLine("[Older lines omitted to keep the report bounded: ${snapshot.second}]")
+            if (persistedOutput.isNullOrBlank()) {
+                if (snapshot.second > 0) {
+                    appendLine("[Older lines omitted to keep the report bounded: ${snapshot.second}]")
+                }
+                snapshot.first.forEach(::appendLine)
+                if (persistedOutput == null) {
+                    appendLine("[Persistent launch log could not be read; showing in-memory output.]")
+                }
+            } else {
+                append(persistedOutput)
+                if (!persistedOutput.endsWith("\n")) appendLine()
             }
-            snapshot.first.forEach(::appendLine)
             appendLine()
             val logcatOutput = readOwnLogcat()
             appendLogcatSection(logcatOutput)
@@ -454,5 +489,6 @@ class DiagnosticLogStore(private val context: Context) {
         const val LOGCAT_MESSAGE_CHUNK = 3_000
         const val DIAGNOSTIC_LOG_TAG = "RamenWineDiag"
         const val LOGCAT_TIMEOUT_SECONDS = 5L
+        const val LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS = 5L
     }
 }
