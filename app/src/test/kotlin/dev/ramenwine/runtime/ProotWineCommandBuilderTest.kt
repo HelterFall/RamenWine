@@ -20,6 +20,9 @@ class ProotWineCommandBuilderTest {
             assertEquals("fixture-runtime-1", command.runtimeVersion)
             assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LANG"])
             assertEquals(GameLocaleProfile.DEFAULT_LOCALE, command.guestEnvironment["LC_ALL"])
+            assertEquals("1", command.guestEnvironment["BOX64_LOG"])
+            assertTrue(command.arguments.contains("BOX64_LOG=1"))
+            assertTrue(command.unsetEnvironment.contains("BOX64_LOG"))
             assertEquals("/opt/ramenwine-audio/lib/wine", command.guestEnvironment["WINEDLLPATH"])
             assertEquals("/run/user/10123/directaudio-relay.sock", command.guestEnvironment["BANNER_AUDIO_DIRECT_RELAY"])
             assertEquals(
