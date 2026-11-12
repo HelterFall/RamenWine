@@ -449,7 +449,11 @@ object ProotWineCommandBuilder {
         if (envCommandIndex < 0 || shellCommandIndex <= envCommandIndex) {
             throw IOException("The PRoot guest environment command is malformed.")
         }
-        val arguments = gameCommand.arguments.take(shellCommandIndex) +
+        val unsetEnvironmentArguments = gameCommand.unsetEnvironment.flatMap { name ->
+            listOf("-u", name)
+        }
+        val arguments = gameCommand.arguments.take(envCommandIndex + 1) +
+            unsetEnvironmentArguments +
             diagnosticEnvironment.map { (name, value) -> "$name=$value" } +
             commandTail
 
