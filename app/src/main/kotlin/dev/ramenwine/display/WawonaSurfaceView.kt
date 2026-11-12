@@ -65,6 +65,9 @@ class WawonaSurfaceView(
         var compositorReset = false
         var smokeSurfaceCleared = false
         var resetFailure: String? = null
+        var resetCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
+        var resetVisiblePixels = 0
+        var resetRequiredPixels = 0
         try {
             while (SystemClock.elapsedRealtime() < deadline) {
                 if (!isAttachedToWindow || !holder.surface.isValid) {
@@ -125,7 +128,7 @@ class WawonaSurfaceView(
                 if (compositorReset) {
                     // Confirm the old SHM frame is gone after the compositor has been
                     // restarted and its Android Surface presenter has been recreated.
-                    delay(SMOKE_CLIENT_STOP_SETTLE_MS)
+                    delay(SMOKE_RESET_SETTLE_MS)
                     if (isAttachedToWindow && holder.surface.isValid) {
                         val clearDeadline = SystemClock.elapsedRealtime() + SMOKE_FRAME_CLEAR_TIMEOUT_MS
                         var consecutiveClearFrames = 0
@@ -134,6 +137,11 @@ class WawonaSurfaceView(
                             SystemClock.elapsedRealtime() < clearDeadline
                         ) {
                             val capture = runCatching { captureSurfaceFrame() }.getOrNull()
+                            if (capture != null) {
+                                resetCopyStatus = capture.copyStatus
+                                resetVisiblePixels = capture.visiblePixelSamples
+                                resetRequiredPixels = capture.requiredVisiblePixelSamples
+                            }
                             if (
                                 capture != null &&
                                 capture.copyStatus == PixelCopy.SUCCESS &&
@@ -155,7 +163,8 @@ class WawonaSurfaceView(
                 Log.i(
                     TAG,
                     "weston-simple-shm reset result compositorReset=$compositorReset " +
-                        "surfaceCleared=$smokeSurfaceCleared " +
+                        "surfaceCleared=$smokeSurfaceCleared copyStatus=$resetCopyStatus " +
+                        "visiblePixels=$resetVisiblePixels requiredClearPixels=$resetRequiredPixels " +
                         "resetError=${resetFailure ?: "<none>"}"
                 )
             }
@@ -173,8 +182,10 @@ class WawonaSurfaceView(
             )
             !smokeSurfaceCleared -> SurfaceFrameVerification(
                 visible = false,
-                detail = "После перезапуска Wawona тестовый кадр всё ещё виден на Android Surface. " +
-                    "Запуск заблокирован, чтобы не оставить квадрат проверки поверх Win32-окна."
+                detail = "После перезапуска Wawona кадр не очистился с Android Surface " +
+                    "за ${SMOKE_FRAME_CLEAR_TIMEOUT_MS} мс " +
+                    "(PixelCopy status=$resetCopyStatus, нечёрных точек=$resetVisiblePixels, " +
+                    "порог очистки=$resetRequiredPixels). Запуск заблокирован."
             )
             else -> measured
         }
@@ -510,7 +521,7 @@ class WawonaSurfaceView(
         const val IME_POLL_INTERVAL_MS = 200L
         const val IME_SHOW_RETRY_MS = 120L
         const val SMOKE_CAPTURE_INTERVAL_MS = 200L
-        const val SMOKE_CLIENT_STOP_SETTLE_MS = 300L
+        const val SMOKE_RESET_SETTLE_MS = 300L
         const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 3_000L
         const val SMOKE_FRAME_CLEAR_POLL_MS = 100L
         const val SMOKE_FRAME_CLEAR_CONFIRMATIONS = 3
