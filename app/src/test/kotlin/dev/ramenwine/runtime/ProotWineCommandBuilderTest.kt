@@ -351,6 +351,16 @@ class ProotWineCommandBuilderTest {
                 "err+all,+virtual,+mem_areas,+module",
                 command.guestEnvironment["WINEDEBUG"]
             )
+
+            // Check the serialized /usr/bin/env arguments PRoot actually executes,
+            // not just the guestEnvironment map returned for diagnostics.
+            assertTrue(command.arguments.contains("BOX64_LOG=2"))
+            assertTrue(command.arguments.contains("BOX64_DLSYM_ERROR=1"))
+            assertTrue(
+                command.arguments.contains("WINEDEBUG=err+all,+virtual,+mem_areas,+module")
+            )
+            assertFalse(command.arguments.contains("BOX64_LOG=1"))
+            assertEquals(1, command.arguments.count { it.startsWith("BOX64_LOG=") })
         } finally {
             fixture.cleanup()
         }
