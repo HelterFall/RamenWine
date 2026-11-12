@@ -367,7 +367,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             // counter when shutdown is requested, before the detached thread exits.
             // Stopping the compositor disconnects the Wayland client; the counter
             // reaches zero only after weston_simple_shm_thread_func actually returns.
-            WawonaNative.nativeDestroySurface(surface)
+            WawonaNative.nativeDestroySurface()
             WawonaNative.nativeShutdown()
 
             val exitDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_EXIT_TIMEOUT_MS
@@ -412,8 +412,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
                 touchMouseInput.cancel(currentTimestamp())
-                val surface = attachedSurface
-                WawonaNative.nativeDestroySurface(surface)
+                WawonaNative.nativeDestroySurface()
                 attachedSurface = null
                 WawonaNative.nativeShutdown()
             } finally {
