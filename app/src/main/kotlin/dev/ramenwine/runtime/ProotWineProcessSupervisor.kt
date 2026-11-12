@@ -82,7 +82,7 @@ class ProotWineProcessSupervisor(
 
         try {
             emitDiagnostic(
-                "RamenWine: setup PRoot started pid=${process.pid()} guest=${command.guestExecutablePath} " +
+                "RamenWine: setup PRoot started pid=${AndroidProcess.myPid()} guest=${command.guestExecutablePath} " +
                     "prefix=${command.guestEnvironment["WINEPREFIX"].orEmpty()}"
             )
             emitDiagnostic(
@@ -94,7 +94,7 @@ class ProotWineProcessSupervisor(
             val completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!completed) {
                 emitDiagnostic(
-                    "RamenWine: setup timeout pid=${process.pid()} alive=${process.isAlive} " +
+                    "RamenWine: setup timeout pid=${AndroidProcess.myPid()} alive=${process.isAlive} " +
                         "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
                 )
                 process.destroy()
@@ -110,7 +110,7 @@ class ProotWineProcessSupervisor(
 
             val exitCode = process.exitValue()
             emitDiagnostic(
-                "RamenWine: setup PRoot exit pid=${process.pid()} code=$exitCode " +
+                "RamenWine: setup PRoot exit pid=${AndroidProcess.myPid()} code=$exitCode " +
                     "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
             )
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
@@ -186,7 +186,7 @@ class ProotWineProcessSupervisor(
         runCatching {
             withContext(callbackDispatcher) {
                 onOutput(
-                    "RamenWine: game PRoot started pid=${process.pid()} " +
+                    "RamenWine: game PRoot started pid=${AndroidProcess.myPid()} " +
                         "guest=${command.guestExecutablePath} " +
                         "wayland=${command.guestEnvironment["WAYLAND_DISPLAY"].orEmpty()} " +
                         "runtime=${command.runtimeVersion}"
