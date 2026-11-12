@@ -361,6 +361,14 @@ class ProotWineCommandBuilderTest {
             )
             assertFalse(command.arguments.contains("BOX64_LOG=1"))
             assertEquals(1, command.arguments.count { it.startsWith("BOX64_LOG=") })
+            assertEquals(1, command.arguments.count { it.startsWith("BOX64_DLSYM_ERROR=") })
+            assertEquals(1, command.arguments.count { it.startsWith("WINEDEBUG=") })
+            command.unsetEnvironment.forEach { name ->
+                assertTrue(command.arguments.windowed(2).any { it == listOf("-u", name) })
+            }
+            command.guestEnvironment.forEach { (name, value) ->
+                assertEquals(1, command.arguments.count { it == "$name=$value" })
+            }
         } finally {
             fixture.cleanup()
         }
