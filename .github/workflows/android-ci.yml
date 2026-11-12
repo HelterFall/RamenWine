@@ -590,7 +590,15 @@ jobs:
           retention-days: 14
 
   publish:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    # Publish this owner-controlled PR build so the installable APK is directly downloadable.
+    # Keep the exception scoped to PR #3 from the repository's own feature branch.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.build_android) ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.number == 3 &&
+       github.event.pull_request.head.ref == 'feature/minimal-game-grid' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login == 'HelterFall')
     needs: [android]
     name: Publish signed APK on GitHub Releases
     runs-on: ubuntu-latest
