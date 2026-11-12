@@ -48,7 +48,7 @@ The ELF audit is strict for the Wine launcher, prefix initializer, core Wine mod
 | cacheDir/wine-tmp/<id> | /tmp | Per-game temporary files |
 | Wawona runtime directory | /run/user/<Android UID> | Wayland socket directory |
 
-The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. If an interrupted first initialization left only some registry files, the next launch retries with -u rather than permanently rejecting the prefix; existing files are not deleted by this recovery path. It records a private marker only after wineboot exits successfully and system.reg, user.reg and userdef.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
+The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. If an interrupted first initialization left only some registry files, the next launch retries with -u rather than permanently rejecting the prefix; existing files are not deleted by this recovery path. If all three registry hives (system.reg, user.reg and userdef.reg) were written but the process failed during shutdown before the marker was saved, the next launch restores the marker and proceeds without rerunning wineboot. A present marker tied to a different runtime version or locale still triggers a prefix update.
 
 ## Command and environment
 
@@ -63,7 +63,7 @@ The builder requires:
 - an app-private Wayland runtime directory containing the selected socket;
 - a socket path below the Android AF_UNIX sun_path limit.
 
-The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
+The argument vector includes PRoot's --link2symlink and --sysvipc options, the rootfs, binds for /dev, /proc, and the host CPU sysfs subtree at /sys/devices/system/cpu, per-game directories, the Wayland runtime directory and the guest working directory. The CPU sysfs bind allows guest lscpu and Box64's CPU detection to read the host CPU topology rather than failing because the rootfs's /sys is intentionally not populated. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
 
 The two environments are deliberately separate:
 
