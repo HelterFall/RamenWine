@@ -1,7 +1,9 @@
 diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 --- a/src/tools/wine_tools.c
 +++ b/src/tools/wine_tools.c
-@@ -32,18 +32,61 @@ static int get_prereserve(const char* reserve, void** addr, size_t* size)
+@@ -30,22 +30,65 @@
+ int wine_preloaded = 0;
+ 
 -static int get_prereserve(const char* reserve, void** addr, size_t* size)
 -{
 -    if(!reserve)
@@ -81,3 +83,5 @@ diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
 +    *size = end - start;
 +    return 1;
 +}
+ 
+ static void add_no_overlap(void* addr, size_t size)
