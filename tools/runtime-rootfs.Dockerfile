@@ -1,6 +1,7 @@
 # Build a pinned upstream Box64 revision with the non-4K page-size handling
-# needed by Wine on 16-KB Android kernels. The revision is kept in one source
-# of truth and is copied into the runtime package version by the packager.
+# needed by Wine on 16-KB Android kernels, then apply the maintained
+# WINEPRELOADRESERVE range/alignment correction before compiling it.
+# The upstream revision and patch are both versioned in the runtime package.
 FROM debian:trixie-slim AS box64-builder
 
 COPY tools/box64-revision.txt /tmp/box64-revision.txt
