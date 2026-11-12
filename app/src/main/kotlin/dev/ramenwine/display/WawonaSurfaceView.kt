@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.PixelCopy
 import android.text.InputType
 import android.view.KeyEvent
@@ -99,7 +100,9 @@ class WawonaSurfaceView(
                     "Это уже проверка содержимого Surface, а не только флага готовности Wawona."
             )
         } finally {
+            Log.i(TAG, "Stopping weston-simple-shm smoke client after PixelCopy verification.")
             session.stopSurfaceSmokeClient()
+            Log.i(TAG, "weston-simple-shm smoke client stop requested.")
             // The upstream client uses a detached native thread; settle before teardown.
             delay(SMOKE_CLIENT_STOP_SETTLE_MS)
         }
@@ -240,6 +243,9 @@ class WawonaSurfaceView(
         val frame = holder.surfaceFrame
         val targetWidth = (width.takeIf { it > 0 } ?: frame.width()).coerceAtLeast(1)
         val targetHeight = (height.takeIf { it > 0 } ?: frame.height()).coerceAtLeast(1)
+        Log.i(TAG, "Surface created: view=${width}x${height}, " +
+            "holder=${frame.width()}x${frame.height()}, target=${targetWidth}x${targetHeight}, " +
+            "density=${resources.displayMetrics.density}")
         session.attachSurface(
             surface = holder.surface,
             width = targetWidth,
@@ -257,10 +263,14 @@ class WawonaSurfaceView(
         width: Int,
         height: Int
     ) {
-        if (holder.surface.isValid) session.resizeSurface(width, height)
+        if (holder.surface.isValid) {
+            Log.i(TAG, "Surface changed: view=${this.width}x${this.height}, holder=${width}x${height}")
+            session.resizeSurface(width, height)
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        Log.i(TAG, "Surface destroyed: view=${width}x${height}, valid=${holder.surface.isValid}")
         stopImePolling()
         hideSoftwareKeyboard()
         session.detachSurface(holder.surface)
@@ -271,7 +281,19 @@ class WawonaSurfaceView(
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             parent?.requestDisallowInterceptTouchEvent(true)
         }
+        val diagnosticAction = when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> "DOWN"
+            MotionEvent.ACTION_UP -> "UP"
+            MotionEvent.ACTION_CANCEL -> "CANCEL"
+            else -> null
+        }
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch begin action=$diagnosticAction view=${width}x${height}")
+        }
         val handled = session.dispatchTouchEvent(event)
+        if (diagnosticAction != null) {
+            Log.i(TAG, "Touch dispatch end action=$diagnosticAction consumed=$handled")
+        }
         if (event.actionMasked == MotionEvent.ACTION_UP ||
             event.actionMasked == MotionEvent.ACTION_CANCEL
         ) {
@@ -412,6 +434,7 @@ class WawonaSurfaceView(
     }
 
     private companion object {
+        const val TAG = "RamenWineSurface"
         const val IME_POLL_INTERVAL_MS = 200L
         const val IME_SHOW_RETRY_MS = 120L
         const val SMOKE_CAPTURE_INTERVAL_MS = 200L

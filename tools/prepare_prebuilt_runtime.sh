@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Assemble a RamenWine runtime from prebuilt binaries and binary OS packages.
-# This script does not compile PRoot, Box64 or Wine from source.
+# Assemble the runtime from prebuilt PRoot/Wine binaries, a pinned source-built
+# Box64 rootfs and binary OS packages. Box64 is built by runtime-rootfs.Dockerfile.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,12 +26,17 @@ WINE_ARCHIVE_NAME="lug-wine-tkg-experimental-wayland-git-11.20-2.tar.gz"
 WINE_URL="https://github.com/starcitizen-lug/lug-wine-experimental/releases/download/11.20-2/${WINE_ARCHIVE_NAME}"
 WINE_SHA256="f20505464d0b54f685ba1862f99895f357fc44b9b3367562e8926ddb924e5136"
 
-BOX64_DEBIAN_VERSION="0.3.4+dfsg-1"
-
 fail() {
   echo "ERROR: $*" >&2
   exit 1
 }
+
+# Keep this value aligned with the revision copied into runtime-rootfs.Dockerfile.
+BOX64_REVISION_FILE="${ROOT_DIR}/tools/box64-revision.txt"
+[[ -f "$BOX64_REVISION_FILE" ]] || fail "Pinned Box64 revision file is missing."
+BOX64_REVISION="$(tr -d '[:space:]' < "$BOX64_REVISION_FILE")"
+[[ "$BOX64_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "Pinned Box64 revision is not a full Git commit SHA."
+
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
@@ -84,7 +89,7 @@ while IFS= read -r loader_file; do
   [[ -n "$loader_file" ]] || continue
   loader_name="$(basename "$loader_file")"
   install -m 0755 "$loader_file" "$RUNTIME_ROOT/host/libexec/proot/${loader_name}"
-done < <(find "$PROOT_DIR" -type f \( -name loader -o -name loader-m32 \) -print)
+done < <(find "$PROOT_DIR" -type f -name loader -print)
 
 # Use the Buildx-exported Debian ARM64 guest rootfs. CI builds this from
 # runtime-rootfs.Dockerfile and caches the expensive apt layer between runs.
@@ -124,20 +129,41 @@ mkdir -p "$WINE_DIR"
 tar --extract --gzip --file "$DOWNLOAD_DIR/$WINE_ARCHIVE_NAME" \
   --directory "$WINE_DIR"
 
-WINE_ELF=""
-while IFS= read -r candidate; do
-  [[ -n "$candidate" ]] || continue
-  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
-  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
-  if readelf -h "$resolved_candidate" 2>/dev/null | grep -q 'Advanced Micro Devices X86-64'; then
-    WINE_ELF="$candidate"
-    break
-  fi
-done < <(find "$WINE_DIR" \( -type f -o -type l \) \( -name wine64 -o -name wine \) -print)
-[[ -n "$WINE_ELF" ]] || \
-  fail "Could not find an x86-64 ELF Wine launcher (expected bin/wine64)."
+# The upstream release archive is produced by tar -C ... "$lug_name",
+# so its first-level directory is the Wine distribution root. Do not derive
+# this from the selected ELF: Wine may also store an ELF named wine64 under
+# lib/wine/, which would incorrectly make lib/ the root and hide bin/wineserver.
+mapfile -t WINE_DISTRIBUTION_ROOTS < <(
+  find "$WINE_DIR" -mindepth 1 -maxdepth 1 -type d -print
+)
+[[ "${#WINE_DISTRIBUTION_ROOTS[@]}" -eq 1 ]] || \
+  fail "Expected exactly one top-level LUG Wine distribution directory."
+WINE_ROOT="${WINE_DISTRIBUTION_ROOTS[0]}"
+echo "Using Wine distribution root: $WINE_ROOT"
 
-WINE_ROOT="$(cd "$(dirname "$WINE_ELF")/.." && pwd)"
+# Select the public launcher under bin/, never an internal implementation
+# such as lib/wine/wine64. LUG archives expose wine64/wine from bin/.
+WINE_ELF=""
+for launcher_name in wine64 wine; do
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+    [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+    case "$resolved_candidate" in
+      "$WINE_ROOT"/*) ;;
+      *) continue ;;
+    esac
+    if readelf -h "$resolved_candidate" 2>/dev/null | \
+        grep -q 'Advanced Micro Devices X86-64'; then
+      WINE_ELF="$candidate"
+      break
+    fi
+  done < <(find "$WINE_ROOT" \( -type f -o -type l \) \
+    -path "*/bin/$launcher_name" -print)
+  [[ -n "$WINE_ELF" ]] && break
+done
+[[ -n "$WINE_ELF" ]] || \
+  fail "Could not find an x86-64 ELF Wine launcher in bin/ (expected bin/wine64)."
 
 # The final LUG binary must use the same mmdevapi system-thread table as
 # the DirectAudio driver built in the audio job. Upstream DirectAudio uses
@@ -161,6 +187,31 @@ nm -D --undefined-only "$WINEPULSE_UNIX" | grep -q 'PsCreateSystemThread' || \
 WINE_ELF_RELATIVE="${WINE_ELF#"$WINE_ROOT"/}"
 [[ "$WINE_ELF_RELATIVE" != "$WINE_ELF" ]] || \
   fail "Wine launcher is outside its expected distribution directory."
+
+# wineserver owns Wine's registry hives. Do not let PRoot kill it on exit:
+# shut it down normally and wait for its lock to be released before leaving PRoot.
+WINE_SERVER_ELF=""
+while IFS= read -r candidate; do
+  [[ -n "$candidate" ]] || continue
+  resolved_candidate="$(readlink -f "$candidate" 2>/dev/null || true)"
+  [[ -n "$resolved_candidate" && -f "$resolved_candidate" ]] || continue
+  # Store the resolved file, not a potentially absolute or dangling symlink
+  # from bin/. The resolved target must stay inside this Wine distribution.
+  case "$resolved_candidate" in
+    "$WINE_ROOT"/*) ;;
+    *) continue ;;
+  esac
+  if readelf -h "$resolved_candidate" 2>/dev/null | \
+      grep -q 'Advanced Micro Devices X86-64'; then
+    WINE_SERVER_ELF="$resolved_candidate"
+    break
+  fi
+done < <(find "$WINE_ROOT" \( -type f -o -type l \) -name wineserver -print)
+[[ -n "$WINE_SERVER_ELF" ]] || \
+  fail "LUG Wine archive does not contain an in-tree x86-64 wineserver ELF."
+WINE_SERVER_RELATIVE="${WINE_SERVER_ELF#"$WINE_ROOT"/}"
+[[ "$WINE_SERVER_RELATIVE" != "$WINE_SERVER_ELF" ]] || \
+  fail "wineserver is outside the Wine distribution directory."
 
 # WoW64 distributions include both i386 and x86-64 PE tools. Select by
 # the actual PE machine and optional-header magic, not nondeterministic find order.
@@ -197,8 +248,33 @@ cp -a "$WINE_ROOT/." "$ROOTFS/opt/ramenwine-wine/"
 # an x86-64 ELF. Keep the upstream Wine directory layout intact.
 mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/lib/wine/x86_64-windows"
 ln -sfn "/opt/ramenwine-wine/${WINE_ELF_RELATIVE}" "$ROOTFS/usr/bin/wine"
+ln -sfn "/opt/ramenwine-wine/${WINE_SERVER_RELATIVE}" "$ROOTFS/usr/bin/wineserver"
 ln -sfn "/opt/ramenwine-wine/${WINEBOOT_RELATIVE}" \
   "$ROOTFS/usr/lib/wine/x86_64-windows/wineboot.exe"
+
+WINE_SERVER_GUEST="$ROOTFS/opt/ramenwine-wine/${WINE_SERVER_RELATIVE}"
+[[ -f "$WINE_SERVER_GUEST" ]] || fail "The copied wineserver binary is missing."
+readelf -h "$WINE_SERVER_GUEST" | grep -q 'Advanced Micro Devices X86-64' || \
+  fail "The selected wineserver is not an x86-64 ELF."
+# Some upstream archives preserve the ELF payload but omit its executable bit.
+# wineserver is a program entry point, so restore the expected mode explicitly.
+chmod 0755 "$WINE_SERVER_GUEST"
+# The /usr/bin/wineserver link is guest-absolute, so the CI host must
+# validate its target under ROOTFS rather than following it from the host's /.
+test -x "$WINE_SERVER_GUEST" || \
+  fail "Copied guest wineserver target is not executable: $WINE_SERVER_RELATIVE."
+
+# All Wine commands use this wrapper. After the Windows command exits, it asks
+# wineserver to shut down and waits until the server releases its prefix lock.
+# This lets Wine flush its registry hives before the parent PRoot command exits.
+WINE_COMMAND_WRAPPER="$ROOTFS/opt/ramenwine-tools/run-wine-command.sh"
+mkdir -p "$(dirname "$WINE_COMMAND_WRAPPER")"
+# Keep one canonical wrapper source so the runtime and its unit test cannot drift.
+cp "$ROOT_DIR/tools/run-wine-command.sh" "$WINE_COMMAND_WRAPPER"
+chmod 0755 "$WINE_COMMAND_WRAPPER"
+test -x "$ROOTFS/usr/bin/sh" || fail "Debian rootfs is missing /usr/bin/sh."
+test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing the /bin/sh compatibility link."
+test -x "$WINE_COMMAND_WRAPPER" || fail "Wine shutdown wrapper is not executable."
 
 # Absolute Linux symlinks are rooted inside the guest rootfs. Do not use
 # host-side readlink -f on /usr/bin/wine: it would resolve /opt against the
@@ -298,13 +374,41 @@ if machine != 0x8664 or subsystem != 0x20B:
 PY
 
 install -m 0755 "$AUDIO_RELAY" "$RUNTIME_ROOT/host/bin/directaudio-relay"
+
+# Android 10+ blocks execve() of files extracted into the writable app filesDir
+# for apps targeting API 29+. Package Android-host executables as native APK
+# libraries so PackageManager extracts them into ApplicationInfo.nativeLibraryDir.
+NATIVE_LIBRARY_DIR="$ROOT_DIR/app/src/main/jniLibs/arm64-v8a"
+mkdir -p "$NATIVE_LIBRARY_DIR"
+install -m 0755 "$RUNTIME_ROOT/host/bin/proot" "$NATIVE_LIBRARY_DIR/libproot.so"
+install -m 0755 "$RUNTIME_ROOT/host/bin/directaudio-relay" "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so"
+
+readelf -h "$NATIVE_LIBRARY_DIR/libproot.so" | grep -q 'AArch64' || \
+  fail "Packaged Android PRoot is not an AArch64 ELF."
+readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || \
+  fail "Packaged DirectAudio relay is not an AArch64 ELF."
+
+# PRoot normally extracts its ELF loader into PROOT_TMP_DIR. Android denies
+# executing that writable filesDir/cacheDir copy on targetSdk 29+, so ship
+# the ARM64 loader in nativeLibraryDir and point PRoot at that APK file.
+PROOT_LOADER_BINARY="$(find "$PROOT_DIR" -type f -name loader -print -quit)"
+[[ -n "$PROOT_LOADER_BINARY" && -s "$PROOT_LOADER_BINARY" ]] || \
+  fail "The Android PRoot archive does not contain its ELF loader."
+install -m 0755 "$PROOT_LOADER_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader.so"
+readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader.so" | grep -q 'AArch64' || \
+  fail "Packaged PRoot ELF loader is not an AArch64 ELF."
+
+# The bundled Debian guest is ARM64 only. PRoot's optional loader-m32 is for
+# 32-bit ARM guest ELF programs and is not needed by this guest; x86 games run
+# under Box64/Wine rather than as 32-bit ARM ELF binaries.
+
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
 # Emit the exact package format consumed by RuntimePackageInstaller.
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_REVISION:0:12}-non4k-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v4-wineprereserve-v1" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"
