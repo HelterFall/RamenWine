@@ -363,11 +363,10 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
             touchMouseInput.cancel(currentTimestamp())
 
-            // Do not call nativeStopWestonSimpleSHM(): upstream clears its
-            // running counter as soon as stop is requested, before the detached
-            // client thread has returned. Stopping the compositor instead
-            // disconnects the Wayland client; the counter then reaches zero
-            // only in weston_simple_shm_thread_func after the function returns.
+            // Avoid the upstream client-stop helper: it clears its running
+            // counter when shutdown is requested, before the detached thread exits.
+            // Stopping the compositor disconnects the Wayland client; the counter
+            // reaches zero only after weston_simple_shm_thread_func actually returns.
             WawonaNative.nativeDestroySurface(surface)
             WawonaNative.nativeShutdown()
 
