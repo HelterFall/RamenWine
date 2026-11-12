@@ -39,6 +39,8 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--link2symlink"))
             assertFalse(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--sysvipc"))
+            assertTrue(command.arguments.contains("--bind=/sys/devices/system/cpu:/sys/devices/system/cpu"))
+            assertTrue(File(fixture.rootfs, "sys/devices/system/cpu").isDirectory)
             assertEquals(
                 listOf(
                     fixture.nativeLibraryDirectory.canonicalPath,

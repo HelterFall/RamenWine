@@ -26,7 +26,10 @@ WINE_ARCHIVE_NAME="lug-wine-tkg-experimental-wayland-git-11.20-2.tar.gz"
 WINE_URL="https://github.com/starcitizen-lug/lug-wine-experimental/releases/download/11.20-2/${WINE_ARCHIVE_NAME}"
 WINE_SHA256="f20505464d0b54f685ba1862f99895f357fc44b9b3367562e8926ddb924e5136"
 
-BOX64_DEBIAN_VERSION="0.3.4+dfsg-1"
+BOX64_REVISION_FILE="${ROOT_DIR}/tools/box64-revision.txt"
+[[ -f "$BOX64_REVISION_FILE" ]] || fail "Pinned Box64 revision file is missing."
+BOX64_REVISION="$(tr -d '[:space:]' < "$BOX64_REVISION_FILE")"
+[[ "$BOX64_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "Pinned Box64 revision is not a full Git commit SHA."
 
 fail() {
   echo "ERROR: $*" >&2
@@ -403,7 +406,7 @@ cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramen
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v3" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_REVISION:0:12}-non4k-wine-11.20-2-wayland-directaudio-52aedbf8-wineserver-flush-v4" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"

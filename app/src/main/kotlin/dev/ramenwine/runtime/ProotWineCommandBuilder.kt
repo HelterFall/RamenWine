@@ -200,6 +200,7 @@ object ProotWineCommandBuilder {
         listOf(
             "/dev",
             "/proc",
+            "/sys/devices/system/cpu",
             guestGameDirectory,
             guestPrefixDirectory,
             guestHomeDirectory,
@@ -240,6 +241,8 @@ object ProotWineCommandBuilder {
             add("--rootfs=" + rootfs.absolutePath)
             add("--bind=/dev:/dev")
             add("--bind=/proc:/proc")
+            // Box64 and lscpu read this sysfs subtree to determine the guest CPU topology.
+            add("--bind=/sys/devices/system/cpu:/sys/devices/system/cpu")
             add("--bind=" + gameDirectory.absolutePath + ":" + guestGameDirectory)
             add("--bind=" + prefixDirectory.absolutePath + ":" + guestPrefixDirectory)
             add("--bind=" + homeDirectory.absolutePath + ":" + guestHomeDirectory)
