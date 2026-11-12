@@ -4,6 +4,7 @@ import dev.ramenwine.library.ImportedGame
 import dev.ramenwine.library.GameLocaleProfile
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,15 +30,26 @@ class ProotWineCommandBuilderTest {
                 File(fixture.filesDirectory, "prefixes/" + fixture.gameId).canonicalFile,
                 command.hostPrefixDirectory
             )
-            assertEquals(fixture.proot.absoluteFile, command.prootExecutable.absoluteFile)
+            assertTrue(fixture.prefixDirectory.isDirectory)
+            assertEquals(fixture.nativeProot.absoluteFile, command.prootExecutable.absoluteFile)
             assertTrue(command.arguments.contains("--rootfs=" + fixture.rootfs.absolutePath))
             assertTrue(command.arguments.contains("/usr/bin/env"))
-            assertTrue(command.arguments.contains("/usr/bin/box64"))
-            assertTrue(command.arguments.contains("/usr/bin/wine"))
-            assertTrue(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("/bin/sh"))
+            assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
             assertTrue(command.arguments.contains("--link2symlink"))
+            assertFalse(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--sysvipc"))
-            assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertTrue(command.arguments.contains("--bind=/sys/devices/system/cpu:/sys/devices/system/cpu"))
+            assertTrue(File(fixture.rootfs, "sys/devices/system/cpu").isDirectory)
+            assertEquals(
+                listOf(
+                    fixture.nativeLibraryDirectory.canonicalPath,
+                    fixture.hostLibraries.canonicalPath
+                ).joinToString(File.pathSeparator),
+                command.environment["LD_LIBRARY_PATH"]
+            )
+            assertEquals(fixture.nativeProotLoader.canonicalPath, command.environment["PROOT_LOADER"])
+            assertTrue(command.unsetEnvironment.contains("PROOT_LOADER"))
             assertTrue(command.environment.containsKey("PROOT_TMP_DIR"))
             assertFalse(command.environment.containsKey("XDG_RUNTIME_DIR"))
             assertFalse(command.environment.containsKey("WINEPREFIX"))
@@ -76,7 +88,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
             assertTrue(
                 command.arguments.indexOf("/usr/bin/env") <
-                    command.arguments.indexOf("/usr/bin/box64")
+                    command.arguments.indexOf("/bin/sh")
             )
             assertTrue(File(fixture.rootfs, "games/" + fixture.gameId).isDirectory)
             assertTrue(File(fixture.rootfs, "prefixes/" + fixture.gameId).isDirectory)
@@ -88,6 +100,14 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.unsetEnvironment.contains("WINEDLLPATH"))
             assertTrue(command.unsetEnvironment.contains("BANNER_AUDIO_DIRECT_RELAY"))
             assertFalse(command.arguments.any { it.contains("sh -c") })
+            assertEquals(
+                listOf(
+                    "/bin/sh",
+                    "/opt/ramenwine-tools/run-wine-command.sh",
+                    "/games/" + fixture.gameId + "/game.exe"
+                ),
+                command.arguments.takeLast(3)
+            )
         } finally {
             fixture.cleanup()
         }
@@ -141,6 +161,82 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun buildsWritableGuestWinePrefixProbeCommand() {
+        val fixture = Fixture()
+        try {
+            val gameCommand = ProotWineCommandBuilder.build(fixture.request())
+            val probe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(gameCommand)
+
+            assertEquals("/usr/bin/touch", probe.guestExecutablePath)
+            assertEquals(
+                "/prefixes/" + fixture.gameId + "/" +
+                    ProotWineCommandBuilder.PREFIX_WRITE_PROBE_FILE_NAME,
+                probe.arguments.last()
+            )
+            assertTrue(probe.arguments.contains("/usr/bin/touch"))
+            assertTrue(probe.arguments.contains("WINEPREFIX=/prefixes/" + fixture.gameId))
+            assertTrue(
+                probe.arguments.contains(
+                    "--bind=" + fixture.prefixDirectory.absolutePath + ":/prefixes/" + fixture.gameId
+                )
+            )
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun rejectsUnsafeGuestWinePrefixProbePath() {
+        val fixture = Fixture()
+        try {
+            val error = runCatching {
+                ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(
+                    ProotWineCommandBuilder.build(fixture.request()).copy(
+                        guestEnvironment = mapOf("WINEPREFIX" to "/prefixes/../outside")
+                    )
+                )
+            }.exceptionOrNull()
+            assertTrue(error is java.io.IOException)
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun buildsWineServerStopAndWaitCommandsWithTheSamePrefix() {
+        val fixture = Fixture()
+        try {
+            val gameCommand = ProotWineCommandBuilder.build(fixture.request())
+            val stop = ProotWineCommandBuilder.buildWineServerControlCommand(
+                gameCommand,
+                waitForExit = false
+            )
+            val wait = ProotWineCommandBuilder.buildWineServerControlCommand(
+                gameCommand,
+                waitForExit = true
+            )
+
+            assertEquals("/usr/bin/wineserver", stop.guestExecutablePath)
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineserver", "-k"),
+                stop.arguments.takeLast(3)
+            )
+            assertEquals(
+                listOf("/usr/bin/box64", "/usr/bin/wineserver", "-w"),
+                wait.arguments.takeLast(3)
+            )
+            assertEquals(gameCommand.guestEnvironment["WINEPREFIX"], stop.guestEnvironment["WINEPREFIX"])
+            assertEquals(
+                gameCommand.arguments.filter { it.startsWith("--bind=") },
+                stop.arguments.filter { it.startsWith("--bind=") }
+            )
+            assertFalse(stop.arguments.contains("--kill-on-exit"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun buildsWineRegistryCommandThatSelectsDirectAudio() {
         val fixture = Fixture()
         try {
@@ -148,6 +244,8 @@ class ProotWineCommandBuilderTest {
                 ProotWineCommandBuilder.build(fixture.request())
             )
             assertEquals("reg.exe", command.guestExecutablePath)
+            assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
+            assertFalse(command.arguments.contains("--kill-on-exit"))
             assertEquals("directaudio", command.arguments[command.arguments.lastIndex - 1])
             assertTrue(command.arguments.contains("HKCU\\Software\\Wine\\Drivers"))
             assertTrue(command.arguments.contains("/v"))
@@ -173,11 +271,15 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals("/opt/ramenwine-tests", smokeCommand.guestWorkingDirectory)
             assertTrue(smokeCommand.arguments.contains("--pwd=/opt/ramenwine-tests"))
-            assertEquals("/usr/bin/box64", smokeCommand.arguments[smokeCommand.arguments.size - 3])
-            assertEquals("/usr/bin/wine", smokeCommand.arguments[smokeCommand.arguments.size - 2])
+            assertTrue(smokeCommand.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
+            assertFalse(smokeCommand.arguments.contains("--kill-on-exit"))
             assertEquals(
-                "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe",
-                smokeCommand.arguments.last()
+                listOf(
+                    "/bin/sh",
+                    "/opt/ramenwine-tools/run-wine-command.sh",
+                    "/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+                ),
+                smokeCommand.arguments.takeLast(3)
             )
             assertEquals(gameCommand.hostPrefixDirectory, smokeCommand.hostPrefixDirectory)
             assertEquals(
@@ -221,8 +323,11 @@ class ProotWineCommandBuilderTest {
                 command.guestExecutablePath
             )
             assertEquals("-i", command.arguments.last())
-            assertEquals("/usr/bin/box64", command.arguments[command.arguments.size - 4])
-            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 3])
+            assertEquals("/bin/sh", command.arguments[command.arguments.size - 4])
+            assertEquals(
+                "/opt/ramenwine-tools/run-wine-command.sh",
+                command.arguments[command.arguments.size - 3]
+            )
         } finally {
             fixture.cleanup()
         }
@@ -268,7 +373,8 @@ class ProotWineCommandBuilderTest {
             val command = ProotWineCommandBuilder.build(
                 fixture.request().copy(game = x86Game)
             )
-            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+            assertEquals("/opt/ramenwine-tools/run-wine-command.sh", command.arguments[command.arguments.size - 2])
+            assertFalse(command.arguments.contains("--kill-on-exit"))
         } finally {
             fixture.cleanup()
         }
@@ -341,6 +447,54 @@ class ProotWineCommandBuilderTest {
     }
 
     @Test
+    fun refusesToBuildWhenApkNativeProotIsMissing() {
+        val fixture = Fixture()
+        try {
+            fixture.nativeProot.delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request())
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("libproot.so"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesToBuildWhenApkNativeAudioRelayIsMissing() {
+        val fixture = Fixture()
+        try {
+            fixture.nativeAudioRelay.delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request())
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("libdirectaudio-relay.so"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
+    fun refusesToBuildWhenApkNativeProotLoaderIsMissing() {
+        val fixture = Fixture()
+        try {
+            fixture.nativeProotLoader.delete()
+            val error = runCatching {
+                ProotWineCommandBuilder.build(fixture.request())
+            }.exceptionOrNull()
+
+            assertTrue(error is java.io.IOException)
+            assertTrue(error?.message.orEmpty().contains("libproot-loader.so"))
+        } finally {
+            fixture.cleanup()
+        }
+    }
+
+    @Test
     fun refusesRuntimeWithMissingProotExecutable() {
         val fixture = Fixture()
         try {
@@ -363,6 +517,10 @@ class ProotWineCommandBuilderTest {
         val root = Files.createTempDirectory("ramenwine-launch").toFile()
         val filesDirectory = File(root, "files").apply { mkdirs() }
         val cacheDirectory = File(root, "cache").apply { mkdirs() }
+        val nativeLibraryDirectory = File(root, "native-libs").apply { mkdirs() }
+        val nativeProot = executable(nativeLibraryDirectory, "libproot.so")
+        val nativeAudioRelay = executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
+        val nativeProotLoader = executable(nativeLibraryDirectory, "libproot-loader.so")
         val gameId = "12345678-1234-1234-1234-123456789abc"
 
         val backendRoot = File(
@@ -381,7 +539,12 @@ class ProotWineCommandBuilderTest {
         val env = executable(rootfs, "usr/bin/env")
         val box64 = executable(rootfs, "usr/bin/box64")
         val wine = executable(rootfs, "usr/bin/wine")
+        val wineserver = executable(rootfs, "usr/bin/wineserver")
+        val shell = executable(rootfs, "usr/bin/dash")
+        val wineCommandWrapper = executable(rootfs, "opt/ramenwine-tools/run-wine-command.sh")
+        val touch = executable(rootfs, "usr/bin/touch")
         val wineboot = executable(rootfs, "usr/lib/wine/x86_64-windows/wineboot.exe")
+        val prefixDirectory = File(filesDirectory, "prefixes/" + gameId)
         val audioUnix = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         val audioPe64 = executable(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         val audioPe32 = executable(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
@@ -396,6 +559,9 @@ class ProotWineCommandBuilderTest {
         val displayDirectory = File(cacheDirectory, "wawona-runtime").apply { mkdirs() }
 
         init {
+            // Match Debian Trixie's merged-/usr shell layout.
+            Files.createSymbolicLink(File(rootfs, "usr/bin/sh").toPath(), Paths.get("dash"))
+            Files.createSymbolicLink(File(rootfs, "bin").toPath(), Paths.get("usr/bin"))
             if (createWaylandSocket) {
                 File(displayDirectory, "wayland-0").writeText("socket placeholder")
             }
@@ -404,6 +570,7 @@ class ProotWineCommandBuilderTest {
         fun request() = ProotWineLaunchRequest(
             filesDirectory = filesDirectory,
             cacheDirectory = cacheDirectory,
+            nativeLibraryDirectory = nativeLibraryDirectory,
             game = ImportedGame(
                 id = gameId,
                 title = "Test visual novel",
