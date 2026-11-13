@@ -62,7 +62,7 @@ class WawonaSurfaceView(
         var lastCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
         var lastVisiblePixels = 0
         var verification: SurfaceFrameVerification? = null
-        var compositorReset = false
+        var smokeClientStopped = false
         var smokeSurfaceCleared = false
         var resetFailure: String? = null
         var resetCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
@@ -115,19 +115,19 @@ class WawonaSurfaceView(
             }
         } finally {
             withContext(NonCancellable) {
-                Log.i(TAG, "Restarting Wawona compositor to disconnect weston-simple-shm.")
+                Log.i(TAG, "Stopping isolated weston-simple-shm process; keeping Wawona compositor alive.")
                 val resetResult = runCatching { session.resetAfterSmokeClient() }
                 resetFailure = resetResult.exceptionOrNull()?.let {
                     "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
                 }
-                compositorReset = resetResult.getOrNull() == true
-                if (!compositorReset && resetFailure == null) {
-                    resetFailure = "Display session could not restore its compositor and Android Surface."
+                smokeClientStopped = resetResult.getOrNull() == true
+                if (!smokeClientStopped && resetFailure == null) {
+                    resetFailure = "Isolated SHM client process was not confirmed terminated."
                 }
 
-                if (compositorReset) {
-                    // Confirm the old SHM frame is gone after the compositor has been
-                    // restarted and its Android Surface presenter has been recreated.
+                if (smokeClientStopped) {
+                    // Confirm the old SHM frame is gone after the isolated client
+                    // process exits. The main compositor and Surface stay alive.
                     delay(SMOKE_RESET_SETTLE_MS)
                     if (isAttachedToWindow && holder.surface.isValid) {
                         val clearDeadline = SystemClock.elapsedRealtime() + SMOKE_FRAME_CLEAR_TIMEOUT_MS
@@ -162,8 +162,9 @@ class WawonaSurfaceView(
 
                 Log.i(
                     TAG,
-                    "weston-simple-shm reset result compositorReset=$compositorReset " +
-                        "surfaceCleared=$smokeSurfaceCleared copyStatus=$resetCopyStatus " +
+                    "weston-simple-shm cleanup result clientProcessExited=$smokeClientStopped " +
+                        "compositorPreserved=true surfaceCleared=$smokeSurfaceCleared " +
+                        "copyStatus=$resetCopyStatus " +
                         "visiblePixels=$resetVisiblePixels requiredClearPixels=$resetRequiredPixels " +
                         "resetError=${resetFailure ?: "<none>"}"
                 )
@@ -174,15 +175,15 @@ class WawonaSurfaceView(
         return when {
             resetFailure != null -> SurfaceFrameVerification(
                 visible = false,
-                detail = "Не удалось безопасно перезапустить Wawona после SHM-проверки: $resetFailure"
+                detail = "Не удалось безопасно завершить изолированный SHM-клиент: $resetFailure"
             )
-            !compositorReset -> SurfaceFrameVerification(
+            !smokeClientStopped -> SurfaceFrameVerification(
                 visible = false,
-                detail = "Wawona не подтвердил перезапуск после SHM-проверки. Запуск заблокирован."
+                detail = "Завершение процесса weston-simple-shm не подтверждено. Запуск заблокирован."
             )
             !smokeSurfaceCleared -> SurfaceFrameVerification(
                 visible = false,
-                detail = "После перезапуска Wawona кадр не очистился с Android Surface " +
+                detail = "После завершения SHM-клиента кадр не очистился с Android Surface " +
                     "за ${SMOKE_FRAME_CLEAR_TIMEOUT_MS} мс " +
                     "(PixelCopy status=$resetCopyStatus, нечёрных точек=$resetVisiblePixels, " +
                     "порог очистки=$resetRequiredPixels). Запуск заблокирован."
