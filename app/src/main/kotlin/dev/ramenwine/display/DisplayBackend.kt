@@ -50,8 +50,12 @@ interface DisplaySession {
     /** True while the backend's SHM smoke client is still connected. */
     fun isSurfaceSmokeClientRunning(): Boolean = false
 
-    /** Requests the backend's SHM smoke client to exit. */
-    fun stopSurfaceSmokeClient() {}
+    /**
+     * Tears down and recreates the compositor so the SHM test client disconnects
+     * through the Wayland server. Returns only after the client thread has exited
+     * and the Android Surface has been attached to the fresh compositor.
+     */
+    suspend fun resetAfterSmokeClient(): Boolean = false
 
     fun stop()
 }

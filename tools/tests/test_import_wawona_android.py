@@ -49,7 +49,6 @@ class WawonaReleaseImporterTests(unittest.TestCase):
     def test_requires_upstream_shm_smoke_client_exports(self) -> None:
         required = {
             "Java_com_aspauldingcode_wawona_WawonaNative_nativeRunWestonSimpleSHM",
-            "Java_com_aspauldingcode_wawona_WawonaNative_nativeStopWestonSimpleSHM",
             "Java_com_aspauldingcode_wawona_WawonaNative_nativeIsWestonSimpleSHMRunning",
         }
         self.assertTrue(required.issubset(import_wawona_android.REQUIRED_JNI_SYMBOLS))

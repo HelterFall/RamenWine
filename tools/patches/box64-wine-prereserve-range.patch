@@ -1,0 +1,87 @@
+diff --git a/src/tools/wine_tools.c b/src/tools/wine_tools.c
+--- a/src/tools/wine_tools.c
++++ b/src/tools/wine_tools.c
+@@ -30,22 +30,65 @@
+ int wine_preloaded = 0;
+ 
+-static int get_prereserve(const char* reserve, void** addr, size_t* size)
+-{
+-    if(!reserve)
+-        return 0;
+-    uintptr_t r = 0;
+-    int first = 1;
+-    while(*reserve) {
+-        // numbers reading
+-        if(*reserve>='0' && *reserve<='9')  r=r*16+(*reserve)-'0';
+-        else if(*reserve>='A' && *reserve<='F')  r=r*16+(*reserve)-'A'+10;
+-        else if(*reserve>='a' && *reserve<='f')  r=r*16+(*reserve)-'a'+10;
+-        else if(*reserve=='-') {if(first) {*addr=(void*)(r&~(box64_pagesize-1)); r=0; first=0;} else {printf_log(LOG_NONE, "Warning, Wine prereserve badly formatted\n"); return 0;}}
+-        else {printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n"); return 0;}
+-        ++reserve;
+-    }
+-    *size = r;
+-    return 1;
+-}
++static int get_prereserve(const char* reserve, void** addr, size_t* size)
++{
++    if(!reserve)
++        return 0;
++    uintptr_t r = 0;
++    uintptr_t start = 0;
++    const uintptr_t wine_granularity_mask = 0xffff;
++    int first = 1;
++    while(*reserve) {
++        int digit = -1;
++        if(*reserve>='0' && *reserve<='9') digit = *reserve - '0';
++        else if(*reserve>='A' && *reserve<='F') digit = *reserve - 'A' + 10;
++        else if(*reserve>='a' && *reserve<='f') digit = *reserve - 'a' + 10;
++        else if(*reserve=='-') {
++            if(!first) {
++                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
++                return 0;
++            }
++            start = r & ~wine_granularity_mask;
++            r = 0;
++            first = 0;
++        } else {
++            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
++            return 0;
++        }
++        if(digit >= 0) {
++            if(r > (UINTPTR_MAX - (uintptr_t)digit) / 16) {
++                printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
++                return 0;
++            }
++            r = r * 16 + (uintptr_t)digit;
++        }
++        ++reserve;
++    }
++
++    // Wine encodes WINEPRELOADRESERVE as start-end, not start-size. Its
++    // preloader rounds start down and end up to Windows' 64 KiB allocation
++    // granularity before exposing the resulting addr/size pair to ntdll.
++    if(first) {
++        if(r) {
++            printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
++            return 0;
++        }
++        *addr = NULL;
++        *size = 0;
++        return 1;
++    }
++    if(r > UINTPTR_MAX - wine_granularity_mask) {
++        printf_log(LOG_INFO, "Warning, Wine prereserve badly formatted\n");
++        return 0;
++    }
++    uintptr_t end = (r + wine_granularity_mask) & ~wine_granularity_mask;
++    if(end <= start) {
++        *addr = NULL;
++        *size = 0;
++        return 1;
++    }
++    *addr = (void*)start;
++    *size = end - start;
++    return 1;
++}
+ 
+ static void add_no_overlap(void* addr, size_t size)

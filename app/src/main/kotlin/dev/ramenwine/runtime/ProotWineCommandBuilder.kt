@@ -14,6 +14,8 @@ data class WaylandDisplayEndpoint(
 data class ProotWineLaunchRequest(
     val filesDirectory: File,
     val cacheDirectory: File,
+    /** APK-extracted Android-host binaries; app-data files are not execve()-eligible on API 29+. */
+    val nativeLibraryDirectory: File,
     val game: ImportedGame,
     val display: WaylandDisplayEndpoint,
     val hostUid: Int,
@@ -103,14 +105,26 @@ object ProotWineCommandBuilder {
             ?.takeIf { it.isNotEmpty() && it.length <= 128 }
             ?: throw IOException("Runtime version is missing from runtime.properties.")
 
-        val proot = executableFile(backendRoot, "host/bin/proot")
+        // Keep the runtime package's copies as integrity-checked payload files,
+        // but execute Android-host ELF programs only from the APK-extracted native
+        // library directory. Android 10+ denies execve() from writable filesDir.
+        requireRuntimeFile(backendRoot, "host/bin/proot")
+        requireRuntimeFile(backendRoot, "host/bin/directaudio-relay")
+        val nativeLibraryDirectory = request.nativeLibraryDirectory.canonicalFile
+        val proot = androidHostExecutable(nativeLibraryDirectory, "libproot.so")
+        androidHostExecutable(nativeLibraryDirectory, "libdirectaudio-relay.so")
+        val prootLoader = androidHostExecutable(nativeLibraryDirectory, "libproot-loader.so")
+
         val hostLibraryDirectory = File(backendRoot, "host/lib").canonicalFile
         requireContained(backendRoot, hostLibraryDirectory, "PRoot host libraries")
         requireDirectory(hostLibraryDirectory, "PRoot host libraries")
         executableFile(rootfs, "usr/bin/env")
+        executableFile(rootfs, "usr/bin/touch")
         executableFile(rootfs, "usr/bin/box64")
         executableFile(rootfs, "usr/bin/wine")
-        executableFile(backendRoot, "host/bin/directaudio-relay")
+        executableFile(rootfs, "usr/bin/wineserver")
+        executableFile(rootfs, "bin/sh")
+        executableFile(rootfs, "opt/ramenwine-tools/run-wine-command.sh")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/x86_64-windows/winedirectaudio.drv")
         requireRuntimeFile(rootfs, "opt/ramenwine-audio/lib/wine/i386-windows/winedirectaudio.drv")
@@ -186,6 +200,7 @@ object ProotWineCommandBuilder {
         listOf(
             "/dev",
             "/proc",
+            "/sys/devices/system/cpu",
             guestGameDirectory,
             guestPrefixDirectory,
             guestHomeDirectory,
@@ -212,6 +227,8 @@ object ProotWineCommandBuilder {
             "LANG" to request.locale,
             "LC_ALL" to request.locale,
             "PATH" to "/opt/ramenwine-wine/bin:/usr/local/bin:/usr/bin:/bin",
+            // Capture Box64 Wine pre-reservation diagnostics without verbose tracing.
+            "BOX64_LOG" to "1",
             "BOX64_NOBANNER" to "1",
             "WINEDLLPATH" to "/opt/ramenwine-audio/lib/wine",
             "BANNER_AUDIO_DIRECT_RELAY" to
@@ -219,12 +236,15 @@ object ProotWineCommandBuilder {
         )
 
         val arguments = buildList {
-            add("--kill-on-exit")
+            // Wine starts a detached wineserver and services.exe. The guest
+            // wrapper below shuts them down cleanly before PRoot exits.
             add("--link2symlink")
             add("--sysvipc")
             add("--rootfs=" + rootfs.absolutePath)
             add("--bind=/dev:/dev")
             add("--bind=/proc:/proc")
+            // Box64 and lscpu read this sysfs subtree to determine the guest CPU topology.
+            add("--bind=/sys/devices/system/cpu:/sys/devices/system/cpu")
             add("--bind=" + gameDirectory.absolutePath + ":" + guestGameDirectory)
             add("--bind=" + prefixDirectory.absolutePath + ":" + guestPrefixDirectory)
             add("--bind=" + homeDirectory.absolutePath + ":" + guestHomeDirectory)
@@ -244,14 +264,18 @@ object ProotWineCommandBuilder {
             guestEnvironment.forEach { (name, value) ->
                 add("$name=$value")
             }
-            add("/usr/bin/box64")
-            add("/usr/bin/wine")
+            add("/bin/sh")
+            add("/opt/ramenwine-tools/run-wine-command.sh")
             add(guestExecutable)
         }
 
         val environment = linkedMapOf(
-            "LD_LIBRARY_PATH" to hostLibraryDirectory.canonicalPath,
-            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath
+            "LD_LIBRARY_PATH" to listOf(
+                nativeLibraryDirectory.canonicalPath,
+                hostLibraryDirectory.canonicalPath
+            ).joinToString(File.pathSeparator),
+            "PROOT_TMP_DIR" to prootTempDirectory.absolutePath,
+            "PROOT_LOADER" to prootLoader.canonicalPath
         )
 
         return ProotWineCommand(
@@ -271,6 +295,50 @@ object ProotWineCommandBuilder {
     }
 
 
+    /**
+     * Exercises the exact guest WINEPREFIX bind before starting Wine.
+     * A successful host-side file check proves the guest path is writable.
+     */
+    fun buildWinePrefixWriteProbeCommand(gameCommand: ProotWineCommand): ProotWineCommand {
+        val guestPrefix = gameCommand.guestEnvironment["WINEPREFIX"]
+            ?: throw IOException("The Wine prefix path is not configured.")
+        if (!WINE_PREFIX_PATH_PATTERN.matches(guestPrefix)) {
+            throw IOException("The Wine prefix path is invalid for the write probe.")
+        }
+
+        val probePath = guestPrefix + "/" + PREFIX_WRITE_PROBE_FILE_NAME
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/touch",
+            probePath
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "/usr/bin/touch"
+        )
+    }
+
+    const val PREFIX_WRITE_PROBE_FILE_NAME = ".ramenwine-prefix-write-probe"
+
+    /**
+     * Builds a separate PRoot command that asks the active Wine server to stop
+     * or waits for it to release the prefix lock. Used by the app's Stop action
+     * before falling back to terminating the Android-host PRoot process.
+     */
+    fun buildWineServerControlCommand(
+        gameCommand: ProotWineCommand,
+        waitForExit: Boolean
+    ): ProotWineCommand {
+        val arguments = gameCommand.arguments.dropLast(3) + listOf(
+            "/usr/bin/box64",
+            "/usr/bin/wineserver",
+            if (waitForExit) "-w" else "-k"
+        )
+        return gameCommand.copy(
+            arguments = arguments,
+            guestExecutablePath = "/usr/bin/wineserver"
+        )
+    }
+
     fun buildAudioDriverSelectionCommand(
         gameCommand: ProotWineCommand
     ): ProotWineCommand {
@@ -283,8 +351,8 @@ object ProotWineCommandBuilder {
         }
 
         val arguments = gameCommand.arguments.dropLast(3) + listOf(
-            "/usr/bin/box64",
-            "/usr/bin/wine",
+            "/bin/sh",
+            "/opt/ramenwine-tools/run-wine-command.sh",
             "reg.exe",
             "add",
             "HKCU\\Software\\Wine\\Drivers",
@@ -318,8 +386,8 @@ object ProotWineCommandBuilder {
                     argument
                 }
             } + listOf(
-                "/usr/bin/box64",
-                "/usr/bin/wine",
+                "/bin/sh",
+                "/opt/ramenwine-tools/run-wine-command.sh",
                 guestExecutable
             )
 
@@ -352,16 +420,46 @@ object ProotWineCommandBuilder {
             "Wine prefix initializer wineboot.exe is missing from the runtime package."
         )
 
-        // build() ends in /usr/bin/box64 /usr/bin/wine <game-exe>.
-        // Replace only that final guest command and retain all validated binds.
-        val arguments = gameCommand.arguments.dropLast(3) + listOf(
-            "/usr/bin/box64",
-            "/usr/bin/wine",
+        // wineboot starts wineserver and services.exe. Run it through the
+        // clean-shutdown wrapper so registry hives are flushed before PRoot exits.
+        val commandTail = listOf(
+            "/bin/sh",
+            "/opt/ramenwine-tools/run-wine-command.sh",
             "/" + selected,
             if (updateExistingPrefix) "-u" else "-i"
         )
+        val diagnosticEnvironment = gameCommand.guestEnvironment.toMutableMap().apply {
+            // wineboot is the first failing stage. Capture Box64 loader decisions and
+            // Wine's virtual-memory bookkeeping here, without flooding game sessions.
+            this["BOX64_LOG"] = "2"
+            this["BOX64_DLSYM_ERROR"] = "1"
+            this["WINEDEBUG"] = "err+all,+virtual,+mem_areas,+module"
+        }
+
+        // The PRoot argument vector contains a serialized copy of guestEnvironment
+        // after /usr/bin/env. Updating only the data-class property leaves those
+        // original KEY=value arguments untouched, so the wrapper and Wine never see
+        // the diagnostic overrides. Replace that serialized environment as well.
+        val envCommandIndex = gameCommand.arguments.indexOf("/usr/bin/env")
+        val shellCommandIndex = if (envCommandIndex >= 0) {
+            gameCommand.arguments.indexOfFirst { it == "/bin/sh" }
+        } else {
+            -1
+        }
+        if (envCommandIndex < 0 || shellCommandIndex <= envCommandIndex) {
+            throw IOException("The PRoot guest environment command is malformed.")
+        }
+        val unsetEnvironmentArguments = gameCommand.unsetEnvironment.flatMap { name ->
+            listOf("-u", name)
+        }
+        val arguments = gameCommand.arguments.take(envCommandIndex + 1) +
+            unsetEnvironmentArguments +
+            diagnosticEnvironment.map { (name, value) -> "$name=$value" } +
+            commandTail
+
         return gameCommand.copy(
             arguments = arguments,
+            guestEnvironment = diagnosticEnvironment,
             guestExecutablePath = "/" + selected
         )
     }
@@ -385,6 +483,19 @@ object ProotWineCommandBuilder {
         if (!canonicalDirectory.isDirectory) {
             throw IOException("Guest mount target is not a directory: " + guestAbsolutePath)
         }
+    }
+
+    private fun androidHostExecutable(nativeLibraryDirectory: File, fileName: String): File {
+        val root = nativeLibraryDirectory.canonicalFile
+        requireDirectory(root, "Android native library")
+        val executable = File(root, fileName).canonicalFile
+        requireContained(root, executable, "Android host executable")
+        if (!executable.isFile || !executable.canExecute()) {
+            throw IOException(
+                "Required Android native executable is missing or not executable: " + fileName
+            )
+        }
+        return executable
     }
 
     private fun executableFile(root: File, relativePath: String): File {
@@ -460,11 +571,14 @@ object ProotWineCommandBuilder {
         "HOME",
         "TMPDIR",
         "PROOT_TMP_DIR",
+        "PROOT_LOADER",
         "LD_LIBRARY_PATH",
         "PATH",
         "WINEPREFIX",
         "WINEDEBUG",
         "BOX64_LD_LIBRARY_PATH",
+        "BOX64_LOG",
+        "BOX64_DLSYM_ERROR",
         "BOX64_NOBANNER",
         "WINEDLLPATH",
         "BANNER_AUDIO_DIRECT_RELAY",
@@ -478,5 +592,7 @@ object ProotWineCommandBuilder {
     )
 
     private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+    private val WINE_PREFIX_PATH_PATTERN =
+        Regex("/prefixes/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     private val SOCKET_NAME_PATTERN = Regex("[A-Za-z0-9_.-]{1,40}")
 }

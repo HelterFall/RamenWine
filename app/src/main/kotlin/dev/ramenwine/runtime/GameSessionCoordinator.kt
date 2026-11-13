@@ -3,6 +3,7 @@ package dev.ramenwine.runtime
 import android.content.Context
 import android.os.Looper
 import android.os.Process
+import java.io.File
 import java.io.IOException
 import dev.ramenwine.display.DisplayBackend
 import dev.ramenwine.display.DisplaySession
@@ -84,31 +85,69 @@ class GameSessionCoordinator(
 
         launchInProgress = true
         try {
+            onOutput("RamenWine: stage=audio-relay status=starting")
             val relay = withContext(Dispatchers.IO) {
-                DirectAudioRelaySupervisor(appContext.filesDir).start(
+                DirectAudioRelaySupervisor(File(appContext.applicationInfo.nativeLibraryDir)).start(
                     display.endpoint.hostRuntimeDirectory
                 )
             }
             audioRelaySession = relay
+            onOutput("RamenWine: stage=audio-relay status=ready")
             audioRelayDisplay = display
 
             val request = ProotWineLaunchRequest(
                 filesDirectory = appContext.filesDir,
                 cacheDirectory = appContext.cacheDir,
+                nativeLibraryDirectory = File(appContext.applicationInfo.nativeLibraryDir),
                 game = game,
                 display = display.endpoint,
                 hostUid = Process.myUid(),
                 locale = game.locale
             )
+            onOutput("RamenWine: stage=command-build status=starting")
             val command = withContext(Dispatchers.IO) {
                 ProotWineCommandBuilder.build(request)
             }
+            onOutput(
+                "RamenWine: stage=command-build status=complete guest-exe=" +
+                    command.guestExecutablePath
+            )
 
-            WinePrefixManager(processSupervisor).ensureInitialized(
+            val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
+            onOutput("RamenWine: stage=prefix-probe status=starting")
+            val prefixProbeFile = File(
+                command.hostPrefixDirectory,
+                ProotWineCommandBuilder.PREFIX_WRITE_PROBE_FILE_NAME
+            )
+            prefixProbeFile.delete()
+            try {
+                val probeExitCode = processSupervisor.runToCompletion(
+                    prefixProbe,
+                    onOutput,
+                    timeoutMillis = PREFIX_PROBE_TIMEOUT_MILLIS
+                )
+                if (probeExitCode != 0 || !prefixProbeFile.isFile) {
+                    throw IOException(
+                        "PRoot could not write through the guest WINEPREFIX bind " +
+                            "(" + command.guestEnvironment["WINEPREFIX"] + " -> " +
+                            command.hostPrefixDirectory.absolutePath + "); probe exit code: " +
+                            probeExitCode + "."
+                    )
+                }
+                onOutput("RamenWine: WINEPREFIX bind is visible and writable from the guest.")
+                onOutput("RamenWine: stage=prefix-probe status=complete exit_code=$probeExitCode")
+            } finally {
+                prefixProbeFile.delete()
+            }
+
+            onOutput("RamenWine: stage=prefix-check status=starting")
+            val winebootRan = WinePrefixManager(processSupervisor).ensureInitialized(
                 gameCommand = command,
                 onOutput = onOutput
             )
+            onOutput("RamenWine: stage=prefix-check status=complete wineboot_ran=$winebootRan")
 
+            onOutput("RamenWine: stage=audio-driver status=starting")
             val audioDriverExitCode = processSupervisor.runToCompletion(
                 command = ProotWineCommandBuilder.buildAudioDriverSelectionCommand(command),
                 onOutput = onOutput,
@@ -121,6 +160,7 @@ class GameSessionCoordinator(
                 )
             }
 
+            onOutput("RamenWine: stage=audio-driver status=complete exit_code=$audioDriverExitCode")
             val processCommand = if (launchDiagnosticWindow) {
                 withContext(Dispatchers.IO) {
                     ProotWineCommandBuilder.buildWin32GdiSmokeCommand(command)
@@ -129,10 +169,20 @@ class GameSessionCoordinator(
                 command
             }
 
+            onOutput(
+                if (launchDiagnosticWindow) {
+                    "RamenWine: stage=win32-smoke status=launching executable=/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+                } else {
+                    "RamenWine: stage=selected-exe status=launching executable=" + command.guestExecutablePath
+                }
+            )
             val process = processSupervisor.start(
                 command = processCommand,
                 onOutput = onOutput,
                 onExit = { exitCode ->
+                    runCatching {
+                        onOutput("RamenWine: stage=process status=exited exit_code=$exitCode")
+                    }
                     try {
                         closeDisplayIfCurrent(display)
                     } finally {
@@ -148,10 +198,49 @@ class GameSessionCoordinator(
                 processSession = process
             }
 
-            GameSession(game, process, launchDiagnosticWindow) {
-                closeDisplayIfCurrent(display)
-            }
+            GameSession(
+                game = game,
+                process = process,
+                isDiagnostic = launchDiagnosticWindow,
+                requestWineServerShutdown = {
+                    val killCommand = ProotWineCommandBuilder.buildWineServerControlCommand(
+                        gameCommand = command,
+                        waitForExit = false
+                    )
+                    val killExitCode = processSupervisor.runToCompletion(
+                        command = killCommand,
+                        onOutput = onOutput,
+                        timeoutMillis = WINE_SERVER_STOP_TIMEOUT_MILLIS
+                    )
+                    if (killExitCode != 0) {
+                        onOutput("RamenWine: wineserver -k returned $killExitCode; checking shutdown state.")
+                    }
+
+                    val waitCommand = ProotWineCommandBuilder.buildWineServerControlCommand(
+                        gameCommand = command,
+                        waitForExit = true
+                    )
+                    val waitExitCode = processSupervisor.runToCompletion(
+                        command = waitCommand,
+                        onOutput = onOutput,
+                        timeoutMillis = WINE_SERVER_STOP_TIMEOUT_MILLIS
+                    )
+                    if (waitExitCode != 0) {
+                        throw IOException(
+                            "wineserver did not release the Wine prefix lock " +
+                                "(exit code $waitExitCode)."
+                        )
+                    }
+                },
+                releaseDisplay = { closeDisplayIfCurrent(display) }
+            )
         } catch (error: Exception) {
+            runCatching {
+                onOutput(
+                    "RamenWine: stage=launch-preparation status=failed " +
+                        "error=${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                )
+            }
             closeDisplayIfCurrent(display)
             throw error
         } finally {
@@ -187,7 +276,9 @@ class GameSessionCoordinator(
     }
 
     private companion object {
+        const val PREFIX_PROBE_TIMEOUT_MILLIS = 15_000L
         const val AUDIO_DRIVER_SETUP_TIMEOUT_MILLIS = 30_000L
+        const val WINE_SERVER_STOP_TIMEOUT_MILLIS = 30_000L
     }
 
     private fun checkMainThread() {
@@ -202,13 +293,27 @@ class GameSession internal constructor(
     val game: ImportedGame,
     private val process: ProotWineProcessSession,
     val isDiagnostic: Boolean,
+    private val requestWineServerShutdown: suspend () -> Unit,
     private val releaseDisplay: () -> Unit
 ) {
     val isRunning: Boolean
         get() = process.isAlive()
 
     suspend fun stop(): Int {
-        return try {
+        var gracefulShutdownError: Exception? = null
+        if (process.isAlive()) {
+            try {
+                // Stop guest Windows processes through wineserver first. The
+                // active Wine wrapper then exits after its registry flush.
+                requestWineServerShutdown()
+            } catch (error: Exception) {
+                gracefulShutdownError = error
+            }
+        }
+
+        val exitCode = try {
+            // This is the fallback if the wineserver protocol could not stop
+            // the game cleanly or the host PRoot process remained alive.
             process.stop()
         } finally {
             // Keep the compositor and Android Surface alive if PRoot resisted
@@ -220,5 +325,13 @@ class GameSession internal constructor(
                 }
             }
         }
+
+        gracefulShutdownError?.let { error ->
+            throw IOException(
+                "Wine could not shut down cleanly; the app used its process-stop fallback.",
+                error
+            )
+        }
+        return exitCode
     }
 }
