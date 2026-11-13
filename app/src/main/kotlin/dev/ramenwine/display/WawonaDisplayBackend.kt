@@ -240,9 +240,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
             if (attachedSurface != null) {
                 touchMouseInput.cancel(currentTimestamp())
-                // Preserve connected Wayland clients across Android Surface recreation.
-                // Destroying the presenter does not stop the compositor or falsify
-                // the upstream SHM client's actual running state.
+                // Preserve the compositor and connected Wayland clients across
+                // Android Surface recreation. Destroying the presenter does not
+                // affect the isolated SHM test-client process.
                 WawonaNative.nativeDestroySurface()
             }
             attachedDensity = density
@@ -424,8 +424,6 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
     private companion object {
         const val TAG = "RamenWineDisplay"
-        const val SMOKE_CLIENT_EXIT_TIMEOUT_MS = 5_000L
-        const val SMOKE_CLIENT_EXIT_POLL_MS = 50L
         const val RUNTIME_DIRECTORY_NAME = "wawona-runtime"
         const val WAYLAND_SOCKET_NAME = "wayland-0"
         const val MAX_UNIX_SOCKET_PATH_BYTES = 108
