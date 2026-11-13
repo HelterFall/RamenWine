@@ -108,6 +108,7 @@ class DiagnosticLogStore(private val context: Context) {
     }
 
     fun buildReport(): String {
+        val reportCollectionStartedAt = System.currentTimeMillis()
         val snapshot = synchronized(lock) {
             lines.toList() to truncatedLines
         }
@@ -117,7 +118,7 @@ class DiagnosticLogStore(private val context: Context) {
         }.getOrNull()
         return buildString {
             appendLine("RAMENWINE DIAGNOSTICS")
-            appendLine("Generated: ${timestamp(System.currentTimeMillis())}")
+            appendLine("Collection started: ${timestamp(reportCollectionStartedAt)}")
             appendLine("This file contains app/runtime diagnostics and the latest launch log.")
             appendLine("It does not include game file contents or logs from other apps.")
             appendLine()
@@ -141,8 +142,10 @@ class DiagnosticLogStore(private val context: Context) {
             }
             appendLine()
             val logcatOutput = readOwnLogcat()
+            appendLine("Logcat snapshot captured: ${timestamp(System.currentTimeMillis())}")
             appendLogcatSection(logcatOutput)
             appendFindings(snapshot.first + logcatOutput.lineSequence())
+            appendLine("Report build completed: ${timestamp(System.currentTimeMillis())}")
         }
     }
 
