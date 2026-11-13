@@ -2,7 +2,6 @@ package dev.ramenwine.display
 
 import android.content.Context
 import android.os.Looper
-import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
@@ -11,7 +10,6 @@ import android.view.MotionEvent
 import android.view.Surface
 import com.aspauldingcode.wawona.WawonaNative
 import dev.ramenwine.runtime.WaylandDisplayEndpoint
-import kotlinx.coroutines.delay
 import java.io.File
 
 class DisplayBackendUnavailableException(
@@ -133,9 +131,6 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             }
 
             WawonaNative.loadLibraries()
-            check(!WawonaNative.nativeIsWestonSimpleSHMRunning()) {
-                "A previous Weston SHM test thread has not exited; reopen RamenWine before starting another display session."
-            }
             WawonaNative.nativePrepareShellEnvironment(appContext.filesDir.absolutePath)
             WawonaNative.nativeInit(cacheDirectory.absolutePath)
             WawonaNative.nativeSetDisplayDensity(appContext.resources.displayMetrics.density)
@@ -157,7 +152,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
                     hostRuntimeDirectory = runtimeDirectory,
                     socketName = WAYLAND_SOCKET_NAME
                 ),
-                cacheDirectory = cacheDirectory
+                appContext = appContext
             )
         } catch (error: Exception) {
             runCatching { WawonaNative.nativeDestroySurface() }
@@ -191,8 +186,9 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
 
     private class WawonaDisplaySession(
         override val endpoint: WaylandDisplayEndpoint,
-        private val cacheDirectory: File
+        private val appContext: Context
     ) : DisplaySession {
+        private val smokeClientProcess = WawonaSmokeClientProcess(appContext)
         private var attachedSurface: Surface? = null
         private var attachedWidth = 0
         private var attachedHeight = 0
@@ -336,19 +332,18 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             return true
         }
 
-        override fun startSurfaceSmokeClient(): Boolean {
+        override suspend fun startSurfaceSmokeClient(): Boolean {
             checkMainThread()
             check(!stopped) { "Wawona display session is stopped." }
             check(attachedSurface?.isValid == true) {
                 "Attach the Android Surface before starting the Wayland smoke client."
             }
-            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) return true
-            return WawonaNative.nativeRunWestonSimpleSHM()
+            return smokeClientProcess.start(endpoint.hostRuntimeDirectory)
         }
 
-        override fun isSurfaceSmokeClientRunning(): Boolean {
+        override suspend fun isSurfaceSmokeClientRunning(): Boolean {
             checkMainThread()
-            return !stopped && WawonaNative.nativeIsWestonSimpleSHMRunning()
+            return !stopped && smokeClientProcess.isRunning()
         }
 
         override suspend fun resetAfterSmokeClient(): Boolean {
@@ -356,54 +351,27 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             check(!stopped) { "Wawona display session is stopped." }
 
             val surface = attachedSurface?.takeIf { it.isValid }
-                ?: throw IllegalStateException("Android Surface detached before the SHM reset.")
-            val width = attachedWidth
-            val height = attachedHeight
-            val density = attachedDensity
-            check(width > 0 && height > 0 && density > 0f) {
-                "Android Surface dimensions or density are invalid during SHM reset."
+                ?: throw IllegalStateException("Android Surface detached before the SHM client stopped.")
+            check(attachedWidth > 0 && attachedHeight > 0 && attachedDensity > 0f) {
+                "Android Surface dimensions or density are invalid during SHM cleanup."
             }
 
             touchMouseInput.cancel(currentTimestamp())
 
-            // Avoid the upstream client-stop helper: it clears its running
-            // counter when shutdown is requested, before the detached thread exits.
-            // Stopping the compositor disconnects the Wayland client; the counter
-            // reaches zero only after weston_simple_shm_thread_func actually returns.
-            WawonaNative.nativeDestroySurface()
-            WawonaNative.nativeShutdown()
-
-            val exitDeadline = SystemClock.elapsedRealtime() + SMOKE_CLIENT_EXIT_TIMEOUT_MS
-            while (
-                WawonaNative.nativeIsWestonSimpleSHMRunning() &&
-                SystemClock.elapsedRealtime() < exitDeadline
-            ) {
-                delay(SMOKE_CLIENT_EXIT_POLL_MS)
-            }
-            if (WawonaNative.nativeIsWestonSimpleSHMRunning()) {
-                val detail = "weston-simple-shm thread did not return within " +
-                    "${SMOKE_CLIENT_EXIT_TIMEOUT_MS} ms after compositor shutdown."
-                Log.w(TAG, detail)
-                throw IllegalStateException(detail)
+            // The SHM client is a separate same-UID process. Terminating that
+            // process closes its Wayland socket without shutting down or
+            // reinitializing the compositor in the UI process.
+            if (!smokeClientProcess.stop()) {
+                throw IllegalStateException(
+                    "Isolated weston-simple-shm process did not exit within " +
+                        "${WawonaSmokeClientProcessTimeout.VALUE} ms."
+                )
             }
 
             check(surface.isValid) {
-                "Android Surface became invalid while Wawona was resetting after the SHM test."
+                "Android Surface became invalid while the isolated SHM client was stopping."
             }
-            WawonaNative.nativeInit(cacheDirectory.absolutePath)
-            check(WawonaNative.nativeIsCompositorReady()) {
-                "Wawona compositor did not become ready after SHM reset."
-            }
-
-            val socketPath = File(endpoint.hostRuntimeDirectory, endpoint.socketName).absolutePath
-            check(isUnixSocket(socketPath)) {
-                "Wawona Wayland socket was not restored after SHM reset: $socketPath"
-            }
-
-            WawonaNative.nativeSetDisplayDensity(density)
-            WawonaNative.nativeSetSurface(surface)
-            resizeSurface(width, height)
-            Log.i(TAG, "Wawona compositor restarted and Android Surface reattached after SHM test.")
+            Log.i(TAG, "Isolated SHM client process exited; Wawona compositor and Surface were preserved.")
             return true
         }
 
@@ -414,6 +382,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             try {
                 // The pinned Wawona release also releases Vulkan resources when
                 // no Android Surface was attached.
+                smokeClientProcess.stopAsync()
                 touchMouseInput.cancel(currentTimestamp())
                 WawonaNative.nativeDestroySurface()
                 attachedSurface = null
