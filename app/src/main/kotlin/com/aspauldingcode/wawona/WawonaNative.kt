@@ -37,7 +37,6 @@ object WawonaNative {
     // Starts the pinned upstream weston-simple-shm client for a real SHM
     // buffer/presentation smoke test on the Android Surface.
     external fun nativeRunWestonSimpleSHM(): Boolean
-    external fun nativeStopWestonSimpleSHM()
     external fun nativeIsWestonSimpleSHMRunning(): Boolean
 
     // Android finger taps are translated to mouse input because standard

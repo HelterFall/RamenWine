@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:label="RamenWine"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <provider
+            android:name=".display.WawonaSmokeClientProvider"
+            android:authorities="${applicationId}.wawona-smoke-client"
+            android:exported="false"
+            android:process=":wawona_smoke_client" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
