@@ -364,7 +364,7 @@ class WawonaDisplayBackend(context: Context) : DisplayBackend {
             if (!smokeClientProcess.stop()) {
                 throw IllegalStateException(
                     "Isolated weston-simple-shm process did not exit within " +
-                        "${WawonaSmokeClientProcessTimeout.VALUE} ms."
+                        "5,000 ms."
                 )
             }
 
