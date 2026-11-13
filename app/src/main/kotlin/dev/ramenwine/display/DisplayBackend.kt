@@ -45,15 +45,14 @@ interface DisplaySession {
     fun dispatchKeyEvent(event: KeyEvent): Boolean
 
     /** Starts the upstream Weston SHM test client, if this backend provides one. */
-    fun startSurfaceSmokeClient(): Boolean = false
+    suspend fun startSurfaceSmokeClient(): Boolean = false
 
     /** True while the backend's SHM smoke client is still connected. */
-    fun isSurfaceSmokeClientRunning(): Boolean = false
+    suspend fun isSurfaceSmokeClientRunning(): Boolean = false
 
     /**
-     * Tears down and recreates the compositor so the SHM test client disconnects
-     * through the Wayland server. Returns only after the client thread has exited
-     * and the Android Surface has been attached to the fresh compositor.
+     * Terminates the isolated SHM client process. The compositor remains running;
+     * the caller separately verifies that its Android Surface is clear.
      */
     suspend fun resetAfterSmokeClient(): Boolean = false
 
