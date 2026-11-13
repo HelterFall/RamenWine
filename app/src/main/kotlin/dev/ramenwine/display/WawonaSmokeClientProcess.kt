@@ -25,19 +25,31 @@ internal class WawonaSmokeClientProcess(context: Context) {
     suspend fun start(runtimeDirectory: File): Boolean = withContext(Dispatchers.IO) {
         val currentPid = workerPid
         if (currentPid != null && isProcessAlive(currentPid)) {
-            return@withContext queryRunning(currentPid)
+            if (queryRunning(currentPid)) return@withContext true
+            check(requestStopAndWait(currentPid)) {
+                "A previous isolated Wawona SHM worker could not be terminated."
+            }
         }
         workerPid = null
 
-        var response = call(
-            WawonaSmokeClientProvider.METHOD_START,
-            Bundle().apply {
-                putString(
-                    WawonaSmokeClientProvider.KEY_RUNTIME_DIRECTORY,
-                    runtimeDirectory.absolutePath
-                )
-            }
-        )
+        val startExtras = Bundle().apply {
+            putString(
+                WawonaSmokeClientProvider.KEY_RUNTIME_DIRECTORY,
+                runtimeDirectory.absolutePath
+            )
+        }
+        var response = try {
+            call(WawonaSmokeClientProvider.METHOD_START, startExtras)
+        } catch (error: Exception) {
+            // A Binder failure can happen after the provider has already started
+            // the native thread. Ask that process to terminate before returning.
+            runCatching {
+                call(WawonaSmokeClientProvider.METHOD_STOP)
+            }.getOrNull()?.getInt(WawonaSmokeClientProvider.KEY_PID, -1)
+                ?.takeIf { it > 0 }
+                ?.let { requestStopAndWait(it) }
+            throw error
+        }
         var pid = response.getInt(WawonaSmokeClientProvider.KEY_PID, -1)
 
         // Recover a stale helper left by a previous screen/session before
