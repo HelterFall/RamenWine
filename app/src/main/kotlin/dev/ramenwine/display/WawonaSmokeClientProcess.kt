@@ -1,6 +1,7 @@
 package dev.ramenwine.display
 
 import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -176,8 +177,12 @@ internal class WawonaSmokeClientProcess(context: Context) {
     private fun isProcessAlive(pid: Int): Boolean = File("/proc/$pid").exists()
 
     private fun call(method: String, extras: Bundle? = null): Bundle =
-        appContext.contentResolver.call(authority, method, null, extras)
-            ?: throw IllegalStateException("Wawona smoke-client provider returned no response.")
+        appContext.contentResolver.call(
+            Uri.parse("content://$authority"),
+            method,
+            null,
+            extras
+        ) ?: throw IllegalStateException("Wawona smoke-client provider returned no response.")
 
     private companion object {
         const val TAG = "RamenWineDisplay"
