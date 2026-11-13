@@ -129,6 +129,7 @@ internal class WawonaSmokeClientProcess(context: Context) {
         val responsePid = response.getInt(WawonaSmokeClientProvider.KEY_PID, -1)
         if (responsePid != expectedPid) {
             workerPid = null
+            if (responsePid > 0) requestStopAndWait(responsePid)
             return false
         }
         return response.getBoolean(WawonaSmokeClientProvider.KEY_RUNNING)
@@ -139,7 +140,13 @@ internal class WawonaSmokeClientProcess(context: Context) {
         val response = runCatching {
             call(WawonaSmokeClientProvider.METHOD_STOP)
         }.getOrNull()
-        if (response == null && isProcessAlive(pid)) return false
+        if (
+            response == null ||
+            response.getInt(WawonaSmokeClientProvider.KEY_PID, -1) != pid ||
+            !response.getBoolean(WawonaSmokeClientProvider.KEY_STOP_SCHEDULED)
+        ) {
+            return !isProcessAlive(pid)
+        }
         return waitForProcessExitBlocking(pid, PROCESS_STOP_TIMEOUT_MS)
     }
 
@@ -148,7 +155,13 @@ internal class WawonaSmokeClientProcess(context: Context) {
         val response = runCatching {
             call(WawonaSmokeClientProvider.METHOD_STOP)
         }.getOrNull()
-        if (response == null && isProcessAlive(pid)) return false
+        if (
+            response == null ||
+            response.getInt(WawonaSmokeClientProvider.KEY_PID, -1) != pid ||
+            !response.getBoolean(WawonaSmokeClientProvider.KEY_STOP_SCHEDULED)
+        ) {
+            return !isProcessAlive(pid)
+        }
         return waitForProcessExitBlocking(pid, timeoutMillis)
     }
 
