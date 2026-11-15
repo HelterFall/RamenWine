@@ -26,6 +26,9 @@ private const val SETUP_COMMAND_STOP_WAIT_MILLIS = 1_500L
 private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
 private const val PROCESS_TREE_SCAN_INTERVAL_MILLIS = 250L
 
+// Keep the pre/post-spawn /proc snapshot atomic across concurrent sessions.
+private val PROCESS_LAUNCH_LOCK = Any()
+
 /**
  * Starts a previously validated PRoot command without a shell.
  *
@@ -46,10 +49,15 @@ class ProotWineProcessSupervisor(
         timeoutMillis: Long = SETUP_COMMAND_TIMEOUT_MILLIS
     ): Int = withContext(Dispatchers.IO) {
         require(timeoutMillis > 0L) { "Setup timeout must be positive." }
-        // One-shot wineboot/reg.exe commands run under PRoot --kill-on-exit.
-        // Do not force-kill their descendants here: Wine may keep wineserver
-        // alive briefly so the next setup command can reuse the same prefix.
-        val process = createProcess(command)
+        // One-shot Wine commands use the guest run-wine-command.sh wrapper.
+        // It asks wineserver to stop and waits for its lock to be released,
+        // allowing registry hives to flush before PRoot itself exits.
+        val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
+        val startedAtNanos = System.nanoTime()
+        val appPid = ProcessTreeTerminator.currentProcessPid()?.toString() ?: "unknown"
+        suspend fun emitDiagnostic(message: String) {
+            withContext(callbackDispatcher) { onOutput(message) }
+        }
         val outputJob = launch {
             try {
                 process.inputStream.bufferedReader().use { reader ->
@@ -73,8 +81,22 @@ class ProotWineProcessSupervisor(
         }
 
         try {
+            emitDiagnostic(
+                "RamenWine: setup PRoot started pid=${appPid} guest=${command.guestExecutablePath} " +
+                    "prefix=${command.guestEnvironment["WINEPREFIX"].orEmpty()}"
+            )
+            emitDiagnostic(
+                "RamenWine: setup config BOX64_LOG=${command.guestEnvironment["BOX64_LOG"].orEmpty()} " +
+                    "BOX64_DLSYM_ERROR=${command.guestEnvironment["BOX64_DLSYM_ERROR"].orEmpty()} " +
+                    "WINEDEBUG=${command.guestEnvironment["WINEDEBUG"].orEmpty()} " +
+                    "BOX64_LD_LIBRARY_PATH=${command.guestEnvironment["BOX64_LD_LIBRARY_PATH"].orEmpty()}"
+            )
             val completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!completed) {
+                emitDiagnostic(
+                    "RamenWine: setup timeout pid=${appPid} alive=${process.isAlive} " +
+                        "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
+                )
                 process.destroy()
                 if (!process.waitFor(SETUP_COMMAND_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
@@ -87,6 +109,10 @@ class ProotWineProcessSupervisor(
             }
 
             val exitCode = process.exitValue()
+            emitDiagnostic(
+                "RamenWine: setup PRoot exit pid=${appPid} code=$exitCode " +
+                    "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
+            )
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
                 outputJob.join()
                 true
@@ -142,12 +168,39 @@ class ProotWineProcessSupervisor(
             throw IOException("The PRoot working directory does not exist.")
         }
 
-        val process = createProcess(command)
+        val parentPid = ProcessTreeTerminator.currentProcessPid()
+            ?: throw IOException("Could not read the app PID from /proc/self/status.")
+        val appPid = parentPid.toString()
+        val (process, processTree) = synchronized(PROCESS_LAUNCH_LOCK) {
+            val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
+            val startedProcess = createProcess(command)
+            val rootPid = if (startedProcess.isAlive) {
+                ProcessTreeTerminator.findNewDirectChildPid(
+                    parentPid = parentPid,
+                    executable = command.prootExecutable,
+                    existingPids = existingChildren
+                )
+            } else {
+                null
+            }
+            startedProcess to rootPid?.let { ProcessTreeTerminator(it) }
+        }
+        runCatching {
+            withContext(callbackDispatcher) {
+                onOutput(
+                    "RamenWine: game PRoot started pid=${appPid} " +
+                        "guest=${command.guestExecutablePath} " +
+                        "wayland=${command.guestEnvironment["WAYLAND_DISPLAY"].orEmpty()} " +
+                        "runtime=${command.runtimeVersion}"
+                )
+            }
+        }
         ProotWineProcessSession(
             process = process,
             onOutput = onOutput,
             onExit = onExit,
-            callbackDispatcher = callbackDispatcher
+            callbackDispatcher = callbackDispatcher,
+            processTree = processTree
         )
     }
 }
@@ -156,7 +209,8 @@ class ProotWineProcessSession internal constructor(
     private val process: Process,
     private val onOutput: (String) -> Unit,
     private val onExit: (Int) -> Unit,
-    private val callbackDispatcher: CoroutineDispatcher
+    private val callbackDispatcher: CoroutineDispatcher,
+    private val processTree: ProcessTreeTerminator? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val finished = AtomicBoolean(false)
@@ -168,10 +222,6 @@ class ProotWineProcessSession internal constructor(
     private val outputDrainMutex = Mutex()
     private val outputJob: Job
     private val processTreeMonitor: Job
-    private val processTree = runCatching {
-        val pid = process.pid().toInt()
-        if (pid > 0) ProcessTreeTerminator(pid) else null
-    }.getOrNull()
 
     init {
         outputJob = scope.launch {

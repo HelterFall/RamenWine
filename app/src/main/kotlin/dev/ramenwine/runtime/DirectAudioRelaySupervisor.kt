@@ -17,7 +17,7 @@ import java.io.IOException
  * rings. No shell, external app or user-installed audio server is involved.
  */
 internal class DirectAudioRelaySupervisor(
-    private val filesDirectory: File
+    private val nativeLibraryDirectory: File
 ) {
     fun start(runtimeDirectory: File): DirectAudioRelaySession {
         if (Build.VERSION.SDK_INT < MIN_ANDROID_API) {
@@ -31,18 +31,15 @@ internal class DirectAudioRelaySupervisor(
             throw IOException("The Android audio relay directory is not writable.")
         }
 
-        val helper = File(
-            filesDirectory,
-            "runtime/current/backends/glibc-proot-box64/host/bin/directaudio-relay"
-        ).canonicalFile
-        val expectedRoot = File(
-            filesDirectory,
-            "runtime/current/backends/glibc-proot-box64/host/bin"
-        ).canonicalFile
-        if (!helper.path.startsWith(expectedRoot.path + File.separator) ||
+        val expectedRoot = nativeLibraryDirectory.canonicalFile
+        val helper = File(expectedRoot, "libdirectaudio-relay.so").canonicalFile
+        if (!expectedRoot.isDirectory ||
+            helper.parentFile != expectedRoot ||
             !helper.isFile || !helper.canExecute()
         ) {
-            throw IOException("The bundled DirectAudio Android helper is missing or not executable.")
+            throw IOException(
+                "The APK-extracted DirectAudio Android helper is missing or not executable."
+            )
         }
 
         val socket = File(canonicalRuntimeDirectory, SOCKET_NAME)
@@ -72,7 +69,9 @@ internal class DirectAudioRelaySupervisor(
         val process = try {
             builder.start()
         } catch (error: Exception) {
-            throw IOException("Could not start the Android audio relay.", error)
+            val detail = error.message?.takeIf { it.isNotBlank() }
+                ?: error.javaClass.simpleName
+            throw IOException("Could not start the Android audio relay ($detail).", error)
         }
 
         // The Wine client makes a one-shot relay connection. Wait for the

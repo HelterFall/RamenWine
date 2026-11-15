@@ -231,7 +231,7 @@ object RuntimeLayout {
 
         return runCatching {
             val rootPath = canonicalRoot.toPath().normalize()
-            val linkPath = backendRoot.toPath().resolve(safeRelativePath).normalize()
+            val linkPath = rootPath.resolve(safeRelativePath).normalize()
             if (!linkPath.startsWith(rootPath)) return false
 
             val domain = safeRelativePath.substringBefore('/')

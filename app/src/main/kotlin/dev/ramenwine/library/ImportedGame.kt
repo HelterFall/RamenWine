@@ -8,5 +8,6 @@ data class ImportedGame(
     val architecture: String,
     val totalBytes: Long,
     val importedAtEpochMillis: Long,
-    val locale: String = GameLocaleProfile.DEFAULT_LOCALE
+    val locale: String = GameLocaleProfile.DEFAULT_LOCALE,
+    val coverImageUrl: String? = null
 )

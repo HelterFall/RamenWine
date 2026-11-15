@@ -9,6 +9,71 @@ import org.junit.Test
 
 class ProcessTreeTerminatorTest {
     @Test
+    fun readsCurrentProcessPidFromProcStatusWithoutAndroidFramework() {
+        val proc = Files.createTempDirectory("ramenwine-proc-self-pid").toFile()
+        try {
+            File(proc, "self/status").apply {
+                parentFile.mkdirs()
+                writeText("Name:\ttest\nState:\tS (sleeping)\nPid:\t2468\n")
+            }
+
+            assertEquals(2468, ProcessTreeTerminator.currentProcessPid(proc))
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun fallsBackToProcStatWhenStatusPidIsUnavailable() {
+        val proc = Files.createTempDirectory("ramenwine-proc-self-stat").toFile()
+        try {
+            File(proc, "self/stat").apply {
+                parentFile.mkdirs()
+                writeText("1357 (test process) S 1 2 3 4 5")
+            }
+
+            assertEquals(1357, ProcessTreeTerminator.currentProcessPid(proc))
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun findsNewDirectChildPidFromProcChildren() {
+        val proc = Files.createTempDirectory("ramenwine-proc-child-lookup").toFile()
+        try {
+            val parentTaskOne = File(proc, "500/task/500").apply { mkdirs() }
+            File(parentTaskOne, "children").writeText("600")
+            val parentTaskTwo = File(proc, "500/task/501").apply { mkdirs() }
+            File(parentTaskTwo, "children").writeText("601 602")
+
+            File(proc, "600/cmdline").apply {
+                parentFile.mkdirs()
+                writeBytes("/app/runtime/proot\u0000--kill-on-exit\u0000".toByteArray(Charsets.UTF_8))
+            }
+            File(proc, "601/cmdline").apply {
+                parentFile.mkdirs()
+                writeBytes("/app/runtime/proot\u0000--kill-on-exit\u0000".toByteArray(Charsets.UTF_8))
+            }
+            File(proc, "602/cmdline").apply {
+                parentFile.mkdirs()
+                writeBytes("/app/runtime/other\u0000".toByteArray(Charsets.UTF_8))
+            }
+
+            val pid = ProcessTreeTerminator.findNewDirectChildPid(
+                parentPid = 500,
+                executable = File("/app/runtime/proot"),
+                existingPids = setOf(600),
+                procDirectory = proc
+            )
+
+            assertEquals(601, pid)
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
     fun capturesOnlyTheRootProcessesChildrenAndGrandchildren() {
         val proc = Files.createTempDirectory("ramenwine-proc-tree").toFile()
         try {
