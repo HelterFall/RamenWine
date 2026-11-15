@@ -345,21 +345,17 @@ class ProotWineCommandBuilderTest {
                 updateExistingPrefix = true
             )
             assertEquals("-u", command.arguments.last())
-            assertEquals("2", command.guestEnvironment["BOX64_LOG"])
+            assertEquals("1", command.guestEnvironment["BOX64_LOG"])
             assertEquals("1", command.guestEnvironment["BOX64_DLSYM_ERROR"])
-            assertEquals(
-                "err+all,+virtual,+mem_areas,+module",
-                command.guestEnvironment["WINEDEBUG"]
-            )
+            assertEquals("err+all", command.guestEnvironment["WINEDEBUG"])
 
             // Check the serialized /usr/bin/env arguments PRoot actually executes,
             // not just the guestEnvironment map returned for diagnostics.
-            assertTrue(command.arguments.contains("BOX64_LOG=2"))
+            assertTrue(command.arguments.contains("BOX64_LOG=1"))
             assertTrue(command.arguments.contains("BOX64_DLSYM_ERROR=1"))
-            assertTrue(
-                command.arguments.contains("WINEDEBUG=err+all,+virtual,+mem_areas,+module")
-            )
-            assertFalse(command.arguments.contains("BOX64_LOG=1"))
+            assertTrue(command.arguments.contains("WINEDEBUG=err+all"))
+            assertFalse(command.arguments.contains("BOX64_LOG=2"))
+            assertFalse(command.arguments.contains("WINEDEBUG=err+all,+virtual,+mem_areas,+module"))
             assertEquals(1, command.arguments.count { it.startsWith("BOX64_LOG=") })
             assertEquals(1, command.arguments.count { it.startsWith("BOX64_DLSYM_ERROR=") })
             assertEquals(1, command.arguments.count { it.startsWith("WINEDEBUG=") })

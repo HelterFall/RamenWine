@@ -429,11 +429,10 @@ object ProotWineCommandBuilder {
             if (updateExistingPrefix) "-u" else "-i"
         )
         val diagnosticEnvironment = gameCommand.guestEnvironment.toMutableMap().apply {
-            // wineboot is the first failing stage. Capture Box64 loader decisions and
-            // Wine's virtual-memory bookkeeping here, without flooding game sessions.
-            this["BOX64_LOG"] = "2"
+            // Keep Wine errors and Box64 loader diagnostics without per-call tracing.
+            this["BOX64_LOG"] = "1"
             this["BOX64_DLSYM_ERROR"] = "1"
-            this["WINEDEBUG"] = "err+all,+virtual,+mem_areas,+module"
+            this["WINEDEBUG"] = "err+all"
         }
 
         // The PRoot argument vector contains a serialized copy of guestEnvironment
