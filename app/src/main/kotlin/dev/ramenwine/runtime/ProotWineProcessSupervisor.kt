@@ -1,6 +1,7 @@
 package dev.ramenwine.runtime
 
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
@@ -12,6 +13,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +23,11 @@ import kotlinx.coroutines.sync.withLock
 
 private const val OUTPUT_DRAIN_MILLIS = 500L
 private const val OUTPUT_CLOSE_WAIT_MILLIS = 250L
+private const val OUTPUT_BATCH_INTERVAL_MILLIS = 150L
+private const val OUTPUT_BATCH_MAX_LINES = 128
+private const val OUTPUT_CHANNEL_CAPACITY = 1_024
+private const val SETUP_HEARTBEAT_INTERVAL_MILLIS = 2_000L
+private const val GAME_HEARTBEAT_INTERVAL_MILLIS = 5_000L
 private const val SETUP_COMMAND_TIMEOUT_MILLIS = 5 * 60 * 1000L
 private const val SETUP_COMMAND_STOP_WAIT_MILLIS = 1_500L
 private const val SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS = 1_500L
@@ -30,9 +37,76 @@ private const val PROCESS_TREE_SCAN_INTERVAL_MILLIS = 250L
 private val PROCESS_LAUNCH_LOCK = Any()
 
 /**
+ * Drain the child's pipe on IO and forward bounded batches to the callback dispatcher.
+ * Lifecycle markers flush immediately; high-volume loader output is coalesced.
+ */
+private fun CoroutineScope.launchBatchedOutputReader(
+    input: InputStream,
+    callbackDispatcher: CoroutineDispatcher,
+    onOutput: (String) -> Unit
+): Job = launch(Dispatchers.IO) {
+    val channel = Channel<String>(capacity = OUTPUT_CHANNEL_CAPACITY)
+    val readerJob = launch(Dispatchers.IO) {
+        try {
+            input.bufferedReader().use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    channel.send(line)
+                }
+            }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // The child may close its pipe during shutdown.
+        } finally {
+            channel.close()
+        }
+    }
+
+    val batch = ArrayList<String>(OUTPUT_BATCH_MAX_LINES)
+    suspend fun flushBatch() {
+        if (batch.isEmpty()) return
+        val payload = batch.joinToString("\n")
+        batch.clear()
+        try {
+            withContext(callbackDispatcher) { onOutput(payload) }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // A UI/log consumer failure must never stop draining the child pipe.
+        }
+    }
+
+    try {
+        while (true) {
+            val received = withTimeoutOrNull(OUTPUT_BATCH_INTERVAL_MILLIS) {
+                channel.receiveCatching()
+            }
+            if (received == null) {
+                flushBatch()
+                continue
+            }
+            if (received.isClosed) {
+                flushBatch()
+                break
+            }
+            val line = received.getOrNull() ?: continue
+            batch += line
+            if (batch.size >= OUTPUT_BATCH_MAX_LINES || line.startsWith("RamenWine:")) {
+                flushBatch()
+            }
+        }
+    } finally {
+        channel.cancel()
+        readerJob.cancelAndJoin()
+    }
+}
+
+/**
  * Starts a previously validated PRoot command without a shell.
  *
- * Output is merged (stdout + stderr) and delivered on the main dispatcher.
+ * Output is merged (stdout + stderr), coalesced off-thread and delivered to the
+ * callback dispatcher in bounded batches. Lifecycle markers flush immediately.
  * This is a process boundary only; an Android display backend must already be
  * running and its Wayland socket must be supplied to ProotWineCommandBuilder.
  */
@@ -52,37 +126,37 @@ class ProotWineProcessSupervisor(
         // One-shot Wine commands use the guest run-wine-command.sh wrapper.
         // It asks wineserver to stop and waits for its lock to be released,
         // allowing registry hives to flush before PRoot itself exits.
-        val process = synchronized(PROCESS_LAUNCH_LOCK) { createProcess(command) }
+        val appPid = ProcessTreeTerminator.currentProcessPid()
+        val (process, prootPid) = synchronized(PROCESS_LAUNCH_LOCK) {
+            val existingChildren = appPid?.let { ProcessTreeTerminator.directChildPids(it) }.orEmpty()
+            val startedProcess = createProcess(command)
+            val childPid = if (startedProcess.isAlive && appPid != null) {
+                ProcessTreeTerminator.findNewDirectChildPid(
+                    parentPid = appPid,
+                    executable = command.prootExecutable,
+                    existingPids = existingChildren
+                )
+            } else {
+                null
+            }
+            startedProcess to childPid
+        }
+        val processTree = prootPid?.let(::ProcessTreeTerminator)
+        processTree?.captureDescendants()
         val startedAtNanos = System.nanoTime()
-        val appPid = ProcessTreeTerminator.currentProcessPid()?.toString() ?: "unknown"
         suspend fun emitDiagnostic(message: String) {
             withContext(callbackDispatcher) { onOutput(message) }
         }
-        val outputJob = launch {
-            try {
-                process.inputStream.bufferedReader().use { reader ->
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        try {
-                            withContext(callbackDispatcher) {
-                                onOutput(line)
-                            }
-                        } catch (error: kotlinx.coroutines.CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            // A UI/log consumer failure must not stop pipe draining
-                            // and block Wine/PRoot on a full output pipe.
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // The setup process can close its stream during shutdown.
-            }
-        }
+        val outputJob = launchBatchedOutputReader(
+            input = process.inputStream,
+            callbackDispatcher = callbackDispatcher,
+            onOutput = onOutput
+        )
 
         try {
             emitDiagnostic(
-                "RamenWine: setup PRoot started pid=${appPid} guest=${command.guestExecutablePath} " +
+                "RamenWine: setup PRoot started app_pid=${appPid ?: "unknown"} " +
+                    "proot_pid=${prootPid ?: "unavailable"} guest=${command.guestExecutablePath} " +
                     "prefix=${command.guestEnvironment["WINEPREFIX"].orEmpty()}"
             )
             emitDiagnostic(
@@ -91,11 +165,34 @@ class ProotWineProcessSupervisor(
                     "WINEDEBUG=${command.guestEnvironment["WINEDEBUG"].orEmpty()} " +
                     "BOX64_LD_LIBRARY_PATH=${command.guestEnvironment["BOX64_LD_LIBRARY_PATH"].orEmpty()}"
             )
-            val completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+            var completed = false
+            while (!completed) {
+                val elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)
+                val remainingMillis = timeoutMillis - elapsedMillis
+                if (remainingMillis <= 0L) break
+                completed = process.waitFor(
+                    minOf(SETUP_HEARTBEAT_INTERVAL_MILLIS, remainingMillis),
+                    TimeUnit.MILLISECONDS
+                )
+                if (!completed && process.isAlive) {
+                    val tree = processTree?.diagnosticSnapshot() ?: "<PRoot PID unavailable>"
+                    emitDiagnostic(
+                        "RamenWine: setup heartbeat guest=${command.guestExecutablePath} " +
+                            "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)} " +
+                            "app_pid=${appPid ?: "unknown"} proot_pid=${prootPid ?: "unavailable"} " +
+                            "proot_alive=${process.isAlive} process_tree=$tree " +
+                            "prefix_files=${prefixDiagnosticSnapshot(command.hostPrefixDirectory)} " +
+                            "memory=${hostMemoryDiagnosticSnapshot()}"
+                    )
+                }
+            }
             if (!completed) {
+                val tree = processTree?.diagnosticSnapshot() ?: "<PRoot PID unavailable>"
                 emitDiagnostic(
-                    "RamenWine: setup timeout pid=${appPid} alive=${process.isAlive} " +
-                        "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
+                    "RamenWine: setup timeout proot_pid=${prootPid ?: "unavailable"} " +
+                        "alive=${process.isAlive} " +
+                        "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)} " +
+                        "process_tree=$tree prefix_files=${prefixDiagnosticSnapshot(command.hostPrefixDirectory)}"
                 )
                 process.destroy()
                 if (!process.waitFor(SETUP_COMMAND_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
@@ -110,9 +207,13 @@ class ProotWineProcessSupervisor(
 
             val exitCode = process.exitValue()
             emitDiagnostic(
-                "RamenWine: setup PRoot exit pid=${appPid} code=$exitCode " +
+                "RamenWine: setup PRoot exit app_pid=${appPid ?: "unknown"} " +
+                    "proot_pid=${prootPid ?: "unavailable"} code=$exitCode " +
                     "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
             )
+            processTree?.let { tree ->
+                emitDiagnostic("RamenWine: setup process tree at exit: ${tree.diagnosticSnapshot()}")
+            }
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
                 outputJob.join()
                 true
@@ -129,10 +230,45 @@ class ProotWineProcessSupervisor(
                 process.destroyForcibly()
                 runCatching { process.waitFor(SETUP_COMMAND_FORCE_STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS) }
             }
+            // wineboot/wineserver can leave descendants behind when PRoot is
+            // terminated by a timeout. Clean only processes observed beneath this
+            // exact PRoot PID, with PID start-time checks guarding against reuse.
+            processTree?.let { tree ->
+                runCatching { tree.terminateRemaining() }
+                runCatching {
+                    emitDiagnostic(
+                        "RamenWine: setup process tree after cleanup: ${tree.diagnosticSnapshot()}"
+                    )
+                }
+            }
             runCatching { process.inputStream.close() }
             outputJob.cancel()
             throw error
         }
+    }
+
+    private fun prefixDiagnosticSnapshot(prefix: File): String {
+        val registry = listOf("system.reg", "user.reg", "userdef.reg").joinToString(",") { name ->
+            val file = File(prefix, name)
+            "$name=${file.isFile && file.length() > 0L}:${file.length()}"
+        }
+        val entries = prefix.list()?.size?.toString() ?: "unreadable"
+        val marker = File(prefix, ".ramenwine-prefix")
+        return "entries=$entries,marker=${marker.isFile},registry=[$registry]"
+    }
+
+    private fun hostMemoryDiagnosticSnapshot(): String {
+        val available = runCatching {
+            File("/proc/meminfo").useLines { lines ->
+                lines.firstOrNull { it.startsWith("MemAvailable:") }?.substringAfter(':')?.trim()
+            }
+        }.getOrNull() ?: "unavailable"
+        val appRss = runCatching {
+            File("/proc/self/status").useLines { lines ->
+                lines.firstOrNull { it.startsWith("VmRSS:") }?.substringAfter(':')?.trim()
+            }
+        }.getOrNull() ?: "unavailable"
+        return "MemAvailable=$available,app_VmRSS=$appRss"
     }
 
     private fun createProcess(command: ProotWineCommand): Process {
@@ -171,7 +307,7 @@ class ProotWineProcessSupervisor(
         val parentPid = ProcessTreeTerminator.currentProcessPid()
             ?: throw IOException("Could not read the app PID from /proc/self/status.")
         val appPid = parentPid.toString()
-        val (process, processTree) = synchronized(PROCESS_LAUNCH_LOCK) {
+        val (process, prootPid) = synchronized(PROCESS_LAUNCH_LOCK) {
             val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
             val startedProcess = createProcess(command)
             val rootPid = if (startedProcess.isAlive) {
@@ -183,12 +319,14 @@ class ProotWineProcessSupervisor(
             } else {
                 null
             }
-            startedProcess to rootPid?.let { ProcessTreeTerminator(it) }
+            startedProcess to rootPid
         }
+        val processTree = prootPid?.let(::ProcessTreeTerminator)
         runCatching {
             withContext(callbackDispatcher) {
                 onOutput(
-                    "RamenWine: game PRoot started pid=${appPid} " +
+                    "RamenWine: game PRoot started app_pid=${appPid} " +
+                        "proot_pid=${prootPid ?: "unavailable"} " +
                         "guest=${command.guestExecutablePath} " +
                         "wayland=${command.guestEnvironment["WAYLAND_DISPLAY"].orEmpty()} " +
                         "runtime=${command.runtimeVersion}"
@@ -224,36 +362,52 @@ class ProotWineProcessSession internal constructor(
     private val processTreeMonitor: Job
 
     init {
-        outputJob = scope.launch {
-            try {
-                process.inputStream.bufferedReader().use { reader ->
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        try {
-                            withContext(callbackDispatcher) {
-                                onOutput(line)
-                            }
-                        } catch (error: kotlinx.coroutines.CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            // Keep draining even if a UI/log callback fails.
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // The process may close its stream while the session is stopping.
-            }
-        }
+        outputJob = scope.launchBatchedOutputReader(
+            input = process.inputStream,
+            callbackDispatcher = callbackDispatcher,
+            onOutput = onOutput
+        )
 
         // Capture the process tree while PRoot is alive. Some Wine/game children
         // may outlive a failed or interrupted PRoot shutdown and become reparented.
         processTree?.captureDescendants()
         processTreeMonitor = scope.launch {
+            var nextHeartbeatAtNanos = System.nanoTime() +
+                TimeUnit.MILLISECONDS.toNanos(GAME_HEARTBEAT_INTERVAL_MILLIS)
+            val startedAtNanos = System.nanoTime()
             while (process.isAlive) {
                 processTree?.captureDescendants()
+                val now = System.nanoTime()
+                if (processTree != null && now >= nextHeartbeatAtNanos) {
+                    val elapsedMillis = TimeUnit.NANOSECONDS.toMillis(now - startedAtNanos)
+                    val tree = processTree.diagnosticSnapshot()
+                    try {
+                        withContext(callbackDispatcher) {
+                            onOutput(
+                                "RamenWine: game heartbeat elapsed_ms=$elapsedMillis " +
+                                    "process_alive=${process.isAlive} process_tree=$tree"
+                            )
+                        }
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // A diagnostic callback failure must not stop process monitoring.
+                    }
+                    nextHeartbeatAtNanos = now +
+                        TimeUnit.MILLISECONDS.toNanos(GAME_HEARTBEAT_INTERVAL_MILLIS)
+                }
                 delay(PROCESS_TREE_SCAN_INTERVAL_MILLIS)
             }
             processTree?.captureDescendants()
+            processTree?.let { tree ->
+                try {
+                    withContext(callbackDispatcher) {
+                        onOutput("RamenWine: process tree at exit: ${tree.diagnosticSnapshot()}")
+                    }
+                } catch (_: Exception) {
+                    // Exit reporting must not mask the process exit callback.
+                }
+            }
         }
 
         // Exactly one coroutine observes process termination. Manual stop waits

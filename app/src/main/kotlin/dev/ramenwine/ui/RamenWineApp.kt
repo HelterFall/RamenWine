@@ -392,6 +392,10 @@ fun RamenWineApp() {
         gameLaunchError = null
         gameLaunchOutput = emptyList()
         diagnosticLogStore.record(
+            "UI: launch_mode=" + if (launchDiagnosticWindow) "wine-smoke-test" else "game" +
+                " selected_exe=${game.executableRelativePath} architecture=${game.architecture}"
+        )
+        diagnosticLogStore.record(
             "UI: launching " + if (launchDiagnosticWindow) "bundled Win32 GDI smoke test." else "selected Win32 executable."
         )
         gameLaunchNotice = if (launchDiagnosticWindow) "Проверяю запуск Win32-окна…" else "Запускаю игру…"
@@ -400,46 +404,55 @@ fun RamenWineApp() {
                 val launched = gameSessionCoordinator.launchGame(
                     game = game,
                     launchDiagnosticWindow = launchDiagnosticWindow,
-                    onOutput = { line ->
-                        diagnosticLogStore.record("PROCESS: $line")
-                        val stageNotice = when {
-                            line.contains("stage=audio-relay status=starting") ->
-                                "Запускаю аудиомост Android…"
-                            line.contains("stage=audio-relay status=ready") ->
-                                "Аудиомост готов. Подготавливаю Wine…"
-                            line.contains("stage=command-build status=starting") ->
-                                "Собираю команду запуска Wine…"
-                            line.contains("stage=prefix-probe status=starting") ->
-                                "Проверяю доступ Wine к каталогу prefix…"
-                            line.contains("stage=prefix-check status=starting") ||
-                                line.contains("RamenWine: wineboot ") ->
-                                "Проверяю Wine prefix. Первый запуск может занять несколько минут…"
-                            line.contains("stage=prefix-check status=complete") ->
-                                "Wine prefix готов. Настраиваю звук…"
-                            line.contains("stage=audio-driver status=starting") ->
-                                "Настраиваю DirectAudio в Wine…"
-                            line.contains("stage=audio-driver status=complete") ->
-                                if (launchDiagnosticWindow) {
-                                    "Запускаю тестовое Win32-окно…"
-                                } else {
+                    onOutput = { batch ->
+                        val outputLines = batch.lineSequence().toList()
+                        diagnosticLogStore.recordBatch(outputLines.map { "PROCESS: $it" })
+                        outputLines.forEach { line ->
+                            val stageNotice = when {
+                                line.contains("stage=audio-relay status=starting") ->
+                                    "Запускаю аудиомост Android…"
+                                line.contains("stage=audio-relay status=ready") ->
+                                    "Аудиомост готов. Подготавливаю Wine…"
+                                line.contains("stage=command-build status=starting") ->
+                                    "Собираю команду запуска Wine…"
+                                line.contains("stage=prefix-probe status=starting") ->
+                                    "Проверяю доступ Wine к каталогу prefix…"
+                                line.contains("stage=prefix-check status=starting") ||
+                                    line.contains("RamenWine: wineboot ") ->
+                                    "Проверяю Wine prefix. Первый запуск может занять несколько минут…"
+                                line.contains("stage=prefix-check status=complete") ->
+                                    "Wine prefix готов. Настраиваю звук…"
+                                line.contains("stage=audio-driver status=starting") ->
+                                    "Настраиваю DirectAudio в Wine…"
+                                line.contains("stage=audio-driver status=complete") ->
+                                    if (launchDiagnosticWindow) {
+                                        "Запускаю тестовое Win32-окно…"
+                                    } else {
+                                        "Запускаю выбранный Windows EXE…"
+                                    }
+                                line.contains("stage=win32-smoke status=launching") ->
+                                    "Запускаю встроенный Win32 GDI-тест…"
+                                line.contains("stage=selected-exe status=launching") ->
                                     "Запускаю выбранный Windows EXE…"
-                                }
-                            line.contains("stage=win32-smoke status=launching") ->
-                                "Запускаю встроенный Win32 GDI-тест…"
-                            line.contains("stage=selected-exe status=launching") ->
-                                "Запускаю выбранный Windows EXE…"
-                            line.contains("game PRoot started") ->
-                                if (launchDiagnosticWindow) {
-                                    "Win32 GDI-тест запущен. Ожидаю появления окна Windows…"
-                                } else {
-                                    "Windows EXE запущен через Wine. Ожидаю его окно…"
-                                }
-                            line.contains("setup timeout") ->
-                                "Подготовка Wine превысила лимит времени. Остановка процесса…"
-                            else -> null
+                                line.contains("game PRoot started") ->
+                                    if (launchDiagnosticWindow) {
+                                        "Win32 GDI-тест запущен. Ожидаю появления окна Windows…"
+                                    } else {
+                                        "Windows EXE запущен через Wine. Ожидаю его окно…"
+                                    }
+                                line.contains("setup heartbeat") || line.contains("game heartbeat") ->
+                                    if (launchDiagnosticWindow) {
+                                        "Wine работает; проверяю состояние тестового окна…"
+                                    } else {
+                                        "Windows-процесс работает; ожидаю его изображение…"
+                                    }
+                                line.contains("setup timeout") ->
+                                    "Подготовка Wine превысила лимит времени. Остановка процесса…"
+                                else -> null
+                            }
+                            if (stageNotice != null) gameLaunchNotice = stageNotice
                         }
-                        if (stageNotice != null) gameLaunchNotice = stageNotice
-                        gameLaunchOutput = (gameLaunchOutput + line.take(500)).takeLast(120)
+                        gameLaunchOutput = (gameLaunchOutput + outputLines.map { it.take(500) }).takeLast(120)
                     },
                     onExit = { exitCode ->
                         diagnosticLogStore.record("PROCESS EXIT: $exitCode")
@@ -460,9 +473,38 @@ fun RamenWineApp() {
                 if (launched.isRunning) {
                     activeGameSession = launched
                     gameLaunchNotice = if (launched.isDiagnostic) {
-                        "Win32 smoke-test запущен. Проверь появление отдельного окна."
+                        "Win32 smoke-test запущен. Проверяю первый кадр окна…"
                     } else {
-                        null
+                        "Windows-процесс запущен. Проверяю вывод на экран…"
+                    }
+                    val surfaceView = activeSurfaceView
+                    if (surfaceView == null) {
+                        diagnosticLogStore.record(
+                            "UI: ${if (launched.isDiagnostic) "Win32 GDI" else "selected EXE"} " +
+                                "first-frame observation unavailable; SurfaceView reference is missing."
+                        )
+                    } else {
+                        // PixelCopy observation runs independently so the UI is not
+                        // held in the preparing state while a game is already running.
+                        scope.launch {
+                            val frame = surfaceView.observeNonBlackOutput()
+                            val target = if (launched.isDiagnostic) "Win32 GDI" else "selected EXE"
+                            diagnosticLogStore.record(
+                                "UI: $target first-frame visible=${frame.visible}: ${frame.detail}"
+                            )
+                            if (activeGameSession === launched) {
+                                gameLaunchNotice = when {
+                                    frame.visible && launched.isDiagnostic ->
+                                        "Wine показал тестовое Windows-окно на экране."
+                                    frame.visible ->
+                                        "Windows-приложение вывело изображение на экран."
+                                    launched.isDiagnostic ->
+                                        "Процесс Wine работает, но кадр тестового окна не подтверждён. Сохрани диагностику."
+                                    else ->
+                                        "Windows-процесс работает, но вывод на экран не подтверждён. Сохрани диагностику."
+                                }
+                            }
+                        }
                     }
                 } else {
                     activeGameSession = null

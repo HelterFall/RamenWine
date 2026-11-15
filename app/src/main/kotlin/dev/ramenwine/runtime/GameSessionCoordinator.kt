@@ -3,6 +3,7 @@ package dev.ramenwine.runtime
 import android.content.Context
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import java.io.File
 import java.io.IOException
 import dev.ramenwine.display.DisplayBackend
@@ -84,7 +85,14 @@ class GameSessionCoordinator(
         }
 
         launchInProgress = true
+        val launchStartedAt = SystemClock.elapsedRealtime()
+        var stageStartedAt = launchStartedAt
         try {
+            onOutput(
+                "RamenWine: stage=launch status=starting mode=" +
+                    (if (launchDiagnosticWindow) "wine-smoke-test" else "game") +
+                    " game_arch=${game.architecture} runtime_locale=${game.locale}"
+            )
             onOutput("RamenWine: stage=audio-relay status=starting")
             val relay = withContext(Dispatchers.IO) {
                 DirectAudioRelaySupervisor(File(appContext.applicationInfo.nativeLibraryDir)).start(
@@ -92,8 +100,12 @@ class GameSessionCoordinator(
                 )
             }
             audioRelaySession = relay
-            onOutput("RamenWine: stage=audio-relay status=ready")
+            onOutput(
+                "RamenWine: stage=audio-relay status=ready " +
+                    "elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
+            )
             audioRelayDisplay = display
+            stageStartedAt = SystemClock.elapsedRealtime()
 
             val request = ProotWineLaunchRequest(
                 filesDirectory = appContext.filesDir,
@@ -110,8 +122,10 @@ class GameSessionCoordinator(
             }
             onOutput(
                 "RamenWine: stage=command-build status=complete guest-exe=" +
-                    command.guestExecutablePath
+                    command.guestExecutablePath +
+                    " elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
             )
+            stageStartedAt = SystemClock.elapsedRealtime()
 
             val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
             onOutput("RamenWine: stage=prefix-probe status=starting")
@@ -135,17 +149,25 @@ class GameSessionCoordinator(
                     )
                 }
                 onOutput("RamenWine: WINEPREFIX bind is visible and writable from the guest.")
-                onOutput("RamenWine: stage=prefix-probe status=complete exit_code=$probeExitCode")
+                onOutput(
+                    "RamenWine: stage=prefix-probe status=complete exit_code=$probeExitCode " +
+                        "elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
+                )
             } finally {
                 prefixProbeFile.delete()
             }
 
+            stageStartedAt = SystemClock.elapsedRealtime()
             onOutput("RamenWine: stage=prefix-check status=starting")
             val winebootRan = WinePrefixManager(processSupervisor).ensureInitialized(
                 gameCommand = command,
                 onOutput = onOutput
             )
-            onOutput("RamenWine: stage=prefix-check status=complete wineboot_ran=$winebootRan")
+            onOutput(
+                "RamenWine: stage=prefix-check status=complete wineboot_ran=$winebootRan " +
+                    "elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
+            )
+            stageStartedAt = SystemClock.elapsedRealtime()
 
             onOutput("RamenWine: stage=audio-driver status=starting")
             val audioDriverExitCode = processSupervisor.runToCompletion(
@@ -160,7 +182,10 @@ class GameSessionCoordinator(
                 )
             }
 
-            onOutput("RamenWine: stage=audio-driver status=complete exit_code=$audioDriverExitCode")
+            onOutput(
+                "RamenWine: stage=audio-driver status=complete exit_code=$audioDriverExitCode " +
+                    "elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
+            )
             val processCommand = if (launchDiagnosticWindow) {
                 withContext(Dispatchers.IO) {
                     ProotWineCommandBuilder.buildWin32GdiSmokeCommand(command)
@@ -238,6 +263,7 @@ class GameSessionCoordinator(
             runCatching {
                 onOutput(
                     "RamenWine: stage=launch-preparation status=failed " +
+                        "elapsed_ms=${SystemClock.elapsedRealtime() - launchStartedAt} " +
                         "error=${error.javaClass.simpleName}: ${error.message.orEmpty()}"
                 )
             }

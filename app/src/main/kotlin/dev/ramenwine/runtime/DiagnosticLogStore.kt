@@ -4,18 +4,21 @@ import android.content.Context
 import android.os.Build
 import android.os.Process
 import android.os.StatFs
+import android.os.SystemClock
 import android.util.Log
 import android.system.Os
 import android.system.OsConstants
 import dev.ramenwine.library.ImportedGame
 import java.io.File
 import java.io.PrintWriter
+import java.io.RandomAccessFile
 import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.Properties
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -36,6 +39,8 @@ class DiagnosticLogStore(private val context: Context) {
     }
     private var game: ImportedGame? = null
     private var sessionStartedAt: Long = System.currentTimeMillis()
+    private var sessionStartedElapsedRealtime: Long = 0L
+    private var sessionId: String = "not-started"
     private var truncatedLines = 0
 
     fun beginSession(selectedGame: ImportedGame?) {
@@ -44,7 +49,10 @@ class DiagnosticLogStore(private val context: Context) {
             truncatedLines = 0
             game = selectedGame
             sessionStartedAt = System.currentTimeMillis()
+            sessionStartedElapsedRealtime = SystemClock.elapsedRealtime()
+            sessionId = UUID.randomUUID().toString()
             lines += "=== RamenWine launch diagnostic ==="
+            lines += "Session ID: $sessionId"
             lines += "Started: ${timestamp(sessionStartedAt)}"
             lines += "Selected game: ${selectedGame?.title ?: "<not selected>"}"
             selectedGame?.let {
@@ -67,29 +75,47 @@ class DiagnosticLogStore(private val context: Context) {
         Log.i(DIAGNOSTIC_LOG_TAG, "DIAGNOSTIC_SESSION_START ${timestamp(sessionStartedAt)}")
     }
 
-    fun record(message: String) {
-        val safeMessage = message
-            .replace("\u0000", "")
-            .take(MAX_LINE_LENGTH)
+    fun record(message: String) = recordBatch(listOf(message))
+
+    /**
+     * Persists and mirrors a group of process-output lines with one IO write.
+     * This avoids queuing a disk task for every bursty Box64/Wine log line.
+     */
+    fun recordBatch(messages: List<String>) {
+        val safeMessages = messages.map { message ->
+            message.replace("\u0000", "").take(MAX_LINE_LENGTH)
+        }.filter { it.isNotEmpty() }
+        if (safeMessages.isEmpty()) return
+
+        val nowWallClock = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val persistedLines = safeMessages.map { message ->
+            val elapsed = if (sessionStartedElapsedRealtime > 0L) {
+                (nowElapsed - sessionStartedElapsedRealtime).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            "${timestamp(nowWallClock)} +${elapsed}ms  $message"
+        }
         synchronized(lock) {
-            val persistedLine = "${timestamp(System.currentTimeMillis())}  $safeMessage"
-            lines += persistedLine
+            lines.addAll(persistedLines)
             trimIfNeeded()
+            val persistedBatch = persistedLines.joinToString(separator = "\n", postfix = "\n")
             persistenceExecutor.execute {
                 runCatching {
                     persistedLaunchLog.parentFile?.mkdirs()
-                    persistedLaunchLog.appendText(persistedLine + "\n", Charsets.UTF_8)
+                    persistedLaunchLog.appendText(persistedBatch, Charsets.UTF_8)
                 }.onFailure { error ->
-                    Log.e(DIAGNOSTIC_LOG_TAG, "Could not append persistent launch log.", error)
+                    Log.e(DIAGNOSTIC_LOG_TAG, "Could not append persistent launch log batch.", error)
                 }
+                safeMessages.joinToString("\n")
+                    .chunked(LOGCAT_MESSAGE_CHUNK)
+                    .forEachIndexed { index, chunk ->
+                        Log.i(DIAGNOSTIC_LOG_TAG, "[$index] $chunk")
+                    }
             }
         }
-        // Mirror launch output into the app-UID logcat buffer. If Android kills
-        // or restarts RamenWine while the game screen is frozen, the next report
-        // can still recover Wine/Box64 output from the previous process.
-        safeMessage.chunked(LOGCAT_MESSAGE_CHUNK).forEachIndexed { index, chunk ->
-            Log.i(DIAGNOSTIC_LOG_TAG, "[$index] $chunk")
-        }
+
     }
 
     fun recordException(stage: String, error: Throwable) {
@@ -110,15 +136,27 @@ class DiagnosticLogStore(private val context: Context) {
     fun buildReport(): String {
         val reportCollectionStartedAt = System.currentTimeMillis()
         val snapshot = synchronized(lock) {
-            lines.toList() to truncatedLines
+            Triple(lines.toList(), truncatedLines, sessionId to sessionStartedElapsedRealtime)
         }
         val persistedOutput = runCatching {
             persistenceExecutor.submit(Runnable {}).get(LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             if (persistedLaunchLog.isFile) persistedLaunchLog.readText(Charsets.UTF_8) else ""
         }.getOrNull()
+        val launchOutputLines = if (persistedOutput.isNullOrBlank()) {
+            snapshot.first
+        } else {
+            persistedOutput.lineSequence().toList()
+        }
         return buildString {
             appendLine("RAMENWINE DIAGNOSTICS")
             appendLine("Collection started: ${timestamp(reportCollectionStartedAt)}")
+            appendLine("Session ID: ${snapshot.third.first}")
+            val reportElapsedMillis = if (snapshot.third.second > 0L) {
+                (SystemClock.elapsedRealtime() - snapshot.third.second).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            appendLine("Session elapsed at report: ${reportElapsedMillis} ms")
             appendLine("This file contains app/runtime diagnostics and the latest launch log.")
             appendLine("It does not include game file contents or logs from other apps.")
             appendLine()
@@ -126,6 +164,8 @@ class DiagnosticLogStore(private val context: Context) {
             appendHostResourceSection()
             appendStorageSection()
             appendRuntimeSection()
+            appendLaunchStageSummary(launchOutputLines)
+            appendDirectAudioLogSection()
             appendLine()
             appendLine("=== LAUNCH OUTPUT ===")
             if (persistedOutput.isNullOrBlank()) {
@@ -144,7 +184,7 @@ class DiagnosticLogStore(private val context: Context) {
             val logcatOutput = readOwnLogcat()
             appendLine("Logcat snapshot captured: ${timestamp(System.currentTimeMillis())}")
             appendLogcatSection(logcatOutput)
-            appendFindings(snapshot.first + logcatOutput.lineSequence())
+            appendFindings(snapshot.first + launchOutputLines + logcatOutput.lineSequence())
             appendLine("Report build completed: ${timestamp(System.currentTimeMillis())}")
         }
     }
@@ -359,6 +399,49 @@ class DiagnosticLogStore(private val context: Context) {
         }
     }
 
+    private fun StringBuilder.appendLaunchStageSummary(launchOutput: List<String>) {
+        appendLine("=== LAUNCH STAGE SUMMARY ===")
+        val events = launchOutput.filter { line ->
+            line.contains("RamenWine: stage=") ||
+                line.contains("UI: launch_mode=") ||
+                line.contains("first-frame visible=")
+        }.takeLast(MAX_LAUNCH_STAGE_EVENTS)
+        if (events.isEmpty()) {
+            appendLine("No structured launch-stage events were recorded.")
+        } else {
+            events.forEach(::appendLine)
+        }
+        appendLine()
+    }
+
+    private fun StringBuilder.appendDirectAudioLogSection() {
+        appendLine("=== DIRECTAUDIO RELAY OUTPUT ===")
+        val logFile = File(context.cacheDir, "wawona-runtime/directaudio-relay.log")
+        if (!logFile.isFile) {
+            appendLine("DirectAudio helper output file is not present.")
+            appendLine()
+            return
+        }
+        appendLine("File size: ${logFile.length()} bytes")
+        val output = runCatching {
+            RandomAccessFile(logFile, "r").use { file ->
+                val length = file.length()
+                val start = (length - MAX_DIRECTAUDIO_LOG_CHARACTERS).coerceAtLeast(0L)
+                val bytes = ByteArray((length - start).toInt())
+                file.seek(start)
+                file.readFully(bytes)
+                String(bytes, Charsets.UTF_8)
+            }
+        }.getOrElse {
+            "Could not read DirectAudio log: ${it.javaClass.simpleName}: ${it.message}"
+        }
+        appendLine(output)
+        if (logFile.length() > MAX_DIRECTAUDIO_LOG_CHARACTERS) {
+            appendLine("[Earlier DirectAudio output omitted; showing the last $MAX_DIRECTAUDIO_LOG_CHARACTERS bytes.]")
+        }
+        appendLine()
+    }
+
     private fun StringBuilder.appendLogcatSection(logcatOutput: String) {
         appendLine("=== ANDROID LOGCAT (THIS APP UID ONLY; INCLUDES PERSISTED LAUNCH OUTPUT) ===")
         appendLine(logcatOutput)
@@ -397,11 +480,45 @@ class DiagnosticLogStore(private val context: Context) {
         ) {
             appendLine("NOTE: CPU topology detection reported a sysfs issue. The runtime launch command should bind /sys/devices/system/cpu into the guest.")
         }
+        if (combined.contains("RamenWine: setup heartbeat", ignoreCase = true)) {
+            appendLine("INFO: A Wine setup heartbeat was captured. Its line includes the actual PRoot PID, tracked child-process states, wait channels, RSS, prefix registry-file state and host memory.")
+        }
+        if (combined.contains("RamenWine: setup timeout", ignoreCase = true)) {
+            appendLine("HIGH: A supervised setup command exceeded its timeout. Use the final process-tree snapshot to distinguish a live wait, an exited child or a missing PRoot PID.")
+        }
+        if (
+            combined.contains("RamenWine: stage=wineboot status=starting", ignoreCase = true) &&
+            !combined.contains("RamenWine: stage=wineboot status=finished", ignoreCase = true)
+        ) {
+            appendLine("HIGH: wineboot started but no completion event was recorded before diagnostics were exported. Check the most recent setup heartbeat and process-tree state; this report alone does not prove a permanent hang.")
+        }
+        if (
+            combined.contains("RamenWine: stage=wineboot status=finished", ignoreCase = true) &&
+            !combined.contains("RamenWine: stage=prefix-registry status=verified", ignoreCase = true)
+        ) {
+            appendLine("HIGH: wineboot returned, but the app did not verify all three populated registry hives. Check the registry wait events and the final prefix inventory.")
+        }
+        if (combined.contains("UI: Win32 GDI first-frame visible=true", ignoreCase = true)) {
+            appendLine("INFO: PixelCopy observed non-black pixels after the built-in Win32 GDI smoke launch. This confirms a real frame reached the Android Surface; it does not certify a game's own rendering.")
+        }
+        if (combined.contains("UI: Win32 GDI first-frame visible=false", ignoreCase = true)) {
+            appendLine("HIGH: The built-in Win32 GDI smoke process was launched, but a non-black Android Surface frame was not confirmed within the observation window. Check process heartbeats separately: the process may still be running.")
+        }
+        if (combined.contains("UI: selected EXE first-frame visible=true", ignoreCase = true)) {
+            appendLine("INFO: PixelCopy observed non-black pixels after the selected Windows EXE launch. A frame reached the Android Surface; this alone does not prove the game is interactive or fully rendered.")
+        }
+        if (combined.contains("UI: selected EXE first-frame visible=false", ignoreCase = true)) {
+            appendLine("NOTE: The selected Windows EXE did not produce a confirmed non-black frame during the observation window. Check its process heartbeat and exit code before treating this as a crash.")
+        }
         if (!combined.contains("noexec filesystem", ignoreCase = true) &&
             !combined.contains("set_mem_area_state", ignoreCase = true) &&
-            !combined.contains("libGLX_nvidia.so", ignoreCase = true)
+            !combined.contains("libGLX_nvidia.so", ignoreCase = true) &&
+            !combined.contains("RamenWine: setup heartbeat", ignoreCase = true) &&
+            !combined.contains("RamenWine: setup timeout", ignoreCase = true) &&
+            !combined.contains("RamenWine: stage=wineboot", ignoreCase = true) &&
+            !combined.contains("UI: Win32 GDI first-frame", ignoreCase = true)
         ) {
-            appendLine("No known signature matched; use the complete process output and app logcat section.")
+            appendLine("No known signature matched; use the structured stage summary, process snapshots and complete output.")
         }
         appendLine()
     }
@@ -490,6 +607,8 @@ class DiagnosticLogStore(private val context: Context) {
         const val LOGCAT_LINE_LIMIT = 4_000
         const val MAX_LOGCAT_CHARACTERS = 650_000
         const val LOGCAT_MESSAGE_CHUNK = 3_000
+        const val MAX_DIRECTAUDIO_LOG_CHARACTERS = 100_000
+        const val MAX_LAUNCH_STAGE_EVENTS = 80
         const val DIAGNOSTIC_LOG_TAG = "RamenWineDiag"
         const val LOGCAT_TIMEOUT_SECONDS = 5L
         const val LOG_PERSISTENCE_FLUSH_TIMEOUT_SECONDS = 5L

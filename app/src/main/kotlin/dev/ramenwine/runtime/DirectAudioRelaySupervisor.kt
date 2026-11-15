@@ -50,13 +50,17 @@ internal class DirectAudioRelaySupervisor(
             throw IOException("A stale DirectAudio socket could not be removed.")
         }
 
+        val logFile = File(canonicalRuntimeDirectory, "directaudio-relay.log")
+        if (logFile.exists() && !logFile.delete()) {
+            throw IOException("A previous DirectAudio relay log could not be rotated.")
+        }
         val builder = ProcessBuilder(
             helper.absolutePath,
             "--socket",
             socket.absolutePath
         ).directory(canonicalRuntimeDirectory)
-            .redirectOutput(File("/dev/null"))
-            .redirectError(File("/dev/null"))
+            .redirectErrorStream(true)
+            .redirectOutput(logFile)
 
         // Do not allow an unrelated native loader configuration from the app
         // process to change which Android libraries the helper loads.

@@ -84,7 +84,15 @@ internal class WinePrefixManager(
             prefixHasData = prefixHasData
         )
 
-        if (recoveryAction == WinePrefixRecoveryAction.SKIP) return false
+        onOutput(
+            "RamenWine: prefix inspection action=$recoveryAction " +
+                "registry_files=$presentRegistryCount/3 marker_exists=$markerExists " +
+                "marker_matches=$markerMatches has_data=$prefixHasData"
+        )
+        if (recoveryAction == WinePrefixRecoveryAction.SKIP) {
+            onOutput("RamenWine: prefix status=ready source=validated-marker registry_files=3/3")
+            return false
+        }
 
         // Existing registry hives do not prove wineboot completed. Any prefix
         // without a matching marker is updated in place; no existing files are
@@ -94,20 +102,32 @@ internal class WinePrefixManager(
             gameCommand = gameCommand,
             updateExistingPrefix = updateExistingPrefix
         )
+        val operation = if (updateExistingPrefix) "update" else "initialize"
+        onOutput("RamenWine: stage=wineboot status=starting operation=$operation")
+        val winebootStartedAt = System.nanoTime()
         onOutput(
             "RamenWine: wineboot " +
                 (if (updateExistingPrefix) "-u" else "-i") +
                 " WINEPREFIX=" + gameCommand.guestEnvironment["WINEPREFIX"].orEmpty()
         )
         val exitCode = processSupervisor.runToCompletion(winebootCommand, onOutput)
+        val winebootElapsedMillis =
+            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - winebootStartedAt)
+        onOutput(
+            "RamenWine: stage=wineboot status=finished operation=$operation " +
+                "exit_code=$exitCode elapsed_ms=$winebootElapsedMillis"
+        )
         if (exitCode != 0) {
-            val operation = if (updateExistingPrefix) "update" else "initialization"
+            onOutput("RamenWine: stage=wineboot status=failed exit_code=$exitCode")
             throw IOException("Wine prefix $operation failed with exit code $exitCode.")
         }
 
         // The guest wrapper waits for wineserver shutdown before PRoot exits.
         // Keep a bounded poll as a final filesystem-visibility safeguard.
-        val missingRegistryFiles = awaitRegistryFiles(registryFiles)
+        val registryWaitStartedAt = System.nanoTime()
+        val missingRegistryFiles = awaitRegistryFiles(registryFiles, onOutput)
+        val registryWaitElapsedMillis =
+            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - registryWaitStartedAt)
         if (missingRegistryFiles.isNotEmpty()) {
             val entries = prefix.list()?.sorted()?.take(24)?.joinToString()
                 ?.ifBlank { "<empty>" } ?: "<unreadable>"
@@ -132,16 +152,37 @@ internal class WinePrefixManager(
             )
         }
 
-        onOutput("RamenWine: all three Wine registry files are present.")
+        onOutput(
+            "RamenWine: stage=prefix-registry status=verified registry_files=3/3 " +
+                "elapsed_ms=$registryWaitElapsedMillis"
+        )
         writeMarkerAtomically(marker, expectedMarker)
+        onOutput("RamenWine: stage=prefix-marker status=written runtime=${gameCommand.runtimeVersion}")
+        onOutput("RamenWine: prefix status=ready source=wineboot registry_files=3/3")
         return true
     }
 
-    private suspend fun awaitRegistryFiles(registryFiles: List<File>): List<File> {
-        val deadline = System.nanoTime() + REGISTRY_WAIT_TIMEOUT_NANOS
+    private suspend fun awaitRegistryFiles(
+        registryFiles: List<File>,
+        onOutput: (String) -> Unit
+    ): List<File> {
+        val startedAt = System.nanoTime()
+        val deadline = startedAt + REGISTRY_WAIT_TIMEOUT_NANOS
+        var nextProgressAt = startedAt + REGISTRY_PROGRESS_INTERVAL_NANOS
         while (System.nanoTime() < deadline) {
             val missing = registryFiles.filterNot { it.isFile && it.length() > 0L }
             if (missing.isEmpty()) return emptyList()
+            val now = System.nanoTime()
+            if (now >= nextProgressAt) {
+                val present = registryFiles.size - missing.size
+                val elapsedMillis =
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(now - startedAt)
+                onOutput(
+                    "RamenWine: prefix registry wait elapsed_ms=$elapsedMillis " +
+                        "present=${present}/3 missing=${missing.joinToString { it.name }}"
+                )
+                nextProgressAt = now + REGISTRY_PROGRESS_INTERVAL_NANOS
+            }
             delay(REGISTRY_POLL_INTERVAL_MILLIS)
         }
         return registryFiles.filterNot { it.isFile && it.length() > 0L }
@@ -177,5 +218,6 @@ internal class WinePrefixManager(
         const val REGISTRY_WAIT_TIMEOUT_MILLIS = 60_000L
         const val REGISTRY_WAIT_TIMEOUT_NANOS = REGISTRY_WAIT_TIMEOUT_MILLIS * 1_000_000L
         const val REGISTRY_POLL_INTERVAL_MILLIS = 250L
+        const val REGISTRY_PROGRESS_INTERVAL_NANOS = 5_000_000_000L
     }
 }

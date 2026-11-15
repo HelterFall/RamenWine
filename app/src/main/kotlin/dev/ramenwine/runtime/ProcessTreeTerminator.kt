@@ -86,6 +86,42 @@ internal class ProcessTreeTerminator(
 
     internal fun trackedPids(): Set<Int> = observedStartTimes.keys.toSet()
 
+    /**
+     * Bounded snapshot of this PRoot tree. Command-line arguments and unrelated
+     * device processes are deliberately excluded.
+     */
+    internal fun diagnosticSnapshot(): String {
+        captureDescendants()
+        val pids = (setOf(rootPid) + observedStartTimes.keys).sorted()
+        val entries = pids.mapNotNull { pid ->
+            val current = readProcStat(File(procDirectory, "$pid/stat")) ?: return@mapNotNull null
+            if (pid != rootPid && observedStartTimes[pid] != current.startTimeTicks) {
+                return@mapNotNull null
+            }
+            val statusFields = runCatching {
+                File(procDirectory, "$pid/status").readLines(Charsets.US_ASCII)
+                    .mapNotNull { line ->
+                        val separator = line.indexOf(':')
+                        if (separator <= 0) null else line.substring(0, separator) to
+                            line.substring(separator + 1).trim()
+                    }.toMap()
+            }.getOrDefault(emptyMap())
+            val name = (statusFields["Name"] ?: current.comm)
+                .replace(',', '_')
+                .replace(';', '_')
+                .take(64)
+            val rss = statusFields["VmRSS"]?.replace(Regex("\\s+"), " ") ?: "unavailable"
+            val threads = statusFields["Threads"] ?: "unavailable"
+            val waitChannel = runCatching {
+                File(procDirectory, "$pid/wchan").readText(Charsets.US_ASCII).trim()
+            }.getOrNull()?.takeIf { it.isNotBlank() }?.take(64) ?: "unavailable"
+            "$name(pid=$pid,ppid=${current.parentPid},state=${current.state}," +
+                "rss=$rss,threads=$threads,wchan=$waitChannel)"
+        }
+        return entries.joinToString(";").take(MAX_DIAGNOSTIC_SNAPSHOT_LENGTH)
+            .ifBlank { "<process tree unavailable>" }
+    }
+
     private fun currentSurvivors(): List<Int> {
         return observedStartTimes.mapNotNull { (pid, expectedStartTime) ->
             val current = readProcStat(File(procDirectory, "$pid/stat"))
@@ -127,6 +163,7 @@ internal class ProcessTreeTerminator(
 
     internal data class ProcStat(
         val pid: Int,
+        val comm: String,
         val state: Char,
         val parentPid: Int,
         val startTimeTicks: Long
@@ -216,6 +253,7 @@ internal class ProcessTreeTerminator(
             }
         }
 
+        private const val MAX_DIAGNOSTIC_SNAPSHOT_LENGTH = 6_000
         private const val SIGTERM = 15
         private const val SIGKILL = 9
         private const val ZOMBIE_STATE = 'Z'
@@ -237,7 +275,13 @@ internal class ProcessTreeTerminator(
             val state = fields[0].singleOrNull() ?: return null
             val parentPid = fields[1].toIntOrNull() ?: return null
             val startTimeTicks = fields[19].toLongOrNull() ?: return null
-            return ProcStat(pid, state, parentPid, startTimeTicks)
+            return ProcStat(
+                pid = pid,
+                comm = line.substring(open + 1, close),
+                state = state,
+                parentPid = parentPid,
+                startTimeTicks = startTimeTicks
+            )
         }
     }
 }

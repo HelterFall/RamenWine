@@ -192,6 +192,62 @@ class WawonaSurfaceView(
         }
     }
 
+    /**
+     * Observes the Android Surface after a Windows process starts.
+     * This is diagnostic evidence only: timeout does not terminate the process.
+     */
+    suspend fun observeNonBlackOutput(timeoutMillis: Long = 15_000L): SurfaceFrameVerification {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "Surface output observation must run on the Android main thread."
+        }
+        require(timeoutMillis > 0L) { "Observation timeout must be positive." }
+        if (!isAttachedToWindow || !holder.surface.isValid || width <= 0 || height <= 0) {
+            return SurfaceFrameVerification(
+                visible = false,
+                detail = "Android Surface is not attached or has no drawable size."
+            )
+        }
+
+        val startedAt = SystemClock.elapsedRealtime()
+        val deadline = startedAt + timeoutMillis
+        var lastCopyStatus = PixelCopy.ERROR_SOURCE_NO_DATA
+        var lastVisiblePixels = 0
+        var lastSampledPixels = 0
+        var requiredPixels = MIN_VISIBLE_PIXEL_SAMPLES
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (!isAttachedToWindow || !holder.surface.isValid) {
+                return SurfaceFrameVerification(
+                    visible = false,
+                    detail = "Android Surface was detached during Windows output observation."
+                )
+            }
+            val capture = captureSurfaceFrame()
+            lastCopyStatus = capture.copyStatus
+            lastVisiblePixels = capture.visiblePixelSamples
+            lastSampledPixels = capture.sampledPixels
+            requiredPixels = capture.requiredVisiblePixelSamples
+            if (
+                capture.copyStatus == PixelCopy.SUCCESS &&
+                capture.visiblePixelSamples >= capture.requiredVisiblePixelSamples
+            ) {
+                val elapsed = SystemClock.elapsedRealtime() - startedAt
+                return SurfaceFrameVerification(
+                    visible = true,
+                    detail = "PixelCopy observed $lastVisiblePixels non-black samples out of " +
+                        "$lastSampledPixels on the Android Surface after ${elapsed} ms."
+                )
+            }
+            delay(OUTPUT_FRAME_POLL_INTERVAL_MS)
+        }
+
+        return SurfaceFrameVerification(
+            visible = false,
+            detail = "No non-black output frame was observed within ${timeoutMillis} ms. " +
+                "PixelCopy status=$lastCopyStatus, samples=$lastVisiblePixels/$lastSampledPixels, " +
+                "threshold=$requiredPixels. The process may still be running."
+        )
+    }
+
     private suspend fun captureSurfaceFrame(): SurfaceFrameCapture =
         suspendCancellableCoroutine { continuation ->
             val captureWidth = width
@@ -522,6 +578,7 @@ class WawonaSurfaceView(
         const val IME_POLL_INTERVAL_MS = 200L
         const val IME_SHOW_RETRY_MS = 120L
         const val SMOKE_CAPTURE_INTERVAL_MS = 200L
+        const val OUTPUT_FRAME_POLL_INTERVAL_MS = 1_000L
         const val SMOKE_RESET_SETTLE_MS = 300L
         const val SMOKE_FRAME_CLEAR_TIMEOUT_MS = 3_000L
         const val SMOKE_FRAME_CLEAR_POLL_MS = 100L

@@ -106,6 +106,31 @@ class ProcessTreeTerminatorTest {
     }
 
     @Test
+    fun diagnosticSnapshotIncludesOnlyTrackedProcessesAndResourceState() {
+        val proc = Files.createTempDirectory("ramenwine-proc-diagnostics").toFile()
+        try {
+            writeStat(proc, pid = 42, comm = "proot", state = 'S', parentPid = 1, startTime = 50L, childPids = listOf(101))
+            writeStat(proc, pid = 101, comm = "wine-preloader", state = 'D', parentPid = 42, startTime = 100L)
+            writeStat(proc, pid = 103, comm = "unrelated-app", state = 'S', parentPid = 7, startTime = 300L)
+            writeStatus(proc, 42, "proot", "1024 kB", "4")
+            writeStatus(proc, 101, "wine-preloader", "4096 kB", "12")
+            writeStatus(proc, 103, "unrelated-app", "8192 kB", "2")
+            File(proc, "42/wchan").writeText("do_wait")
+            File(proc, "101/wchan").writeText("futex_wait_queue")
+
+            val snapshot = ProcessTreeTerminator(42, procDirectory = proc).diagnosticSnapshot()
+
+            assertTrue(snapshot.contains("proot(pid=42,ppid=1,state=S"))
+            assertTrue(snapshot.contains("rss=1024 kB,threads=4,wchan=do_wait"))
+            assertTrue(snapshot.contains("wine-preloader(pid=101,ppid=42,state=D"))
+            assertTrue(snapshot.contains("rss=4096 kB,threads=12,wchan=futex_wait_queue"))
+            assertTrue(!snapshot.contains("unrelated-app"))
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
     fun doesNotSignalAReusedPidAfterItsStartTimeChanges() {
         val proc = Files.createTempDirectory("ramenwine-proc-reused-pid").toFile()
         try {
@@ -155,6 +180,23 @@ class ProcessTreeTerminatorTest {
     fun rejectsMalformedProcStatLines() {
         assertNull(ProcessTreeTerminator.parseStat("not-a-proc-stat"))
         assertNull(ProcessTreeTerminator.parseStat("123 (truncated)"))
+    }
+
+    private fun writeStatus(
+        proc: File,
+        pid: Int,
+        name: String,
+        rss: String,
+        threads: String
+    ) {
+        File(proc, "$pid/status").apply {
+            parentFile.mkdirs()
+            writeText(
+                "Name:\t$name\nState:\tS (sleeping)\nPid:\t$pid\n" +
+                    "VmRSS:\t$rss\nThreads:\t$threads\n",
+                Charsets.US_ASCII
+            )
+        }
     }
 
     private fun writeStat(
