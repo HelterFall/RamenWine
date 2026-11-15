@@ -39,6 +39,8 @@ class GameLibraryStore(context: Context) {
                     ) {
                         continue
                     }
+                    val coverImageUrl = item.optString("coverImageUrl")
+                        .takeIf { it.isNotBlank() && isValidCoverImageUrl(it) }
                     add(
                         ImportedGame(
                             id = id,
@@ -51,7 +53,8 @@ class GameLibraryStore(context: Context) {
                                 .coerceAtLeast(0L),
                             locale = item.optString("locale", GameLocaleProfile.DEFAULT_LOCALE)
                                 .takeIf { GameLocaleProfile.isSupported(it) }
-                                ?: GameLocaleProfile.DEFAULT_LOCALE
+                                ?: GameLocaleProfile.DEFAULT_LOCALE,
+                            coverImageUrl = coverImageUrl
                         )
                     )
                 }
@@ -78,6 +81,7 @@ class GameLibraryStore(context: Context) {
                 val directory = item.optString("relativeDirectory")
                 val executable = item.optString("executableRelativePath")
                 val safeExecutable = SafeGamePath.normalizeRelativePath(executable)
+                val coverImageUrl = item.optString("coverImageUrl")
                 if (
                     !id.matches(ID_PATTERN) ||
                     !seenIds.add(id) ||
@@ -87,7 +91,8 @@ class GameLibraryStore(context: Context) {
                     item.optString("title").length > MAX_TITLE_LENGTH ||
                     !GameLocaleProfile.isSupported(
                         item.optString("locale", GameLocaleProfile.DEFAULT_LOCALE)
-                    )
+                    ) ||
+                    (coverImageUrl.isNotBlank() && !isValidCoverImageUrl(coverImageUrl))
                 ) {
                     return false
                 }
@@ -117,6 +122,9 @@ class GameLibraryStore(context: Context) {
         require(GameLocaleProfile.isSupported(game.locale)) {
             "Unsupported game locale profile."
         }
+        require(game.coverImageUrl == null || isValidCoverImageUrl(game.coverImageUrl)) {
+            "Invalid game cover URL."
+        }
 
         val updatedGames = list().filterNot { it.id == game.id } + game
         writeLibrary(updatedGames)
@@ -135,17 +143,17 @@ class GameLibraryStore(context: Context) {
 
         val array = JSONArray()
         games.sortedByDescending { it.importedAtEpochMillis }.forEach { item ->
-            array.put(
-                JSONObject()
-                    .put("id", item.id)
-                    .put("title", item.title)
-                    .put("relativeDirectory", item.relativeDirectory)
-                    .put("executableRelativePath", item.executableRelativePath)
-                    .put("architecture", item.architecture)
-                    .put("totalBytes", item.totalBytes)
-                    .put("importedAtEpochMillis", item.importedAtEpochMillis)
-                    .put("locale", item.locale)
-            )
+            val storedGame = JSONObject()
+                .put("id", item.id)
+                .put("title", item.title)
+                .put("relativeDirectory", item.relativeDirectory)
+                .put("executableRelativePath", item.executableRelativePath)
+                .put("architecture", item.architecture)
+                .put("totalBytes", item.totalBytes)
+                .put("importedAtEpochMillis", item.importedAtEpochMillis)
+                .put("locale", item.locale)
+            item.coverImageUrl?.let { storedGame.put("coverImageUrl", it) }
+            array.put(storedGame)
         }
 
         val temporaryFile = File(gamesRoot, "$LIBRARY_FILE_NAME.tmp")
@@ -173,6 +181,11 @@ class GameLibraryStore(context: Context) {
         private const val LIBRARY_FILE_NAME = "library.json"
         private const val SCHEMA_VERSION = 1
         private const val MAX_TITLE_LENGTH = 512
+        private const val MAX_COVER_URL_LENGTH = 2048
         private val ID_PATTERN = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+        private fun isValidCoverImageUrl(value: String): Boolean =
+            value.length <= MAX_COVER_URL_LENGTH &&
+                value.startsWith("https://upload.wikimedia.org/")
     }
 }
