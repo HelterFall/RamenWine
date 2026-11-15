@@ -244,6 +244,13 @@ WINEBOOT_RELATIVE="${WINEBOOT_FILE#"$WINE_ROOT"/}"
 mkdir -p "$ROOTFS/opt/ramenwine-wine"
 cp -a "$WINE_ROOT/." "$ROOTFS/opt/ramenwine-wine/"
 
+# The guest sets WINEDLLPATH explicitly, which replaces Wine's compiled-in
+# search list. Require a core built-in module in the main Wine tree so the
+# package cannot ship with only the optional DirectAudio directory visible.
+WINE_WS2_DLL="$ROOTFS/opt/ramenwine-wine/lib/wine/x86_64-windows/ws2_32.dll"
+[[ -s "$WINE_WS2_DLL" ]] || \
+  fail "Wine built-in ws2_32.dll is missing from the main x86-64 DLL tree."
+
 # The app's runtime contract expects rootfs/usr/bin/wine to resolve to
 # an x86-64 ELF. Keep the upstream Wine directory layout intact.
 mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/lib/wine/x86_64-windows"

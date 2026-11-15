@@ -230,7 +230,13 @@ object ProotWineCommandBuilder {
             // Capture Box64 Wine pre-reservation diagnostics without verbose tracing.
             "BOX64_LOG" to "1",
             "BOX64_NOBANNER" to "1",
-            "WINEDLLPATH" to "/opt/ramenwine-audio/lib/wine",
+            // Keep Wine's built-in x86-64/i386 DLLs discoverable while adding
+            // the separately packaged DirectAudio driver directory. WINEDLLPATH
+            // replaces Wine's default search list, so the main tree must be explicit.
+            "WINEDLLPATH" to listOf(
+                "/opt/ramenwine-wine/lib/wine",
+                "/opt/ramenwine-audio/lib/wine"
+            ).joinToString(File.pathSeparator),
             "BANNER_AUDIO_DIRECT_RELAY" to
                 guestRuntimeDirectory + "/directaudio-relay.sock"
         )

@@ -23,7 +23,19 @@ class ProotWineCommandBuilderTest {
             assertEquals("1", command.guestEnvironment["BOX64_LOG"])
             assertTrue(command.arguments.contains("BOX64_LOG=1"))
             assertTrue(command.unsetEnvironment.contains("BOX64_LOG"))
-            assertEquals("/opt/ramenwine-audio/lib/wine", command.guestEnvironment["WINEDLLPATH"])
+            assertEquals(
+                listOf(
+                    "/opt/ramenwine-wine/lib/wine",
+                    "/opt/ramenwine-audio/lib/wine"
+                ).joinToString(File.pathSeparator),
+                command.guestEnvironment["WINEDLLPATH"]
+            )
+            assertTrue(command.guestEnvironment["WINEDLLPATH"]!!.contains(
+                "/opt/ramenwine-wine/lib/wine"
+            ))
+            assertTrue(command.guestEnvironment["WINEDLLPATH"]!!.contains(
+                "/opt/ramenwine-audio/lib/wine"
+            ))
             assertEquals("/run/user/10123/directaudio-relay.sock", command.guestEnvironment["BANNER_AUDIO_DIRECT_RELAY"])
             assertEquals(
                 fixture.rootfs.canonicalFile,
