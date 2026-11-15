@@ -46,20 +46,76 @@ class ProotWineProcessSupervisorTest {
                 runtimeVersion = "test"
             )
 
+            val output = CopyOnWriteArrayList<String>()
             val error = runCatching {
-                ProotWineProcessSupervisor().runToCompletion(
+                ProotWineProcessSupervisor(
+                    callbackDispatcher = Dispatchers.IO
+                ).runToCompletion(
                     command = command,
-                    onOutput = {},
+                    onOutput = { line -> output.add(line) },
                     timeoutMillis = 100L
                 )
             }.exceptionOrNull()
 
-            assertTrue(error is IOException)
-            assertTrue(error?.message.orEmpty().contains("timed out"))
+            assertTrue(
+                "Expected timeout IOException, got ${error?.javaClass?.name}: ${error?.message}",
+                error is IOException
+            )
+            assertTrue(
+                "Expected timeout message, got: ${error?.message}",
+                error?.message.orEmpty().contains("timed out")
+            )
+            assertTrue(
+                "Missing setup-start diagnostic. Output: ${output.joinToString(" | ")}",
+                output.any { it.contains("setup PRoot started") }
+            )
+            assertTrue(
+                "Missing timeout diagnostic. Output: ${output.joinToString(" | ")}",
+                output.any { it.contains("setup timeout") }
+            )
         } finally {
             workingDirectory.deleteRecursively()
         }
     }
+    @Test
+    fun setupHeartbeatReportsChildPidProcessTreeAndPrefixState() = runBlocking {
+        val sleeper = listOf(File("/usr/bin/sleep"), File("/bin/sleep"))
+            .firstOrNull { it.isFile && it.canExecute() }
+        assumeTrue("A POSIX sleep executable is required for this process test.", sleeper != null)
+
+        val workingDirectory = Files.createTempDirectory("ramenwine-setup-heartbeat").toFile()
+        try {
+            val command = ProotWineCommand(
+                prootExecutable = sleeper!!,
+                arguments = listOf("30"),
+                hostWorkingDirectory = workingDirectory,
+                environment = emptyMap(),
+                guestEnvironment = mapOf("WINEPREFIX" to "/prefixes/test"),
+                unsetEnvironment = emptySet(),
+                guestExecutablePath = "/usr/lib/wine/wineboot.exe",
+                guestWorkingDirectory = workingDirectory.absolutePath,
+                guestRuntimeDirectory = "/tmp",
+                guestRootfsDirectory = workingDirectory,
+                hostPrefixDirectory = workingDirectory,
+                runtimeVersion = "test"
+            )
+            val output = CopyOnWriteArrayList<String>()
+            val error = runCatching {
+                ProotWineProcessSupervisor(callbackDispatcher = Dispatchers.IO)
+                    .runToCompletion(command, output::add, timeoutMillis = 2_300L)
+            }.exceptionOrNull()
+
+            assertTrue(error is IOException)
+            assertTrue(output.any { it.contains("setup heartbeat") })
+            assertTrue(output.any { it.contains("proot_pid=") })
+            assertTrue(output.any { it.contains("process_tree=") })
+            assertTrue(output.any { it.contains("prefix_files=") })
+            assertTrue(output.any { it.contains("memory=MemAvailable=") })
+        } finally {
+            workingDirectory.deleteRecursively()
+        }
+    }
+
     @Test
     fun manualStopDrainsFinalOutputBeforeExitCallback() = runBlocking {
         val fakeProcess = FinalOutputProcess("wine-final-line")
