@@ -8,6 +8,12 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# Device-specific diagnostic dumps can expose hardware IDs, build fingerprints,
+# process IDs, app-private paths and system logs. Keep raw reports out of Git.
+RamenWine-diagnostics*.txt
+*-diagnostics*.txt
+*.diagnostics.txt
+
 # Generated Wawona Android native libraries/assets; fetched from the pinned official release
 app/src/main/jniLibs/arm64-v8a/
 app/src/main/assets/wawona/
