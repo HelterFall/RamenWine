@@ -52,7 +52,7 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("/bin/sh"))
             assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
             assertTrue(command.arguments.contains("--link2symlink"))
-            assertFalse(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--sysvipc"))
             assertTrue(command.arguments.contains("--bind=/sys/devices/system/cpu:/sys/devices/system/cpu"))
             assertTrue(File(fixture.rootfs, "sys/devices/system/cpu").isDirectory)
@@ -260,7 +260,7 @@ class ProotWineCommandBuilderTest {
             )
             assertEquals("reg.exe", command.guestExecutablePath)
             assertTrue(command.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
-            assertFalse(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("--kill-on-exit"))
             assertEquals("directaudio", command.arguments[command.arguments.lastIndex - 1])
             assertTrue(command.arguments.contains("HKCU\\Software\\Wine\\Drivers"))
             assertTrue(command.arguments.contains("/v"))
@@ -409,7 +409,7 @@ class ProotWineCommandBuilderTest {
                 fixture.request().copy(game = x86Game)
             )
             assertEquals("/opt/ramenwine-tools/run-wine-command.sh", command.arguments[command.arguments.size - 2])
-            assertFalse(command.arguments.contains("--kill-on-exit"))
+            assertTrue(command.arguments.contains("--kill-on-exit"))
         } finally {
             fixture.cleanup()
         }
