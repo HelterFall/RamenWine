@@ -87,6 +87,7 @@ class GameSessionCoordinator(
         launchInProgress = true
         val launchStartedAt = SystemClock.elapsedRealtime()
         var stageStartedAt = launchStartedAt
+        var prefixSessionLock: WinePrefixSessionLock? = null
         try {
             onOutput(
                 "RamenWine: stage=launch status=starting mode=" +
@@ -126,6 +127,12 @@ class GameSessionCoordinator(
                     " elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
             )
             stageStartedAt = SystemClock.elapsedRealtime()
+
+            // Hold one OS-level lease from the first prefix operation until
+            // the game process exits. This also protects against a recreated
+            // Activity constructing a second coordinator for the same game.
+            prefixSessionLock = WinePrefixSessionLock.acquire(appContext.filesDir, game.id)
+            onOutput("RamenWine: stage=prefix-lock status=acquired game_id=${game.id}")
 
             val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
             onOutput("RamenWine: stage=prefix-probe status=starting")
@@ -209,6 +216,8 @@ class GameSessionCoordinator(
                         onOutput("RamenWine: stage=process status=exited exit_code=$exitCode")
                     }
                     try {
+                        prefixSessionLock?.close()
+                        prefixSessionLock = null
                         closeDisplayIfCurrent(display)
                     } finally {
                         processSession = null
@@ -267,6 +276,8 @@ class GameSessionCoordinator(
                         "error=${error.javaClass.simpleName}: ${error.message.orEmpty()}"
                 )
             }
+            runCatching { prefixSessionLock?.close() }
+            prefixSessionLock = null
             closeDisplayIfCurrent(display)
             throw error
         } finally {
