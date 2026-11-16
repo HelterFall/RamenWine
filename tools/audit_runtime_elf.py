@@ -38,13 +38,13 @@ MAX_STRING_TABLE_BYTES = 64 * 1024 * 1024
 # ordinary Win32/Win64 process startup. Keep their unresolved dependencies
 # visible as warnings instead of making the complete Wine package unusable.
 OPTIONAL_MODULE_DEPENDENCIES = {
-    "opt/ramenwine-wine/x86_64-unix/sane.so": {
+    "opt/ramenwine-wine/lib/wine/x86_64-unix/sane.so": {
         "libsane.so.1": "optional scanner integration",
     },
-    "opt/ramenwine-wine/x86_64-unix/wpcap.so": {
+    "opt/ramenwine-wine/lib/wine/x86_64-unix/wpcap.so": {
         "libpcap.so.1": "optional packet-capture integration",
     },
-    "opt/ramenwine-wine/x86_64-unix/winedmo.so": {
+    "opt/ramenwine-wine/lib/wine/x86_64-unix/winedmo.so": {
         "libavutil.so.56": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavformat.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
         "libavcodec.so.58": "optional DirectShow DMO / FFmpeg 4.4 integration",
@@ -52,7 +52,7 @@ OPTIONAL_MODULE_DEPENDENCIES = {
         "libavformat.so.60": "optional DirectShow DMO / FFmpeg 6 integration",
         "libavcodec.so.60": "optional DirectShow DMO / FFmpeg 6 integration",
     },
-    "opt/ramenwine-wine/x86_64-unix/wineopenxr.so": {
+    "opt/ramenwine-wine/lib/wine/x86_64-unix/wineopenxr.so": {
         "libopenxr_loader.so.1": "optional OpenXR / virtual-reality integration",
     },
 }
