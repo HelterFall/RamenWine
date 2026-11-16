@@ -440,11 +440,21 @@ fun RamenWineApp() {
                                     } else {
                                         "Windows EXE запущен через Wine. Ожидаю его окно…"
                                     }
-                                line.contains("setup heartbeat") || line.contains("game heartbeat") ->
+                                line.contains("setup heartbeat") ->
+                                    when {
+                                        line.contains("guest=/usr/lib/wine/") ||
+                                            line.contains("guest=/usr/lib/x86_64-linux-gnu/wine/") ->
+                                            "Инициализирую Wine и создаю системные службы…"
+                                        line.contains("guest=reg.exe") ->
+                                            "Настраиваю Wine перед запуском Windows-программы…"
+                                        else ->
+                                            "Выполняется подготовительная команда Wine…"
+                                    }
+                                line.contains("game heartbeat") ->
                                     if (launchDiagnosticWindow) {
-                                        "Wine работает; проверяю состояние тестового окна…"
+                                        "Тестовая Windows-программа запущена; проверяю её окно…"
                                     } else {
-                                        "Windows-процесс работает; ожидаю его изображение…"
+                                        "Windows-программа запущена; ожидаю её изображение…"
                                     }
                                 line.contains("setup timeout") ->
                                     "Подготовка Wine превысила лимит времени. Остановка процесса…"
