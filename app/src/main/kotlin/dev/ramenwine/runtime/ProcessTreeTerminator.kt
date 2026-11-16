@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Tracks only descendants of one supervised PRoot PID.
  *
- * PRoot's --kill-on-exit remains the primary cleanup mechanism. This tracker
+ * PRoot's --kill-on-exit is the first cleanup layer. This tracker
  * remembers descendants while PRoot is alive and terminates any survivors
  * after the parent exits. PID start-time checks prevent signaling a different
  * process if Android reuses a PID after a child has already exited.
@@ -218,6 +218,33 @@ internal class ProcessTreeTerminator(
                 result.addAll(childPids.filter { it > 0 })
             }
             return result
+        }
+
+        /**
+         * Waits briefly for Android's /proc children list to publish the newly
+         * spawned PRoot child. ProcessBuilder.start() may return before procfs
+         * exposes the child, so a single immediate snapshot is racy.
+         */
+        internal fun awaitNewDirectChildPid(
+            parentPid: Int,
+            executable: File,
+            existingPids: Set<Int>,
+            procDirectory: File = File("/proc"),
+            timeoutMillis: Long = 750L
+        ): Int? {
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+            do {
+                findNewDirectChildPid(parentPid, executable, existingPids, procDirectory)
+                    ?.let { return it }
+                if (System.nanoTime() >= deadline) break
+                try {
+                    Thread.sleep(20L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
+                }
+            } while (true)
+            return null
         }
 
         /**
