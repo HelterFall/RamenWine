@@ -214,7 +214,7 @@ class GameSessionCoordinator(
                         onOutput("RamenWine: stage=process status=exited exit_code=$exitCode")
                     }
                     try {
-                        prefixSessionLock?.close()
+                        runCatching { prefixSessionLock?.close() }
                         prefixSessionLock = null
                         closeDisplayIfCurrent(display)
                     } finally {
