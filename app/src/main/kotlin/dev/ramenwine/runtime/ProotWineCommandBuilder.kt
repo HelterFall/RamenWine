@@ -243,7 +243,9 @@ object ProotWineCommandBuilder {
 
         val arguments = buildList {
             // Wine starts a detached wineserver and services.exe. The guest
-            // wrapper below shuts them down cleanly before PRoot exits.
+            // wrapper shuts them down cleanly; this is the final safety net
+            // for guest children if the wrapper or app is interrupted.
+            add("--kill-on-exit")
             add("--link2symlink")
             add("--sysvipc")
             add("--rootfs=" + rootfs.absolutePath)
