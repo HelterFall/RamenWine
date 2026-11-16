@@ -245,7 +245,7 @@ class ProotWineCommandBuilderTest {
                 gameCommand.arguments.filter { it.startsWith("--bind=") },
                 stop.arguments.filter { it.startsWith("--bind=") }
             )
-            assertFalse(stop.arguments.contains("--kill-on-exit"))
+            assertTrue(stop.arguments.contains("--kill-on-exit"))
         } finally {
             fixture.cleanup()
         }
@@ -287,7 +287,7 @@ class ProotWineCommandBuilderTest {
             assertEquals("/opt/ramenwine-tests", smokeCommand.guestWorkingDirectory)
             assertTrue(smokeCommand.arguments.contains("--pwd=/opt/ramenwine-tests"))
             assertTrue(smokeCommand.arguments.contains("/opt/ramenwine-tools/run-wine-command.sh"))
-            assertFalse(smokeCommand.arguments.contains("--kill-on-exit"))
+            assertTrue(smokeCommand.arguments.contains("--kill-on-exit"))
             assertEquals(
                 listOf(
                     "/bin/sh",
