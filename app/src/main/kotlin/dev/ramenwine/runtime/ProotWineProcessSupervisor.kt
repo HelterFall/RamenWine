@@ -132,7 +132,7 @@ class ProotWineProcessSupervisor(
             val existingChildren = appPid?.let { ProcessTreeTerminator.directChildPids(it) }.orEmpty()
             val startedProcess = createProcess(command)
             val childPid = if (startedProcess.isAlive && appPid != null) {
-                ProcessTreeTerminator.findNewDirectChildPid(
+                ProcessTreeTerminator.awaitNewDirectChildPid(
                     parentPid = appPid,
                     executable = command.prootExecutable,
                     existingPids = existingChildren
@@ -175,6 +175,9 @@ class ProotWineProcessSupervisor(
                     minOf(SETUP_HEARTBEAT_INTERVAL_MILLIS, remainingMillis),
                     TimeUnit.MILLISECONDS
                 )
+                // Setup commands also spawn wineserver/services.exe. Sample
+                // descendants before PRoot exits, not only after its exit.
+                processTree?.captureDescendants()
                 if (!completed && process.isAlive) {
                     val tree = processTree?.diagnosticSnapshot() ?: "<PRoot PID unavailable>"
                     emitDiagnostic(
@@ -213,7 +216,9 @@ class ProotWineProcessSupervisor(
                     "elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos)}"
             )
             processTree?.let { tree ->
-                emitDiagnostic("RamenWine: setup process tree at exit: ${tree.diagnosticSnapshot()}")
+                emitDiagnostic("RamenWine: setup process tree before cleanup: ${tree.diagnosticSnapshot()}")
+                tree.terminateRemaining()
+                emitDiagnostic("RamenWine: setup process tree after cleanup: ${tree.diagnosticSnapshot()}")
             }
             val drained = withTimeoutOrNull(OUTPUT_DRAIN_MILLIS) {
                 outputJob.join()
