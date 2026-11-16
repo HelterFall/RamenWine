@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Tracks only descendants of one supervised PRoot PID.
  *
- * PRoot's --kill-on-exit remains the primary cleanup mechanism. This tracker
+ * PRoot's --kill-on-exit is the first cleanup layer. This tracker
  * remembers descendants while PRoot is alive and terminates any survivors
  * after the parent exits. PID start-time checks prevent signaling a different
  * process if Android reuses a PID after a child has already exited.
@@ -86,6 +86,42 @@ internal class ProcessTreeTerminator(
 
     internal fun trackedPids(): Set<Int> = observedStartTimes.keys.toSet()
 
+    /**
+     * Bounded snapshot of this PRoot tree. Command-line arguments and unrelated
+     * device processes are deliberately excluded.
+     */
+    internal fun diagnosticSnapshot(): String {
+        captureDescendants()
+        val pids = (setOf(rootPid) + observedStartTimes.keys).sorted()
+        val entries = pids.mapNotNull { pid ->
+            val current = readProcStat(File(procDirectory, "$pid/stat")) ?: return@mapNotNull null
+            if (pid != rootPid && observedStartTimes[pid] != current.startTimeTicks) {
+                return@mapNotNull null
+            }
+            val statusFields = runCatching {
+                File(procDirectory, "$pid/status").readLines(Charsets.US_ASCII)
+                    .mapNotNull { line ->
+                        val separator = line.indexOf(':')
+                        if (separator <= 0) null else line.substring(0, separator) to
+                            line.substring(separator + 1).trim()
+                    }.toMap()
+            }.getOrDefault(emptyMap())
+            val name = (statusFields["Name"] ?: current.comm)
+                .replace(',', '_')
+                .replace(';', '_')
+                .take(64)
+            val rss = statusFields["VmRSS"]?.replace(Regex("\\s+"), " ") ?: "unavailable"
+            val threads = statusFields["Threads"] ?: "unavailable"
+            val waitChannel = runCatching {
+                File(procDirectory, "$pid/wchan").readText(Charsets.US_ASCII).trim()
+            }.getOrNull()?.takeIf { it.isNotBlank() }?.take(64) ?: "unavailable"
+            "$name(pid=$pid,ppid=${current.parentPid},state=${current.state}," +
+                "rss=$rss,threads=$threads,wchan=$waitChannel)"
+        }
+        return entries.joinToString(";").take(MAX_DIAGNOSTIC_SNAPSHOT_LENGTH)
+            .ifBlank { "<process tree unavailable>" }
+    }
+
     private fun currentSurvivors(): List<Int> {
         return observedStartTimes.mapNotNull { (pid, expectedStartTime) ->
             val current = readProcStat(File(procDirectory, "$pid/stat"))
@@ -127,12 +163,124 @@ internal class ProcessTreeTerminator(
 
     internal data class ProcStat(
         val pid: Int,
+        val comm: String,
         val state: Char,
         val parentPid: Int,
         val startTimeTicks: Long
     )
 
     internal companion object {
+        /**
+         * Reads this process PID from Linux procfs rather than android.os.Process.
+         * This keeps process bookkeeping usable in local JVM tests while using
+         * the same kernel-provided PID on Android.
+         */
+        internal fun currentProcessPid(procDirectory: File = File("/proc")): Int? {
+            val statusPid = runCatching {
+                File(procDirectory, "self/status").useLines { lines ->
+                    lines.firstOrNull { it.startsWith("Pid:") }
+                        ?.substringAfter(':')
+                        ?.trim()
+                        ?.toIntOrNull()
+                }
+            }.getOrNull()
+            if (statusPid != null && statusPid > 0) return statusPid
+
+            return runCatching {
+                File(procDirectory, "self/stat").useLines { lines ->
+                    lines.firstOrNull()
+                        ?.substringBefore(' ')
+                        ?.toIntOrNull()
+                }
+            }.getOrNull()?.takeIf { it > 0 }
+        }
+
+        /**
+         * Returns direct child PIDs for every thread of a process. Android's
+         * java.lang.Process API does not expose pid(), so ProcessBuilder callers
+         * identify their newly spawned child through this /proc relationship.
+         */
+        internal fun directChildPids(
+            parentPid: Int,
+            procDirectory: File = File("/proc")
+        ): Set<Int> {
+            val taskDirectory = File(procDirectory, "$parentPid/task")
+            val tasks = runCatching { taskDirectory.listFiles()?.toList() }.getOrNull()
+                ?: return emptySet()
+            val result = LinkedHashSet<Int>()
+            for (task in tasks) {
+                val childPids = runCatching {
+                    File(task, "children").readText(Charsets.US_ASCII)
+                        .trim()
+                        .split(Regex("\\s+"))
+                        .mapNotNull(String::toIntOrNull)
+                }.getOrDefault(emptyList())
+                result.addAll(childPids.filter { it > 0 })
+            }
+            return result
+        }
+
+        /**
+         * Waits briefly for Android's /proc children list to publish the newly
+         * spawned PRoot child. ProcessBuilder.start() may return before procfs
+         * exposes the child, so a single immediate snapshot is racy.
+         */
+        internal fun awaitNewDirectChildPid(
+            parentPid: Int,
+            executable: File,
+            existingPids: Set<Int>,
+            procDirectory: File = File("/proc"),
+            timeoutMillis: Long = 750L
+        ): Int? {
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+            do {
+                findNewDirectChildPid(parentPid, executable, existingPids, procDirectory)
+                    ?.let { return it }
+                if (System.nanoTime() >= deadline) break
+                try {
+                    Thread.sleep(20L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
+                }
+            } while (true)
+            return null
+        }
+
+        /**
+         * Finds a newly spawned direct child with the expected argv[0].
+         * Existing children are excluded to avoid attaching a second session
+         * to an already-running PRoot process.
+         */
+        internal fun findNewDirectChildPid(
+            parentPid: Int,
+            executable: File,
+            existingPids: Set<Int>,
+            procDirectory: File = File("/proc")
+        ): Int? {
+            val expectedPaths = linkedSetOf(executable.absolutePath)
+            runCatching { executable.canonicalPath }.getOrNull()?.let(expectedPaths::add)
+
+            return directChildPids(parentPid, procDirectory).firstOrNull { pid ->
+                if (pid in existingPids) return@firstOrNull false
+                val commandLine = runCatching {
+                    File(procDirectory, "$pid/cmdline").readBytes()
+                }.getOrNull() ?: return@firstOrNull false
+                val argumentEnd = commandLine.indexOf(0.toByte()).let { index ->
+                    if (index < 0) commandLine.size else index
+                }
+                if (argumentEnd == 0) return@firstOrNull false
+                val executableArgument = String(
+                    commandLine,
+                    0,
+                    argumentEnd,
+                    Charsets.UTF_8
+                )
+                executableArgument in expectedPaths
+            }
+        }
+
+        private const val MAX_DIAGNOSTIC_SNAPSHOT_LENGTH = 6_000
         private const val SIGTERM = 15
         private const val SIGKILL = 9
         private const val ZOMBIE_STATE = 'Z'
@@ -154,7 +302,13 @@ internal class ProcessTreeTerminator(
             val state = fields[0].singleOrNull() ?: return null
             val parentPid = fields[1].toIntOrNull() ?: return null
             val startTimeTicks = fields[19].toLongOrNull() ?: return null
-            return ProcStat(pid, state, parentPid, startTimeTicks)
+            return ProcStat(
+                pid = pid,
+                comm = line.substring(open + 1, close),
+                state = state,
+                parentPid = parentPid,
+                startTimeTicks = startTimeTicks
+            )
         }
     }
 }
