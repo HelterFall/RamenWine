@@ -94,6 +94,10 @@ class GameSessionCoordinator(
                     (if (launchDiagnosticWindow) "wine-smoke-test" else "game") +
                     " game_arch=${game.architecture} runtime_locale=${game.locale}"
             )
+            // Acquire before starting the audio relay or touching the prefix so
+            // a second Activity cannot create a competing runtime session.
+            prefixSessionLock = WinePrefixSessionLock.acquire(appContext.filesDir, game.id)
+            onOutput("RamenWine: stage=prefix-lock status=acquired game_id=${game.id}")
             onOutput("RamenWine: stage=audio-relay status=starting")
             val relay = withContext(Dispatchers.IO) {
                 DirectAudioRelaySupervisor(File(appContext.applicationInfo.nativeLibraryDir)).start(
@@ -127,12 +131,6 @@ class GameSessionCoordinator(
                     " elapsed_ms=${SystemClock.elapsedRealtime() - stageStartedAt}"
             )
             stageStartedAt = SystemClock.elapsedRealtime()
-
-            // Hold one OS-level lease from the first prefix operation until
-            // the game process exits. This also protects against a recreated
-            // Activity constructing a second coordinator for the same game.
-            prefixSessionLock = WinePrefixSessionLock.acquire(appContext.filesDir, game.id)
-            onOutput("RamenWine: stage=prefix-lock status=acquired game_id=${game.id}")
 
             val prefixProbe = ProotWineCommandBuilder.buildWinePrefixWriteProbeCommand(command)
             onOutput("RamenWine: stage=prefix-probe status=starting")
