@@ -37,7 +37,15 @@ class ProotWineCommandBuilderTest {
             assertTrue(command.arguments.contains("--kill-on-exit"))
             assertTrue(command.arguments.contains("--link2symlink"))
             assertTrue(command.arguments.contains("--sysvipc"))
-            assertEquals(fixture.hostLibraries.absolutePath, command.environment["LD_LIBRARY_PATH"])
+            assertTrue(
+                command.environment["LD_LIBRARY_PATH"]!!.startsWith(
+                    fixture.nativeLibraryDirectory.canonicalPath + File.pathSeparator
+                )
+            )
+            assertEquals(
+                File(fixture.nativeLibraryDirectory, "libproot-loader.so").canonicalPath,
+                command.environment["PROOT_LOADER"]
+            )
             assertTrue(command.environment.containsKey("PROOT_TMP_DIR"))
             assertFalse(command.environment.containsKey("XDG_RUNTIME_DIR"))
             assertFalse(command.environment.containsKey("WINEPREFIX"))
@@ -369,6 +377,7 @@ class ProotWineCommandBuilderTest {
         val root = Files.createTempDirectory("ramenwine-launch").toFile()
         val filesDirectory = File(root, "files").apply { mkdirs() }
         val cacheDirectory = File(root, "cache").apply { mkdirs() }
+        val nativeLibraryDirectory = File(root, "native-libs").apply { mkdirs() }
         val gameId = "12345678-1234-1234-1234-123456789abc"
 
         val backendRoot = File(
@@ -376,8 +385,11 @@ class ProotWineCommandBuilderTest {
             "runtime/current/backends/" + RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
-        val proot = executable(backendRoot, "host/bin/proot")
-        val audioRelay = executable(backendRoot, "host/bin/directaudio-relay")
+        executable(backendRoot, "host/bin/proot")
+        executable(backendRoot, "host/bin/directaudio-relay")
+        val proot = executable(nativeLibraryDirectory, "libproot.so")
+        executable(nativeLibraryDirectory, "libproot-loader.so")
+        executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val runtimeProperties = File(backendRoot, "runtime.properties").apply {
             writeText(
@@ -413,6 +425,7 @@ class ProotWineCommandBuilderTest {
         fun request() = ProotWineLaunchRequest(
             filesDirectory = filesDirectory,
             cacheDirectory = cacheDirectory,
+            nativeLibraryDirectory = nativeLibraryDirectory,
             game = ImportedGame(
                 id = gameId,
                 title = "Test visual novel",
