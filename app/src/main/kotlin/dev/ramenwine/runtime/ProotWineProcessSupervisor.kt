@@ -317,7 +317,7 @@ class ProotWineProcessSupervisor(
             val existingChildren = ProcessTreeTerminator.directChildPids(parentPid)
             val startedProcess = createProcess(command)
             val rootPid = if (startedProcess.isAlive) {
-                ProcessTreeTerminator.findNewDirectChildPid(
+                ProcessTreeTerminator.awaitNewDirectChildPid(
                     parentPid = parentPid,
                     executable = command.prootExecutable,
                     existingPids = existingChildren
