@@ -150,23 +150,40 @@ fun RamenWineApp() {
             storageError = error.message ?: error.javaClass.simpleName
         }
 
+        val runtimeInstaller = RuntimePackageInstaller(context.applicationContext)
+        val bundledRuntimeVersion = try {
+            withContext(Dispatchers.IO) { runtimeInstaller.bundledRuntimeVersion() }
+        } catch (error: Exception) {
+            runtimePackageError = error.message ?: error.javaClass.simpleName
+            null
+        }
         val installedBackend = RuntimeLayout.inspect(context.filesDir)
             .backends
             .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+        val runtimeNeedsInstall = bundledRuntimeVersion != null && (
+            installedBackend?.state != RuntimeState.FILES_PRESENT ||
+                installedBackend.runtimeVersion != bundledRuntimeVersion
+            )
 
-        if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
+        if (runtimeNeedsInstall) {
             installingRuntime = true
             runtimePackageError = null
-            runtimePackageNotice = null
+            runtimePackageNotice = if (installedBackend?.state == RuntimeState.FILES_PRESENT) {
+                "Обновляю Wine runtime…"
+            } else {
+                null
+            }
             try {
                 val result = withContext(Dispatchers.IO) {
-                    RuntimePackageInstaller(context.applicationContext).installBundled()
+                    runtimeInstaller.installBundled()
                 }
                 runtimeInspection = RuntimeLayout.inspect(context.filesDir)
                 runtimePackageNotice = result.runtimeVersion +
                     " · " + result.installedFileCount + " файлов"
                 // The shared runtime is installed after the initial storage
                 // snapshot. Refresh the summary so it never keeps showing 0 B.
+                // Existing per-game prefixes are retained and WinePrefixManager
+                // updates them on next launch when their runtime marker changes.
                 refreshLibraryStorage()
             } catch (error: Exception) {
                 runtimePackageError = error.message ?: error.javaClass.simpleName
