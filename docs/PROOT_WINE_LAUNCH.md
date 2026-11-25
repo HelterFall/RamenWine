@@ -20,6 +20,9 @@ This document describes the first Windows-process launch route using the glibc r
 
 The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
 
+The Android-host PRoot executable, its ELF loader and the DirectAudio relay are also copied from the pinned build into `app/src/main/jniLibs/arm64-v8a` as `libproot.so`, `libproot-loader.so` and `libdirectaudio-relay.so`. With `android:extractNativeLibs="true"`, PackageManager places them in the app's read-only `ApplicationInfo.nativeLibraryDir`. RamenWine executes those copies from there; the copies in the runtime ZIP remain for checksum, provenance and installed-inventory checks, not as executable launch paths. This is required for apps targeting Android 10/API 29 and later, where executing binaries from writable app-private data directories is blocked by Android's executable-file policy.
+
+
 The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/sh`, `rootfs/usr/bin/box64`, `rootfs/usr/bin/wine`, `rootfs/usr/bin/wineserver` and `rootfs/opt/ramenwine-tools/run-wine-command.sh`, plus a readable `wineboot.exe` at one of the supported paths. Symlink chains are followed when checking required launch files. The installer creates the app-private `host/lib` directory when it is omitted; extra Bionic host libraries may be packaged there only when the selected PRoot build actually needs them.
 
 The binary ABI is also checked from the actual headers:
