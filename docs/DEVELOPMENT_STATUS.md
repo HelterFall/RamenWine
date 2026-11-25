@@ -55,7 +55,10 @@
 7. On first launch, the app automatically extracts the offline Wine runtime already bundled inside the APK; the player does not need to find or download a separate runtime ZIP.
 8. Choose “Open game display” for an imported game; the UI checks the pinned Wawona package and starts the compositor.
 9. Wait for the real Android Surface to attach; the launch button stays disabled until attachment is reported.
-10. Request the Windows EXE launch; the coordinator validates runtime paths and requires the active Wayland socket before starting PRoot/Wine.
+10. Optionally launch the bundled Win32 GDI smoke executable to verify the complete Wine/display path visually.
+11. Launch the selected Windows EXE; the coordinator validates runtime paths and requires the active Wayland socket before starting PRoot/Wine.
+
+The separate Weston SHM smoke client is deliberately not used in the launch flow because the pinned upstream JNI stop API does not join its detached worker. The Win32 GDI smoke test is the safer end-to-end diagnostic while a joinable native Wawona build is pending.
 
 The UI now exposes an initial per-game flow: prepare and verify Wawona off the UI thread, attach its Surface, then request a Windows EXE launch. The flow fails closed when the native Wawona package or a compatible PRoot/Wine runtime is absent. Scanning and importing never execute game code. Runtime file inventory and a successful ZIP install prove package presence/integrity only; they do not prove that Wine or a Windows program can run.
 
@@ -84,7 +87,7 @@ The upstream root MIT license does not make every transitive native dependency M
 - No real Windows EXE has been launched by RamenWine.
 - The initial Play/session UI and coordinator are wired, but the native package/runtime prerequisites are not built or installed and the launch path has not been validated on a physical device.
 - The generated Wawona native libraries are intentionally not committed. Android CI downloads the official v26.8.12 release APK, verifies the published asset digest, extracts the ARM64 JNI libraries and required support assets, then verifies the final APK contains the full SHA-256 inventory. No Wawona compilation or Nix setup occurs in CI. The APK shown in the 2026-11-10 device screenshots predates this packaging change and is missing the bundle; even a successful package check does not prove device-side compositor or game startup.
-- The Wawona display now has an explicit `weston-simple-shm` smoke action that uses PixelCopy to inspect actual Android Surface pixels. It separates compositor/presenter validation from Wine; it has not yet been run on a physical device. The wineboot flow has not yet been exercised with an actual Wine package.
+- The previous `weston-simple-shm` PixelCopy action is excluded from the normal launch flow: the pinned Wawona stop API clears state without joining the detached worker, and a saved device diagnostic showed a subsequent compositor start could be blocked. The built-in Win32 GDI smoke executable is the preferred end-to-end diagnostic until a joinable native Wawona build is available.
 - No DXVK, WineD3D, D8VK, VKD3D, DirectDraw or Android Vulkan-driver integration exists.
 - Basic Android touch-to-pointer and text-input/IME forwarding are implemented, but still need real-game validation.
 - The bundled DirectAudio output bridge is integrated into the runtime and game-session lifecycle. Startup now requires an actual AF_UNIX connection probe; real-device audio playback is not yet verified.
