@@ -85,9 +85,9 @@ class GameSessionCoordinator(
         launchInProgress = true
         try {
             val relay = withContext(Dispatchers.IO) {
-                DirectAudioRelaySupervisor(appContext.filesDir).start(
-                    display.endpoint.hostRuntimeDirectory
-                )
+                DirectAudioRelaySupervisor(
+                    File(appContext.applicationInfo.nativeLibraryDir)
+                ).start(display.endpoint.hostRuntimeDirectory)
             }
             audioRelaySession = relay
             audioRelayDisplay = display
@@ -95,6 +95,7 @@ class GameSessionCoordinator(
             val request = ProotWineLaunchRequest(
                 filesDirectory = appContext.filesDir,
                 cacheDirectory = appContext.cacheDir,
+                nativeLibraryDirectory = File(appContext.applicationInfo.nativeLibraryDir),
                 game = game,
                 display = display.endpoint,
                 hostUid = Process.myUid(),
