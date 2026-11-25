@@ -623,7 +623,6 @@ fun RamenWineApp() {
                                 onSurfaceStateChanged = { attached ->
                                     surfaceReady = attached
                                 }
-                                }
                             )
                                 Text(
                                     "Отдельный Wayland SHM-тест временно отключён: закреплённая Wawona запускает нативный поток без надёжного ожидания завершения. Для проверки полного пути используй встроенное Win32 GDI-окно.",
