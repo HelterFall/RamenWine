@@ -103,11 +103,13 @@ The DisplayBackend API should describe capabilities and lifecycle, not expose up
 7. Launch an original Wayland client smoke program, then a Wine Win32 GDI test program through the existing PRoot builder.
 8. Verify IME, touch, mouse, hardware keyboard, orientation, focus, exit and complete cleanup on a physical ARM64 device.
 
-## Real Android Surface smoke test
+## End-to-end rendering smoke test
 
-RamenWine exposes a manual **Проверить реальный вывод Wayland** action after the Wawona Surface attaches. It starts the pinned upstream `weston-simple-shm` Wayland client, which submits a real shared-memory buffer through the compositor. Android `PixelCopy` then reads pixels from the actual `SurfaceView`; the check passes only when a sufficient number of sampled pixels are non-black. A native client-start return value, compositor-ready flag, or socket file alone is not considered success.
+The standalone Weston SHM smoke client is intentionally not part of the normal launch flow. In the pinned Wawona v26.8.12 JNI implementation, the client runs on a detached native thread and the stop method clears its running counter before that thread has actually exited. It provides no join/completion signal. A saved device diagnostic showed that this could prevent a later compositor session from opening.
 
-This gate isolates the compositor-to-Android-Surface path from Wine. A successful result proves that a Wayland SHM client produced visible pixels through Wawona's Android presentation surface. It does not yet prove Wine, Box64, PRoot, or a Windows EXE can render.
+RamenWine therefore does not start or stop this client from the game UI. Once the Wawona Surface is attached and the Wayland socket is ready, the preferred diagnostic is the bundled Win32 GDI smoke executable, launched through the same PRoot → Box64 → Wine → Wayland path as a Windows game. The user can confirm that the colored GDI window is visible, then close it and launch the selected novel.
+
+This is an end-to-end manual rendering check, not an automated PixelCopy proof. Reintroduce the standalone SHM client only after packaging a RamenWine-owned Wawona native build whose stop operation joins the worker and whose repeated start/stop lifecycle has passed on a physical ARM64 device.
 
 ## Acceptance gates
 
