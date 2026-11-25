@@ -359,13 +359,37 @@ test -x "$ROOTFS/bin/sh" || fail "Debian rootfs is missing the /bin/sh compatibi
 test -x "$WINE_COMMAND_WRAPPER" || fail "Wine command wrapper is not executable."
 
 install -m 0755 "$AUDIO_RELAY" "$RUNTIME_ROOT/host/bin/directaudio-relay"
+
+# Android 10+ denies execve() for binaries extracted into writable app filesDir
+# when the app targets API 29+. Package the host executables as native APK
+# libraries so PackageManager extracts them into read-only nativeLibraryDir.
+NATIVE_LIBRARY_DIR="$ROOT_DIR/app/src/main/jniLibs/arm64-v8a"
+mkdir -p "$NATIVE_LIBRARY_DIR"
+install -m 0755 "$RUNTIME_ROOT/host/bin/proot" "$NATIVE_LIBRARY_DIR/libproot.so"
+install -m 0755 "$RUNTIME_ROOT/host/bin/directaudio-relay" "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so"
+
+readelf -h "$NATIVE_LIBRARY_DIR/libproot.so" | grep -q 'AArch64' || \
+  fail "Packaged Android PRoot is not an AArch64 ELF."
+readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || \
+  fail "Packaged DirectAudio relay is not an AArch64 ELF."
+
+# PRoot's guest ELF loader is executed for Android-host guest programs too.
+# Keep it in nativeLibraryDir rather than allowing PRoot to copy it into
+# writable PROOT_TMP_DIR, where Android's executable-file policy rejects it.
+PROOT_LOADER_BINARY="$(find "$PROOT_DIR" -type f -name loader -print -quit)"
+[[ -n "$PROOT_LOADER_BINARY" && -s "$PROOT_LOADER_BINARY" ]] || \
+  fail "The Android PRoot archive does not contain its ELF loader."
+install -m 0755 "$PROOT_LOADER_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader.so"
+readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader.so" | grep -q 'AArch64' || \
+  fail "Packaged PRoot ELF loader is not an AArch64 ELF."
+
 cp -a "$AUDIO_BUNDLE_DIR/host/share/ramenwine/." "$RUNTIME_ROOT/host/share/ramenwine/"
 
 # Emit the exact package format consumed by RuntimePackageInstaller.
 python3 "$ROOT_DIR/tools/package_runtime.py" \
   --root "$RUNTIME_ROOT" \
   --backend glibc-proot-box64 \
-  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wine-shutdown-1" \
+  --version "prebuilt-proot-26.10.08-box64-${BOX64_DEBIAN_VERSION}-wine-11.20-2-wayland-directaudio-52aedbf8-wine-shutdown-1-android-exec-host-1" \
   --output "$OUTPUT_ZIP"
 
 echo "Bundled runtime asset ready: $OUTPUT_ZIP"
