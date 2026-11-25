@@ -302,7 +302,7 @@ jobs:
           retention-days: 14
 
   rootfs:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     name: Build Debian ARM64 guest rootfs natively
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -342,7 +342,7 @@ jobs:
           retention-days: 1
 
   android:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     needs: [directaudio, rootfs]
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
