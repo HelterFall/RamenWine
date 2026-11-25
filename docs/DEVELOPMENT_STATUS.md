@@ -23,6 +23,7 @@
 - Pinned runtime source acquisition: exact Termux PRoot and Box64 commits plus checksum-verified talloc and Wine WOW64 archives; fetcher emits local source provenance but does not build binaries.
 - Static guest ELF dependency audit: package generation checks ARM64/x86-64 ELF interpreters and direct DT_NEEDED libraries, including architecture-specific paths, before emitting a glibc/PRoot ZIP.
 - PRoot/Wine command builder that validates paths and runtime executables, separates Android-host and Linux-guest environments, applies a validated per-game locale, prepares per-game directories and creates an argument-vector without a shell.
+- Packaged guest Wine shutdown wrapper and `/usr/bin/wineserver` link; game, wineboot and DirectAudio registry commands run through the wrapper, which stops wineserver and waits for the prefix lock to be released before PRoot exits.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
