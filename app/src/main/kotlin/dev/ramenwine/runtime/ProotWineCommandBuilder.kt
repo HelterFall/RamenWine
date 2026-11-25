@@ -489,6 +489,7 @@ object ProotWineCommandBuilder {
         "HOME",
         "TMPDIR",
         "PROOT_TMP_DIR",
+        "PROOT_LOADER",
         "LD_LIBRARY_PATH",
         "PATH",
         "WINEPREFIX",
