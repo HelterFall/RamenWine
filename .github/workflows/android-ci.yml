@@ -454,6 +454,12 @@ jobs:
           test -s "$APK"
           test -s "$MANIFEST"
 
+          # Android-host executables must be extracted from the APK's native
+          # library directory, never execve()'d from writable app filesDir.
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot-loader.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libdirectaudio-relay.so"
+
           unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
           unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
           test -s "$RUNTIME_ZIP"
