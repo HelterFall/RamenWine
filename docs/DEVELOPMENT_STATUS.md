@@ -26,6 +26,7 @@
 - Packaged guest Wine shutdown wrapper and `/usr/bin/wineserver` link; game, wineboot and DirectAudio registry commands run through the wrapper, which stops wineserver and waits for the prefix lock to be released before PRoot exits.
 - WinePrefixManager that initializes each per-game prefix with wineboot.exe, reuses a matching runtime-version marker and updates an existing prefix when the Wine package version changes.
 - PRoot/Wine process supervisor that starts the validated command with ProcessBuilder, merges stdout/stderr, reports exit and supports graceful then forced stop and bounds final output draining so an inherited pipe cannot hold the session open indefinitely.
+- Android-host PRoot, its ELF loader and DirectAudio relay are packaged as `jniLibs` and launched from `ApplicationInfo.nativeLibraryDir` rather than writable app-data storage, which Android 10+ blocks for execve() in apps targeting API 29+.
 - Wawona support-asset SHA-256 verifier and JVM tests for missing, modified, traversal and escaping-symlink cases.
 - Wawona native-library inventory that verifies every manifest-listed arm64-v8a shared object and SHA-256 directly inside the installed APK, a minimal JNI wrapper matching the pinned upstream Android symbols, an in-process compositor lifecycle adapter and a SurfaceHolder-backed SurfaceView with basic touch/hardware-key forwarding.
 - A GameSessionCoordinator that orders compositor start, Surface attachment, PRoot command construction, process launch and display teardown.
