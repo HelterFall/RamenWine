@@ -269,7 +269,12 @@ class ProotWineCommandBuilderTest {
             val command = ProotWineCommandBuilder.build(
                 fixture.request().copy(game = x86Game)
             )
-            assertEquals("/usr/bin/wine", command.arguments[command.arguments.size - 2])
+            assertEquals("/bin/sh", command.arguments[command.arguments.size - 3])
+            assertEquals(
+                "/opt/ramenwine-tools/run-wine-command.sh",
+                command.arguments[command.arguments.size - 2]
+            )
+            assertEquals("/games/" + fixture.gameId + "/game.exe", command.arguments.last())
         } finally {
             fixture.cleanup()
         }
