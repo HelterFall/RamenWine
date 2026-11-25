@@ -162,7 +162,7 @@ fun RamenWineApp() {
             .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
         val runtimeNeedsInstall = bundledRuntimeVersion != null && (
             installedBackend?.state != RuntimeState.FILES_PRESENT ||
-                installedBackend.runtimeVersion != bundledRuntimeVersion
+                installedBackend?.runtimeVersion != bundledRuntimeVersion
             )
 
         if (runtimeNeedsInstall) {
