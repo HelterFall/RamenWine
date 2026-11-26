@@ -3,6 +3,7 @@ package dev.ramenwine.ui
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -577,6 +578,17 @@ fun RamenWineApp() {
                 }
                 preparingGame = false
             }
+        }
+    }
+
+    // System Back must follow the same orderly Wine/PRoot shutdown path as
+    // the in-screen button; otherwise the Activity could disappear while the
+    // supervised Windows process and its prefix lock are still active.
+    BackHandler(enabled = activeDisplaySession != null) {
+        if (preparingGame) {
+            gameLaunchNotice = "Идёт подготовка запуска. Дождись её завершения перед выходом."
+        } else {
+            stopSelectedGame()
         }
     }
 
