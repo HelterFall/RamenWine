@@ -584,7 +584,7 @@ fun RamenWineApp() {
     // System Back must follow the same orderly Wine/PRoot shutdown path as
     // the in-screen button; otherwise the Activity could disappear while the
     // supervised Windows process and its prefix lock are still active.
-    BackHandler(enabled = activeDisplaySession != null) {
+    BackHandler(enabled = activeDisplaySession != null || preparingGame) {
         if (preparingGame || verifyingSurfaceFrame) {
             gameLaunchNotice = "Идёт подготовка или проверка экрана. Дождись её завершения перед выходом."
         } else {
