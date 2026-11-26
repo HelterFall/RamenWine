@@ -250,7 +250,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/out/host/bin"
           "$TC/aarch64-linux-android28-clang" -O2 -Wall -Wextra \
             -Wno-unused-parameter -Wno-sign-compare -fPIE -pie \
-            -Wl,-z,max-page-size=16384 -Wl,-z,now \
+            -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,-z,now \
             "$GITHUB_WORKSPACE/directaudio/directaudio-relay.c" \
             -o "$GITHUB_WORKSPACE/out/host/bin/directaudio-relay" \
             -laaudio -llog -pthread
