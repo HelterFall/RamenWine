@@ -159,6 +159,42 @@ class ProcessTreeTerminatorTest {
     }
 
     @Test
+    fun doesNotCaptureChildrenOfAReusedRootPid() {
+        val proc = Files.createTempDirectory("ramenwine-proc-reused-root-pid").toFile()
+        try {
+            writeStat(proc, pid = 42, comm = "proot", state = 'S', parentPid = 1, startTime = 50L, childPids = listOf(101))
+            writeStat(proc, pid = 101, comm = "original-game", state = 'S', parentPid = 42, startTime = 100L)
+
+            val signals = mutableListOf<Pair<Int, Int>>()
+            val tracker = ProcessTreeTerminator(
+                rootPid = 42,
+                procDirectory = proc,
+                sendSignal = { pid, signal -> signals += pid to signal },
+                termSettleMillis = 0L,
+                killSettleMillis = 0L
+            )
+            tracker.captureDescendants()
+
+            // The original child is now reparented, while Android reuses the
+            // root PID for an unrelated process that has its own child.
+            writeStat(proc, pid = 101, comm = "original-game", state = 'S', parentPid = 7, startTime = 100L)
+            writeStat(proc, pid = 42, comm = "unrelated-root", state = 'S', parentPid = 1, startTime = 999L, childPids = listOf(103))
+            writeStat(proc, pid = 103, comm = "unrelated-child", state = 'S', parentPid = 42, startTime = 200L)
+
+            val snapshot = tracker.diagnosticSnapshot()
+            tracker.terminateRemaining()
+
+            assertTrue(!snapshot.contains("unrelated-root"))
+            assertTrue(!snapshot.contains("unrelated-child"))
+            assertTrue(signals.any { it == (101 to 15) })
+            assertTrue(signals.any { it == (101 to 9) })
+            assertTrue(signals.none { it.first == 42 || it.first == 103 })
+        } finally {
+            proc.deleteRecursively()
+        }
+    }
+
+    @Test
     fun parsesStatWhenCommandNameContainsSpacesAndClosingParentheses() {
         val parsed = ProcessTreeTerminator.parseStat(
             statLine(
