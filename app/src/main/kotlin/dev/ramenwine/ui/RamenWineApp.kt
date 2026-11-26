@@ -132,7 +132,7 @@ fun RamenWineApp() {
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
     var surfaceReady by remember { mutableStateOf(false) }
     var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
-state declarations    var preparingGame by remember { mutableStateOf(false) }
+    var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
     var gameLaunchOutput by remember { mutableStateOf<List<String>>(emptyList()) }
