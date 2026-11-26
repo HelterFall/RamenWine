@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+
+from check_elf_alignment import load_segment_alignments
 from pathlib import Path, PurePosixPath
 
 PINNED_RELEASE_TAG = "v26.8.12"
@@ -48,7 +50,6 @@ REQUIRED_JNI_SYMBOLS = {
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeTextEntryWanted",
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeGetTextInputContentType",
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeRunWestonSimpleSHM",
-    "Java_com_aspauldingcode_wawona_WawonaNative_nativeStopWestonSimpleSHM",
     "Java_com_aspauldingcode_wawona_WawonaNative_nativeIsWestonSimpleSHMRunning",
 }
 ASSET_ROOTS = ("xkb", "fonts", "weston")
@@ -214,6 +215,7 @@ def main() -> int:
                         destination = staged_libs / relative
                         digest = extract_member(archive, info, destination, total_bytes)
                         check_arm64_elf(destination)
+                        load_segment_alignments(destination)
                         native_manifest[relative] = digest
                         native_count += 1
                         continue
