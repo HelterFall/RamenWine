@@ -395,6 +395,12 @@ readelf -h "$NATIVE_LIBRARY_DIR/libproot.so" | grep -q 'AArch64' || \
 readelf -h "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so" | grep -q 'AArch64' || \
   fail "Packaged DirectAudio relay is not an AArch64 ELF."
 
+# The files below are executable ARM64 ELF images stored in nativeLibraryDir.
+# They must also be loadable on 16-KB Android kernels, not merely AArch64.
+python3 "$ROOT_DIR/tools/check_elf_alignment.py" \
+  "$NATIVE_LIBRARY_DIR/libproot.so" \
+  "$NATIVE_LIBRARY_DIR/libdirectaudio-relay.so"
+
 # PRoot normally extracts its ELF loader into PROOT_TMP_DIR. Android denies
 # executing that writable filesDir/cacheDir copy on targetSdk 29+, so ship
 # the ARM64 loader in nativeLibraryDir and point PRoot at that APK file.
@@ -404,6 +410,8 @@ PROOT_LOADER_BINARY="$(find "$PROOT_DIR" -type f -name loader -print -quit)"
 install -m 0755 "$PROOT_LOADER_BINARY" "$NATIVE_LIBRARY_DIR/libproot-loader.so"
 readelf -h "$NATIVE_LIBRARY_DIR/libproot-loader.so" | grep -q 'AArch64' || \
   fail "Packaged PRoot ELF loader is not an AArch64 ELF."
+python3 "$ROOT_DIR/tools/check_elf_alignment.py" \
+  "$NATIVE_LIBRARY_DIR/libproot-loader.so"
 
 # The bundled Debian guest is ARM64 only. PRoot's optional loader-m32 is for
 # 32-bit ARM guest ELF programs and is not needed by this guest; x86 games run
