@@ -132,6 +132,9 @@ fun RamenWineApp() {
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
     var surfaceReady by remember { mutableStateOf(false) }
     var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
+    var surfaceFrameVerified by remember { mutableStateOf(false) }
+    var verifyingSurfaceFrame by remember { mutableStateOf(false) }
+    var surfaceFrameResult by remember { mutableStateOf<String?>(null) }
     var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
@@ -324,6 +327,8 @@ fun RamenWineApp() {
         }
         gameLaunchError = null
         gameLaunchNotice = "Открываю игровой экран…"
+        surfaceFrameVerified = false
+        surfaceFrameResult = null
         preparingGame = true
         scope.launch {
             try {
@@ -332,6 +337,7 @@ fun RamenWineApp() {
                 selectedDisplayGame = game
                 surfaceReady = false
                 activeSurfaceView = null
+                surfaceFrameVerified = false
                 gameLaunchNotice = "Подключаю игровой экран…"
             } catch (error: Exception) {
                 diagnosticLogStore.recordException("opening the display", error)
@@ -343,9 +349,44 @@ fun RamenWineApp() {
         }
     }
 
+    fun verifyWaylandSurfaceOutput() {
+        val view = activeSurfaceView
+        if (view == null || !surfaceReady || verifyingSurfaceFrame || preparingGame) return
+
+        verifyingSurfaceFrame = true
+        surfaceFrameVerified = false
+        surfaceFrameResult = "Проверяю вывод изображения…"
+        scope.launch {
+            try {
+                diagnosticLogStore.record(
+                    "UI: starting Wayland SHM/PixelCopy check view=${view.width}x${view.height} " +
+                        "density=${view.resources.displayMetrics.density}"
+                )
+                val result = view.verifyWaylandShmOutput()
+                diagnosticLogStore.record(
+                    "UI: Wayland SHM/PixelCopy result visible=${result.visible}: ${result.detail}"
+                )
+                surfaceFrameVerified = result.visible
+                surfaceFrameResult = if (result.visible) "Экран готов" else result.detail
+                gameLaunchNotice = if (result.visible) {
+                    "Экран готов. Тестовое окно закрыто; можно проверить Wine или запустить программу."
+                } else {
+                    "Проверка экрана не пройдена: ${result.detail}"
+                }
+            } catch (error: Exception) {
+                diagnosticLogStore.recordException("Wayland SHM/PixelCopy verification", error)
+                surfaceFrameVerified = false
+                surfaceFrameResult = error.message ?: error.javaClass.simpleName
+                gameLaunchNotice = "Ошибка проверки экрана: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                verifyingSurfaceFrame = false
+            }
+        }
+    }
+
     fun startSelectedSession(launchDiagnosticWindow: Boolean = false) {
         val game = selectedDisplayGame ?: return
-        if (!surfaceReady || preparingGame) return
+        if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
 
         preparingGame = true
         gameLaunchError = null
@@ -429,6 +470,7 @@ fun RamenWineApp() {
                         activeDisplaySession = null
                         selectedDisplayGame = null
                         surfaceReady = false
+                        surfaceFrameVerified = false
                         activeSurfaceView = null
                         preparingGame = false
                         gameLaunchNotice = if (launchDiagnosticWindow) {
@@ -479,6 +521,7 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
+                    surfaceFrameVerified = false
                     activeSurfaceView = null
                     gameLaunchNotice = if (launchDiagnosticWindow) {
                         "Win32 smoke-test завершился до подтверждения запуска."
@@ -502,6 +545,7 @@ fun RamenWineApp() {
                 activeDisplaySession = null
                 selectedDisplayGame = null
                 surfaceReady = false
+                surfaceFrameVerified = false
                 activeSurfaceView = null
             } finally {
                 preparingGame = false
@@ -528,6 +572,7 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
+                    surfaceFrameVerified = false
                     activeSurfaceView = null
                 }
                 preparingGame = false
@@ -559,14 +604,21 @@ fun RamenWineApp() {
                         onSurfaceStateChanged = { attached ->
                             diagnosticLogStore.record("UI: Android game Surface attached=$attached")
                             surfaceReady = attached
-                            gameLaunchNotice = if (attached) {
-                                "Экран подключён. Можно запускать Windows-программу."
+                            if (attached) {
+                                gameLaunchNotice = if (surfaceFrameVerified) {
+                                    "Экран подключён и проверен. Можно запускать Win32-программу."
+                                } else {
+                                    "Экран подключён. Теперь проверь вывод изображения."
+                                }
                             } else {
-                                "Ожидаю подключения Android Surface…"
+                                surfaceFrameVerified = false
+                                surfaceFrameResult = null
+                                gameLaunchNotice = "Ожидаю подключения Android Surface…"
                             }
                         },
                         onSurfaceViewChanged = { view ->
                             activeSurfaceView = view
+                            if (view == null) surfaceFrameVerified = false
                         }
                     )
 
@@ -581,7 +633,20 @@ fun RamenWineApp() {
                         ) {
                             Text("Назад")
                         }
-                        if (activeGameSession != null) {
+                        if (activeGameSession == null) {
+                            Button(
+                                onClick = ::verifyWaylandSurfaceOutput,
+                                enabled = surfaceReady && !verifyingSurfaceFrame && !preparingGame
+                            ) {
+                                Text(
+                                    when {
+                                        verifyingSurfaceFrame -> "Проверяю…"
+                                        surfaceFrameVerified -> "Экран готов"
+                                        else -> "Проверить экран"
+                                    }
+                                )
+                            }
+                        } else {
                             Button(
                                 onClick = ::stopSelectedGame,
                                 enabled = !preparingGame
@@ -598,14 +663,16 @@ fun RamenWineApp() {
                             Button(
                                 onClick = { startSelectedSession(launchDiagnosticWindow = true) },
                                 modifier = Modifier.weight(1f),
-                                enabled = surfaceReady && !preparingGame
+                                enabled = surfaceReady && surfaceFrameVerified &&
+                                    !preparingGame && !verifyingSurfaceFrame
                             ) {
                                 Text("Проверить Wine")
                             }
                             Button(
                                 onClick = { startSelectedSession() },
                                 modifier = Modifier.weight(1f),
-                                enabled = surfaceReady && !preparingGame
+                                enabled = surfaceReady && surfaceFrameVerified &&
+                                    !preparingGame && !verifyingSurfaceFrame
                             ) {
                                 Text(if (preparingGame) "Запуск…" else "Запустить")
                             }
