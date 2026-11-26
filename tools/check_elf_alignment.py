@@ -12,6 +12,7 @@ ELF_MAGIC = b"\x7fELF"
 ELFCLASS64 = 2
 ELFDATA2LSB = 1
 PT_LOAD = 1
+PT_GNU_RELRO = 0x6474E552
 ELF64_HEADER_SIZE = 64
 ELF64_PROGRAM_HEADER_SIZE = 56
 DEFAULT_MIN_ALIGNMENT = 16 * 1024
@@ -60,6 +61,8 @@ def load_segment_alignments(
                 raise ElfAlignmentError(f"{path}: program headers lie outside the file")
 
             alignments: list[int] = []
+            load_ranges: list[tuple[int, int]] = []
+            relro_ranges: list[tuple[int, int]] = []
             for index in range(program_header_count):
                 offset = program_header_offset + index * program_header_size
                 stream.seek(offset)
@@ -76,8 +79,12 @@ def load_segment_alignments(
                     _memory_size,
                     alignment,
                 ) = struct.unpack("<IIQQQQQQ", raw)
+                if segment_type == PT_GNU_RELRO:
+                    relro_ranges.append((virtual_address, _memory_size))
+                    continue
                 if segment_type != PT_LOAD:
                     continue
+                load_ranges.append((virtual_address, virtual_address + _memory_size))
                 if alignment < minimum_alignment:
                     raise ElfAlignmentError(
                         f"{path}: PT_LOAD #{len(alignments) + 1} has p_align=0x{alignment:x}; "
@@ -96,6 +103,23 @@ def load_segment_alignments(
 
             if not alignments:
                 raise ElfAlignmentError(f"{path}: no PT_LOAD segments")
+
+            for relro_start, relro_size in relro_ranges:
+                relro_end = relro_start + relro_size
+                if relro_end % minimum_alignment == 0:
+                    continue
+                # Android also accepts a non-page-aligned RELRO end when the
+                # containing LOAD segment ends at exactly the same address,
+                # leaving no writable .data/.bss after RELRO in that page.
+                if any(
+                    load_start <= relro_start and load_end == relro_end
+                    for load_start, load_end in load_ranges
+                ):
+                    continue
+                raise ElfAlignmentError(
+                    f"{path}: GNU_RELRO end 0x{relro_end:x} is not aligned to "
+                    f"0x{minimum_alignment:x} and writable LOAD data follows it"
+                )
             return alignments
     except OSError as error:
         raise ElfAlignmentError(f"{path}: {error}") from error
