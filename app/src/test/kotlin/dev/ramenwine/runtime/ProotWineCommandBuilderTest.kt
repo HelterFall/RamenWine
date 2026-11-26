@@ -385,11 +385,11 @@ class ProotWineCommandBuilderTest {
             "runtime/current/backends/" + RuntimeBackendId.GLIBC_PROOT_BOX64.directoryName
         ).apply { mkdirs() }
         val rootfs = File(backendRoot, "rootfs").apply { mkdirs() }
-        executable(backendRoot, "host/bin/proot")
-        executable(backendRoot, "host/bin/directaudio-relay")
+        val packagedProot = executable(backendRoot, "host/bin/proot")
+        val packagedAudioRelay = executable(backendRoot, "host/bin/directaudio-relay")
         val proot = executable(nativeLibraryDirectory, "libproot.so")
-        executable(nativeLibraryDirectory, "libproot-loader.so")
-        executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
+        val prootLoader = executable(nativeLibraryDirectory, "libproot-loader.so")
+        val nativeAudioRelay = executable(nativeLibraryDirectory, "libdirectaudio-relay.so")
         val hostLibraries = File(backendRoot, "host/lib").apply { mkdirs() }
         val runtimeProperties = File(backendRoot, "runtime.properties").apply {
             writeText(
