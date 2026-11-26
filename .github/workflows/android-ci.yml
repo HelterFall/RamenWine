@@ -508,6 +508,47 @@ jobs:
           test -s "$APK"
           test -s "$MANIFEST"
 
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
+          test -x "$ZIPALIGN"
+          "$ZIPALIGN" -v -c -P 16 4 "$APK"
+
+          # Check every packaged Android ARM64 shared object, including the
+          # official Wawona dependency closure and APK-native launch helpers.
+          python3 - "$APK" <<'PY'
+          import sys
+          import tempfile
+          import zipfile
+          from pathlib import Path
+
+          sys.path.insert(0, "tools")
+          from check_elf_alignment import load_segment_alignments
+
+          apk_path = sys.argv[1]
+          checked = 0
+          with zipfile.ZipFile(apk_path) as archive, tempfile.TemporaryDirectory() as temporary:
+              for entry in archive.infolist():
+                  name = entry.filename
+                  if entry.is_dir() or not name.startswith("lib/arm64-v8a/"):
+                      continue
+                  library_name = name.removeprefix("lib/arm64-v8a/")
+                  if "/" in library_name or not (
+                      library_name.endswith(".so") or ".so." in library_name
+                  ):
+                      continue
+                  staged = Path(temporary) / library_name
+                  staged.write_bytes(archive.read(entry))
+                  alignments = load_segment_alignments(staged)
+                  print(
+                      f"16 KB ELF: {library_name}: " +
+                      ", ".join(f"0x{value:x}" for value in alignments)
+                  )
+                  checked += 1
+
+          if checked == 0:
+              raise SystemExit("APK contains no ARM64 native shared libraries to validate")
+          print(f"Verified 16 KB ELF alignment for {checked} ARM64 shared libraries.")
+          PY
+
           unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot.so"
           unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot-loader.so"
           unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libdirectaudio-relay.so"
