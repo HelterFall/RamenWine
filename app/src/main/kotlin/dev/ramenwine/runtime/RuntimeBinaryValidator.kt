@@ -18,8 +18,10 @@ internal object RuntimeBinaryValidator {
         Triple("host/bin/proot", ELF_MACHINE_AARCH64, "Android-host PRoot"),
         Triple("host/bin/directaudio-relay", ELF_MACHINE_AARCH64, "DirectAudio Android AAudio relay"),
         Triple("rootfs/usr/bin/env", ELF_MACHINE_AARCH64, "guest env"),
+        Triple("rootfs/usr/bin/sh", ELF_MACHINE_AARCH64, "guest shell"),
         Triple("rootfs/usr/bin/box64", ELF_MACHINE_AARCH64, "Box64"),
-        Triple("rootfs/usr/bin/wine", ELF_MACHINE_X86_64, "Wine loader for Box64")
+        Triple("rootfs/usr/bin/wine", ELF_MACHINE_X86_64, "Wine loader for Box64"),
+        Triple("rootfs/usr/bin/wineserver", ELF_MACHINE_X86_64, "Wine wineserver")
     )
 
     private val audioUnixLibrary = "rootfs/opt/ramenwine-audio/lib/wine/x86_64-unix/winedirectaudio.so"

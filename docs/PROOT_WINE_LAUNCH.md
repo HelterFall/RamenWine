@@ -20,16 +20,20 @@ This document describes the first Windows-process launch route using the glibc r
 
 The Wine build must include and load a compatible Wayland driver for the Windows program architecture. The exact driver/library file paths depend on the Wine build, so package construction must validate them rather than assuming one universal path.
 
-The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/box64` and `rootfs/usr/bin/wine`, plus a readable `wineboot.exe` at one of the supported paths. Symlink chains are followed when checking required launch files. The installer creates the app-private `host/lib` directory when it is omitted; extra Bionic host libraries may be packaged there only when the selected PRoot build actually needs them.
+The Android-host PRoot executable, its ELF loader and the DirectAudio relay are also copied from the pinned build into `app/src/main/jniLibs/arm64-v8a` as `libproot.so`, `libproot-loader.so` and `libdirectaudio-relay.so`. With `android:extractNativeLibs="true"`, PackageManager places them in the app's read-only `ApplicationInfo.nativeLibraryDir`. RamenWine executes those copies from there; the copies in the runtime ZIP remain for checksum, provenance and installed-inventory checks, not as executable launch paths. This is required for apps targeting Android 10/API 29 and later, where executing binaries from writable app-private data directories is blocked by Android's executable-file policy.
+
+
+The glibc package is rejected before extraction unless it contains executable `host/bin/proot`, `rootfs/usr/bin/env`, `rootfs/usr/bin/sh`, `rootfs/usr/bin/box64`, `rootfs/usr/bin/wine`, `rootfs/usr/bin/wineserver` and `rootfs/opt/ramenwine-tools/run-wine-command.sh`, plus a readable `wineboot.exe` at one of the supported paths. Symlink chains are followed when checking required launch files. The installer creates the app-private `host/lib` directory when it is omitted; extra Bionic host libraries may be packaged there only when the selected PRoot build actually needs them.
 
 The binary ABI is also checked from the actual headers:
 
 | Path | Required format |
 |---|---|
 | `host/bin/proot` | 64-bit little-endian AArch64 ELF (Android/Bionic host) |
-| `rootfs/usr/bin/env` | 64-bit little-endian AArch64 ELF (guest glibc) |
+| `rootfs/usr/bin/env` and `rootfs/usr/bin/sh` | 64-bit little-endian AArch64 ELF (guest glibc) |
 | `rootfs/usr/bin/box64` | 64-bit little-endian AArch64 ELF |
-| `rootfs/usr/bin/wine` | 64-bit little-endian x86-64 ELF (launched through Box64) |
+| `rootfs/usr/bin/wine` and `rootfs/usr/bin/wineserver` | 64-bit little-endian x86-64 ELF (launched through Box64) |
+| `rootfs/opt/ramenwine-tools/run-wine-command.sh` | Executable guest shell wrapper |
 | `wineboot.exe` | AMD64 PE32+ |
 
 This selects the x86-64 Wine WOW64 route under Box64. Box64's Wine guide documents the x86-64 WOW64 build as capable of running both 32-bit and 64-bit Windows programs without Box32; Wine 11.0 marks the new WoW64 mode fully supported and uses one `wine` loader rather than separate `wine64` binaries. See [Box64 Wine guidance](https://github.com/deepin-community/box64/blob/master/docs/WINE.md) and the [Wine 11.0 release announcement](https://list.winehq.org/hyperkitty/list/wine-announce%40list.winehq.org/thread/MXULWEMXQ5C24UEJ2STHPIUHNOZ7AZPQ/).
@@ -48,7 +52,7 @@ The ELF audit is strict for the Wine launcher, prefix initializer, core Wine mod
 | cacheDir/wine-tmp/<id> | /tmp | Per-game temporary files |
 | Wawona runtime directory | /run/user/<Android UID> | Wayland socket directory |
 
-The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the same Box64/Wine loader using -i for a new prefix or -u for an existing prefix that needs an update. If an interrupted first initialization left only some registry files, the next launch retries with -u rather than permanently rejecting the prefix; existing files are not deleted by this recovery path. It records a private marker only after wineboot exits successfully and system.reg, user.reg and userdef.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
+The command builder prepares private directories and mount targets. Before the selected EXE starts, WinePrefixManager runs the packaged x86-64 wineboot.exe through the guest `/bin/sh` and `run-wine-command.sh` wrapper. The wrapper launches Box64/Wine, then asks `wineserver -k` to stop and waits with `wineserver -w` for the prefix lock to be released before PRoot exits. This gives Wine a chance to flush registry hives after `wineboot -i` for a new prefix or `wineboot -u` for an existing prefix. If an interrupted first initialization left only some registry files, the next launch retries with -u rather than permanently rejecting the prefix; existing files are not deleted by this recovery path. It records a private marker only after wineboot exits successfully and system.reg, user.reg and userdef.reg exist. The marker is tied to the runtime version; a changed Wine runtime triggers a prefix update.
 
 ## Command and environment
 
@@ -56,14 +60,14 @@ The builder requires:
 - a valid imported-game UUID and relative directory games/<id>;
 - a safe selected EXE path contained in the imported game directory;
 - host/bin/proot and host/lib;
-- rootfs/usr/bin/env, used to create a clean guest environment;
-- the ARM64 glibc and x86-64 library directories expected by the guest environment;
-- rootfs/usr/bin/box64 and rootfs/usr/bin/wine, both executable;
+- rootfs/usr/bin/env and rootfs/usr/bin/sh;
+- rootfs/usr/bin/box64, rootfs/usr/bin/wine and rootfs/usr/bin/wineserver;
+- the executable rootfs/opt/ramenwine-tools/run-wine-command.sh wrapper;
 - wineboot.exe in the package's x86_64-windows Wine PE directory;
 - an app-private Wayland runtime directory containing the selected socket;
 - a socket path below the Android AF_UNIX sun_path limit.
 
-The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts /usr/bin/box64 /usr/bin/wine <game-exe> without a shell.
+The argument vector includes PRoot's --kill-on-exit, --link2symlink and --sysvipc options, the rootfs, binds for /dev and /proc, per-game directories, the Wayland runtime directory and the guest working directory. The guest working directory is the parent directory of the selected EXE; when the EXE is at the imported game root, that root is used. This preserves relative-resource lookup for games whose launcher lives in a subfolder. PRoot then starts the guest /usr/bin/env, which removes host-only variables, applies the guest environment and starts `/bin/sh /opt/ramenwine-tools/run-wine-command.sh <game-exe>`. The wrapper launches `/usr/bin/box64 /usr/bin/wine` and performs an orderly wineserver shutdown after the game exits.
 
 The two environments are deliberately separate:
 
@@ -72,7 +76,7 @@ The two environments are deliberately separate:
 
 This split matters: Box64 uses BOX64_LD_LIBRARY_PATH to find x86-64 shared libraries, while ordinary LD_LIBRARY_PATH is used for the guest's native ARM64/glibc libraries. The Android host library path must not be reused as Wine's guest library path. See the [Box64 environment-variable reference](https://github.com/ptitSeb/box64/blob/main/docs/USAGE.md) and [PRoot-Distro guest-environment documentation](https://github.com/termux/proot-distro#guest-environment) for the corresponding environment model.
 
-Wine prefix setup and game launch use separate PRoot processes but the same per-game bind mounts and guest environment. The initialization command replaces the game EXE with the packaged wineboot PE executable and passes -i or -u through the Wine loader.
+Wine prefix setup and game launch use separate PRoot processes but the same per-game bind mounts and guest environment. The initialization command replaces the game EXE with the packaged wineboot PE executable and passes -i or -u through the Wine shutdown wrapper, which waits for wineserver to release the prefix before returning.
 
 The command does not use PRoot fake-root mode. The guest process inherits the app's ordinary Android UID and sandbox.
 
@@ -86,7 +90,7 @@ Without an in-process compositor and a reachable Wayland socket, a launch comman
 
 ProotWineProcessSupervisor starts PRoot directly with ProcessBuilder, merges stdout/stderr, dispatches output and exit callbacks to the main dispatcher, and supports a graceful stop followed by forced stop. One coroutine owns process-exit observation; concurrent stop requests are serialized, and the exit callback is delivered only after a bounded final-output drain. If a Wine descendant keeps the inherited pipe open, the supervisor closes its read end after the drain timeout rather than blocking the game screen forever. The class also provides a run-to-completion path for one-shot setup commands such as wineboot. The current stop grace period is 1.5 seconds, followed by a 1.5-second forced-wait period.
 
-PRoot's `--kill-on-exit` remains the cleanup mechanism for one-shot `wineboot` and `reg.exe` setup commands, so a Wine server can complete or be reused between those short invocations. For a long-running game session, the Android supervisor also samples `/proc` while the PRoot process is alive, remembers descendant PID/start-time pairs, and after PRoot exits sends TERM then KILL only to remembered descendants whose start times still match. This catches escaped Wine/game children without killing a different process after PID reuse. Physical-device verification is still needed for Android's per-device `/proc` visibility and PRoot's actual tracing behavior.
+The guest wrapper is the normal shutdown path for `wineboot`, `reg.exe`, the GDI smoke executable and the selected novel: after the Windows process exits it sends `wineserver -k` and waits for `wineserver -w` before returning. PRoot's `--kill-on-exit` and the Android supervisor's process-tree cleanup remain the fallback for interrupted launches or a forced Stop. The supervisor samples `/proc` while PRoot is alive, remembers descendant PID/start-time pairs, and after PRoot exits sends TERM then KILL only to remembered descendants whose start times still match. This catches escaped Wine/game children without killing a different process after PID reuse. Physical-device verification is still needed for Android's per-device `/proc` visibility and PRoot's actual tracing behavior.
 
 ## Security and package trust
 

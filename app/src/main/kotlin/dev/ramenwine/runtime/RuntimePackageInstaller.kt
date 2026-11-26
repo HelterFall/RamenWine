@@ -16,7 +16,9 @@ import java.util.UUID
 import org.json.JSONArray
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 data class RuntimeInstallResult(
     val backend: RuntimeBackendId,
@@ -48,6 +50,35 @@ class RuntimePackageInstaller(private val context: Context) {
             context.assets.open(assetPath)
         } catch (error: IOException) {
             throw IOException("Bundled runtime asset is missing: " + assetPath, error)
+        }
+    }
+
+    /**
+     * Reads only the first ZIP entry (the small runtime manifest) to decide
+     * whether the app's already-installed runtime must be upgraded.
+     */
+    suspend fun bundledRuntimeVersion(
+        assetPath: String = "runtime/ramenwine-runtime.zip"
+    ): String = withContext(Dispatchers.IO) {
+        val source = try {
+            context.assets.open(assetPath)
+        } catch (error: IOException) {
+            throw IOException("Bundled runtime asset is missing: " + assetPath, error)
+        }
+
+        source.use { rawInput ->
+            ZipInputStream(BufferedInputStream(rawInput)).use { zip ->
+                val entry = zip.nextEntry
+                    ?: throw IOException("Bundled runtime package is empty.")
+                if (entry.name != MANIFEST_ENTRY) {
+                    throw IOException("Bundled runtime manifest must be the first ZIP entry.")
+                }
+                val manifestBytes = ByteArrayOutputStream()
+                copyManifest(zip, manifestBytes)
+                RuntimePackageManifestParser.parse(
+                    manifestBytes.toByteArray().toString(Charsets.UTF_8)
+                ).runtimeVersion
+            }
         }
     }
 

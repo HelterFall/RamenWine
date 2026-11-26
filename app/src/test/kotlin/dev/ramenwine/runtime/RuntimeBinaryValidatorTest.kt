@@ -75,7 +75,7 @@ class RuntimeBinaryValidatorTest {
             createRuntimeHeaders(backendRoot, wineMachine = 62)
             File(
                 backendRoot,
-                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
+                "rootfs/opt/ramenwine-wine/lib/wine/x86_64-unix/winewayland.so"
             ).delete()
 
             val errors = RuntimeBinaryValidator.inspectInstalled(
@@ -97,7 +97,7 @@ class RuntimeBinaryValidatorTest {
             createRuntimeHeaders(backendRoot, wineMachine = 62)
             File(
                 backendRoot,
-                "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
+                "rootfs/opt/ramenwine-wine/lib/wine/x86_64-unix/winewayland.so"
             ).writeBytes(elf64(183))
 
             val errors = RuntimeBinaryValidator.inspectInstalled(
@@ -116,8 +116,10 @@ class RuntimeBinaryValidatorTest {
             "host/bin/proot" to 183,
             "host/bin/directaudio-relay" to 183,
             "rootfs/usr/bin/env" to 183,
+            "rootfs/usr/bin/sh" to 183,
             "rootfs/usr/bin/box64" to 183,
-            "rootfs/usr/bin/wine" to wineMachine
+            "rootfs/usr/bin/wine" to wineMachine,
+            "rootfs/usr/bin/wineserver" to 62
         ).forEach { (relative, machine) ->
             val file = File(backendRoot, relative)
             file.parentFile?.mkdirs()
@@ -161,7 +163,7 @@ class RuntimeBinaryValidatorTest {
 
         val waylandDriver = File(
             backendRoot,
-            "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
+            "rootfs/opt/ramenwine-wine/lib/wine/x86_64-unix/winewayland.so"
         )
         waylandDriver.parentFile?.mkdirs()
         waylandDriver.writeBytes(elf64(62))

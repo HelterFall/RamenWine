@@ -118,14 +118,31 @@ class RuntimeLayoutSymlinkTest {
             "host/bin/proot" to 183,
             "host/bin/directaudio-relay" to 183,
             "rootfs/usr/bin/env" to 183,
+            "rootfs/usr/bin/sh" to 183,
             "rootfs/usr/bin/box64" to 183,
-            "rootfs/usr/bin/wine" to 62
+            "rootfs/usr/bin/wine" to 62,
+            "rootfs/usr/bin/wineserver" to 62
         ).forEach { (relative, machine) ->
             val executable = File(backendRoot, relative)
             executable.parentFile?.mkdirs()
             executable.writeBytes(elf64(machine))
             executable.setExecutable(true)
         }
+
+        val wrapper = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tools/run-wine-command.sh"
+        )
+        wrapper.parentFile?.mkdirs()
+        wrapper.writeText("#!/bin/sh\nexit 0\n")
+        wrapper.setExecutable(true)
+
+        val smokeTest = File(
+            backendRoot,
+            "rootfs/opt/ramenwine-tests/ramenwine-gdi-smoke.exe"
+        )
+        smokeTest.parentFile?.mkdirs()
+        smokeTest.writeBytes(pe32PlusAmd64())
 
         val legacyExecutable = File(backendRoot, "bin/wine")
         legacyExecutable.parentFile?.mkdirs()
@@ -163,7 +180,7 @@ class RuntimeLayoutSymlinkTest {
 
         val waylandDriver = File(
             backendRoot,
-            "rootfs/opt/ramenwine-wine/x86_64-unix/winewayland.so"
+            "rootfs/opt/ramenwine-wine/lib/wine/x86_64-unix/winewayland.so"
         )
         waylandDriver.parentFile?.mkdirs()
         waylandDriver.writeBytes(elf64(62))

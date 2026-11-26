@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import dev.ramenwine.display.DisplaySession
 import dev.ramenwine.display.WawonaDisplayBackend
 import dev.ramenwine.display.WawonaSurfaceHost
-import dev.ramenwine.display.WawonaSurfaceView
 import dev.ramenwine.importer.GameFolderImporter
 import dev.ramenwine.importer.ImportProgress
 import dev.ramenwine.inspection.ExecutableCandidate
@@ -113,10 +112,6 @@ fun RamenWineApp() {
     var activeGameSession by remember { mutableStateOf<GameSession?>(null) }
     var activeGameIsDiagnostic by remember { mutableStateOf(false) }
     var surfaceReady by remember { mutableStateOf(false) }
-    var activeSurfaceView by remember { mutableStateOf<WawonaSurfaceView?>(null) }
-    var surfaceFrameVerified by remember { mutableStateOf(false) }
-    var verifyingSurfaceFrame by remember { mutableStateOf(false) }
-    var surfaceFrameResult by remember { mutableStateOf<String?>(null) }
     var preparingGame by remember { mutableStateOf(false) }
     var gameLaunchError by remember { mutableStateOf<String?>(null) }
     var gameLaunchNotice by remember { mutableStateOf<String?>(null) }
@@ -155,23 +150,40 @@ fun RamenWineApp() {
             storageError = error.message ?: error.javaClass.simpleName
         }
 
+        val runtimeInstaller = RuntimePackageInstaller(context.applicationContext)
+        val bundledRuntimeVersion = try {
+            withContext(Dispatchers.IO) { runtimeInstaller.bundledRuntimeVersion() }
+        } catch (error: Exception) {
+            runtimePackageError = error.message ?: error.javaClass.simpleName
+            null
+        }
         val installedBackend = RuntimeLayout.inspect(context.filesDir)
             .backends
             .firstOrNull { it.backend == RuntimeBackendId.GLIBC_PROOT_BOX64 }
+        val runtimeNeedsInstall = bundledRuntimeVersion != null && (
+            installedBackend?.state != RuntimeState.FILES_PRESENT ||
+                installedBackend?.runtimeVersion != bundledRuntimeVersion
+            )
 
-        if (installedBackend?.state != RuntimeState.FILES_PRESENT) {
+        if (runtimeNeedsInstall) {
             installingRuntime = true
             runtimePackageError = null
-            runtimePackageNotice = null
+            runtimePackageNotice = if (installedBackend?.state == RuntimeState.FILES_PRESENT) {
+                "Обновляю Wine runtime…"
+            } else {
+                null
+            }
             try {
                 val result = withContext(Dispatchers.IO) {
-                    RuntimePackageInstaller(context.applicationContext).installBundled()
+                    runtimeInstaller.installBundled()
                 }
                 runtimeInspection = RuntimeLayout.inspect(context.filesDir)
                 runtimePackageNotice = result.runtimeVersion +
                     " · " + result.installedFileCount + " файлов"
                 // The shared runtime is installed after the initial storage
                 // snapshot. Refresh the summary so it never keeps showing 0 B.
+                // Existing per-game prefixes are retained and WinePrefixManager
+                // updates them on next launch when their runtime marker changes.
                 refreshLibraryStorage()
             } catch (error: Exception) {
                 runtimePackageError = error.message ?: error.javaClass.simpleName
@@ -276,8 +288,6 @@ fun RamenWineApp() {
 
         gameLaunchError = null
         gameLaunchNotice = "Проверяю Wawona и подготавливаю ресурсы…"
-        surfaceFrameVerified = false
-        surfaceFrameResult = null
         processOutput = ""
         preparingGame = true
 
@@ -286,8 +296,6 @@ fun RamenWineApp() {
                 activeDisplaySession = gameSessionCoordinator.openDisplay()
                 selectedDisplayGame = game
                 surfaceReady = false
-                activeSurfaceView = null
-                surfaceFrameVerified = false
                 gameLaunchNotice = "Compositor запущен. Подключаю Android Surface…"
             } catch (error: Exception) {
                 gameLaunchError = error.message ?: error.javaClass.simpleName
@@ -298,31 +306,9 @@ fun RamenWineApp() {
         }
     }
 
-    fun verifyWaylandSurfaceOutput() {
-        val view = activeSurfaceView
-        if (view == null || !surfaceReady || verifyingSurfaceFrame || preparingGame) return
-
-        verifyingSurfaceFrame = true
-        surfaceFrameVerified = false
-        surfaceFrameResult = "Запускаю настоящий Wayland SHM-клиент и проверяю пиксели Android Surface…"
-        scope.launch {
-            try {
-                val result = view.verifyWaylandShmOutput()
-                surfaceFrameVerified = result.visible
-                surfaceFrameResult = result.detail
-            } catch (error: Exception) {
-                surfaceFrameVerified = false
-                surfaceFrameResult = "Проверка не завершилась: " +
-                    (error.message ?: error.javaClass.simpleName)
-            } finally {
-                verifyingSurfaceFrame = false
-            }
-        }
-    }
-
     fun startSelectedSession(launchDiagnosticWindow: Boolean) {
         val game = selectedDisplayGame ?: return
-        if (!surfaceReady || !surfaceFrameVerified || preparingGame || verifyingSurfaceFrame) return
+        if (!surfaceReady || preparingGame) return
 
         preparingGame = true
         gameLaunchError = null
@@ -345,8 +331,6 @@ fun RamenWineApp() {
                         activeDisplaySession = null
                         selectedDisplayGame = null
                         surfaceReady = false
-                        surfaceFrameVerified = false
-                        activeSurfaceView = null
                         preparingGame = false
                         gameLaunchNotice = if (launchDiagnosticWindow) {
                             "Win32 GDI тест завершился (код $exitCode)."
@@ -369,8 +353,6 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
-                    surfaceFrameVerified = false
-                    activeSurfaceView = null
                     gameLaunchNotice = if (launchDiagnosticWindow) {
                         "Win32 GDI тест завершился до подтверждения запуска."
                     } else {
@@ -385,8 +367,6 @@ fun RamenWineApp() {
                 activeDisplaySession = null
                 selectedDisplayGame = null
                 surfaceReady = false
-                surfaceFrameVerified = false
-                activeSurfaceView = null
             } finally {
                 preparingGame = false
             }
@@ -418,8 +398,6 @@ fun RamenWineApp() {
                     activeDisplaySession = null
                     selectedDisplayGame = null
                     surfaceReady = false
-                    surfaceFrameVerified = false
-                    activeSurfaceView = null
                 }
                 preparingGame = false
             }
@@ -661,45 +639,18 @@ fun RamenWineApp() {
                                 modifier = Modifier.fillMaxWidth().height(320.dp),
                                 onSurfaceStateChanged = { attached ->
                                     surfaceReady = attached
-                                    if (!attached) {
-                                        surfaceFrameVerified = false
-                                        surfaceFrameResult = null
-                                    }
-                                },
-                                onSurfaceViewChanged = { view ->
-                                    activeSurfaceView = view
-                                    if (view == null) surfaceFrameVerified = false
                                 }
                             )
-                            if (activeGameSession == null) {
-                                Button(
-                                    onClick = ::verifyWaylandSurfaceOutput,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && !preparingGame && !verifyingSurfaceFrame
-                                ) {
-                                    Text(
-                                        if (verifyingSurfaceFrame) "Проверяю кадр Wayland…"
-                                        else "Проверить реальный вывод Wayland"
-                                    )
-                                }
-                                surfaceFrameResult?.let { detail ->
-                                    Text(
-                                        text = detail,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (detail.startsWith("Успех:")) {
-                                            MaterialTheme.colorScheme.secondary
-                                        } else {
-                                            MaterialTheme.colorScheme.error
-                                        }
-                                    )
-                                }
-                            }
+                                Text(
+                                    "Отдельный Wayland SHM-тест временно отключён: закреплённая Wawona запускает нативный поток без надёжного ожидания завершения. Для проверки полного пути используй встроенное Win32 GDI-окно.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             if (activeGameSession == null) {
                                 Button(
                                     onClick = ::launchWin32GdiSmokeTest,
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && surfaceFrameVerified &&
-                                        !preparingGame && !verifyingSurfaceFrame
+                                    enabled = surfaceReady && !preparingGame
                                 ) {
                                     Text("Проверить запуск Win32 GDI окна")
                                 }
@@ -711,13 +662,10 @@ fun RamenWineApp() {
                                 Button(
                                     onClick = ::launchSelectedGame,
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = surfaceReady && surfaceFrameVerified &&
-                                        !preparingGame && !verifyingSurfaceFrame
+                                    enabled = surfaceReady && !preparingGame
                                 ) {
                                     Text(
-                                        if (preparingGame) "Подготовка…"
-                                        else if (!surfaceFrameVerified) "Сначала проверь вывод Wayland"
-                                        else "Запустить Windows EXE"
+                                        if (preparingGame) "Подготовка…" else "Запустить новеллу"
                                     )
                                 }
                             } else {

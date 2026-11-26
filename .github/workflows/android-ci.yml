@@ -302,7 +302,7 @@ jobs:
           retention-days: 14
 
   rootfs:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     name: Build Debian ARM64 guest rootfs natively
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -342,7 +342,7 @@ jobs:
           retention-days: 1
 
   android:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_android
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.build_android)
     needs: [directaudio, rootfs]
     name: Build Android APK from prebuilt runtime bundles
     runs-on: ubuntu-latest
@@ -440,6 +440,17 @@ jobs:
       - name: Run Android runtime and Wawona adapter tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
+      - name: Upload Android unit test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-report
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
 
@@ -453,6 +464,12 @@ jobs:
 
           test -s "$APK"
           test -s "$MANIFEST"
+
+          # Android-host executables must be extracted from the APK's native
+          # library directory, never execve()'d from writable app filesDir.
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libproot-loader.so"
+          unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/libdirectaudio-relay.so"
 
           unzip -Z1 "$APK" | grep -Fx "assets/runtime/ramenwine-runtime.zip"
           unzip -p "$APK" "assets/runtime/ramenwine-runtime.zip" > "$RUNTIME_ZIP"
