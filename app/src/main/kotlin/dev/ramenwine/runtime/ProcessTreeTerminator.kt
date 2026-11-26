@@ -23,6 +23,11 @@ internal class ProcessTreeTerminator(
     private val killSettleMillis: Long = KILL_SETTLE_MILLIS
 ) {
     private val observedStartTimes = ConcurrentHashMap<Int, Long>()
+    // Capture the root identity too: its PID can be recycled after PRoot exits.
+    private val rootStartTimeTicks =
+        readProcStat(File(procDirectory, "$rootPid/stat"))
+            ?.takeIf { it.pid == rootPid }
+            ?.startTimeTicks
 
     init {
         require(rootPid > 0) { "A valid PRoot PID is required." }
@@ -30,6 +35,17 @@ internal class ProcessTreeTerminator(
 
     /** Call periodically while the root PRoot process is alive. */
     fun captureDescendants() {
+        // Never walk /proc/<rootPid>/task after that PID has been recycled.
+        // A reused root PID must not turn an unrelated app's children into this
+        // session's descendants.
+        val currentRoot = readProcStat(File(procDirectory, "$rootPid/stat"))
+        if (rootStartTimeTicks == null ||
+            currentRoot?.pid != rootPid ||
+            currentRoot.startTimeTicks != rootStartTimeTicks ||
+            currentRoot.state == ZOMBIE_STATE ||
+            currentRoot.state == DEAD_STATE
+        ) return
+
         // Read the Linux children lists of this process tree rather than scanning
         // the device-wide /proc table every 250 ms. Include every thread's list:
         // PRoot can create children from a non-leader thread.
@@ -92,7 +108,11 @@ internal class ProcessTreeTerminator(
      */
     internal fun diagnosticSnapshot(): String {
         captureDescendants()
-        val pids = (setOf(rootPid) + observedStartTimes.keys).sorted()
+        val currentRoot = readProcStat(File(procDirectory, "$rootPid/stat"))
+        val rootIsOriginal = rootStartTimeTicks != null &&
+            currentRoot?.pid == rootPid && currentRoot.startTimeTicks == rootStartTimeTicks
+        val pids = ((if (rootIsOriginal) setOf(rootPid) else emptySet()) +
+            observedStartTimes.keys).sorted()
         val entries = pids.mapNotNull { pid ->
             val current = readProcStat(File(procDirectory, "$pid/stat")) ?: return@mapNotNull null
             if (pid != rootPid && observedStartTimes[pid] != current.startTimeTicks) {
