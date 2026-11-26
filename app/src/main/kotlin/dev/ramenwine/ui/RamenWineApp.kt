@@ -585,8 +585,8 @@ fun RamenWineApp() {
     // the in-screen button; otherwise the Activity could disappear while the
     // supervised Windows process and its prefix lock are still active.
     BackHandler(enabled = activeDisplaySession != null) {
-        if (preparingGame) {
-            gameLaunchNotice = "Идёт подготовка запуска. Дождись её завершения перед выходом."
+        if (preparingGame || verifyingSurfaceFrame) {
+            gameLaunchNotice = "Идёт подготовка или проверка экрана. Дождись её завершения перед выходом."
         } else {
             stopSelectedGame()
         }
