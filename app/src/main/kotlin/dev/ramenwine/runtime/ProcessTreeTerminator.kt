@@ -40,7 +40,8 @@ internal class ProcessTreeTerminator(
         // session's descendants.
         val currentRoot = readProcStat(File(procDirectory, "$rootPid/stat"))
         if (rootStartTimeTicks == null ||
-            currentRoot?.pid != rootPid ||
+            currentRoot == null ||
+            currentRoot.pid != rootPid ||
             currentRoot.startTimeTicks != rootStartTimeTicks ||
             currentRoot.state == ZOMBIE_STATE ||
             currentRoot.state == DEAD_STATE
@@ -110,7 +111,9 @@ internal class ProcessTreeTerminator(
         captureDescendants()
         val currentRoot = readProcStat(File(procDirectory, "$rootPid/stat"))
         val rootIsOriginal = rootStartTimeTicks != null &&
-            currentRoot?.pid == rootPid && currentRoot.startTimeTicks == rootStartTimeTicks
+            currentRoot != null &&
+            currentRoot.pid == rootPid &&
+            currentRoot.startTimeTicks == rootStartTimeTicks
         val pids = ((if (rootIsOriginal) setOf(rootPid) else emptySet()) +
             observedStartTimes.keys).sorted()
         val entries = pids.mapNotNull { pid ->
