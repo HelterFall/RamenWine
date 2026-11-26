@@ -143,7 +143,10 @@ class RuntimePackagerTests(unittest.TestCase):
                 self.assertTrue(parsed["files"][0]["sha256"])
                 self.assertEqual(
                     parsed["symlinks"],
-                    [{"path": "host/lib/libwine.so", "target": "libwine.so.1"}],
+                    [
+                        {"path": "host/lib/libwine.so", "target": "libwine.so.1"},
+                        {"path": "rootfs/usr/bin/sh", "target": "dash"},
+                    ],
                 )
 
 
