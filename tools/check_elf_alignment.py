@@ -87,10 +87,10 @@ def load_segment_alignments(
                     raise ElfAlignmentError(
                         f"{path}: PT_LOAD #{len(alignments) + 1} p_align is not a power of two"
                     )
-                if segment_offset % minimum_alignment != virtual_address % minimum_alignment:
+                if alignment > 1 and segment_offset % alignment != virtual_address % alignment:
                     raise ElfAlignmentError(
                         f"{path}: PT_LOAD #{len(alignments) + 1} file offset and virtual "
-                        f"address are not congruent at 0x{minimum_alignment:x}"
+                        f"address are not congruent at p_align=0x{alignment:x}"
                     )
                 alignments.append(alignment)
 
